@@ -786,12 +786,23 @@ where
         
         use crossterm::event::KeyCode;
         
-        // Check if modal is open first - modal keys take priority
+        // Check if modal is open first - modal keys take priority.
+        // For Modal::Confirm we must distinguish the two keys: Enter
+        // fires ConfirmModal (→ on_confirm), Esc fires CancelModal (→
+        // on_cancel). Prior to this, both keys dispatched CloseModal,
+        // which silently dropped both handlers — a real bug that hid
+        // for as long as no confirm-modal was in play. For non-Confirm
+        // modals (Error/Success/Progress) either handler is fine since
+        // they fall through to the plain modal-clear path.
         if self.model.ui_state.modal.is_some() {
             match key.code {
-                KeyCode::Enter | KeyCode::Esc => {
-                    debug!("🔙 Modal dismissed with Enter/Esc");
-                    return Some(Message::CloseModal);
+                KeyCode::Enter => {
+                    debug!("✅ Modal Enter → ConfirmModal");
+                    return Some(Message::ConfirmModal);
+                }
+                KeyCode::Esc => {
+                    debug!("🔙 Modal Esc → CancelModal");
+                    return Some(Message::CancelModal);
                 }
                 _ => return None, // Ignore other keys when modal is open
             }

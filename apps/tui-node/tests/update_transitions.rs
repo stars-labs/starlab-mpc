@@ -2265,6 +2265,91 @@ fn review_signing_request_navigates_to_join_session_signing_tab() {
 // directly; Confirm/Cancel messages drive the real transition.
 // -----------------------------------------------------------------
 
+// -----------------------------------------------------------------
+// Modal Enter/Esc routing: Enter dispatches ConfirmModal (fires
+// on_confirm), Esc dispatches CancelModal (fires on_cancel). Prior
+// to the fix both keys dispatched CloseModal, silently dropping both
+// handlers — a real bug that was only surfaced when Stages 1 + 3
+// started depending on Confirm modals.
+// -----------------------------------------------------------------
+
+#[test]
+fn confirm_modal_dispatches_on_confirm_message() {
+    use tui_node::elm::command::Command;
+    use tui_node::elm::model::Modal;
+
+    let mut model = fresh_model();
+    // Arbitrary no-op inner payload; we just want to see it emerge.
+    model.ui_state.modal = Some(Modal::Confirm {
+        title: "t".into(),
+        message: "m".into(),
+        on_confirm: Box::new(Message::CancelDKG),
+        on_cancel: Box::new(Message::CloseModal),
+    });
+
+    let cmd = update(&mut model, Message::ConfirmModal);
+
+    assert!(model.ui_state.modal.is_none(), "modal must close");
+    match cmd {
+        Some(Command::SendMessage(Message::CancelDKG)) => {}
+        other => panic!(
+            "ConfirmModal must dispatch on_confirm as a SendMessage; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn cancel_modal_dispatches_on_cancel_message() {
+    use tui_node::elm::command::Command;
+    use tui_node::elm::model::Modal;
+
+    let mut model = fresh_model();
+    model.ui_state.modal = Some(Modal::Confirm {
+        title: "t".into(),
+        message: "m".into(),
+        on_confirm: Box::new(Message::CancelDKG),
+        on_cancel: Box::new(Message::NavigateHome),
+    });
+
+    let cmd = update(&mut model, Message::CancelModal);
+
+    assert!(model.ui_state.modal.is_none());
+    match cmd {
+        Some(Command::SendMessage(Message::NavigateHome)) => {}
+        other => panic!(
+            "CancelModal must dispatch on_cancel; got {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn confirm_modal_on_non_confirm_variant_just_closes() {
+    // Error/Success/Progress don't have on_confirm. ConfirmModal and
+    // CancelModal must both reduce to "close the modal" with no
+    // command dispatched. Preserves the pre-fix behaviour for plain
+    // notification-style modals.
+    use tui_node::elm::model::Modal;
+
+    let mut model = fresh_model();
+    model.ui_state.modal = Some(Modal::Error {
+        title: "e".into(),
+        message: "bad".into(),
+    });
+    let cmd = update(&mut model, Message::ConfirmModal);
+    assert!(cmd.is_none());
+    assert!(model.ui_state.modal.is_none());
+
+    model.ui_state.modal = Some(Modal::Success {
+        title: "s".into(),
+        message: "ok".into(),
+    });
+    let cmd = update(&mut model, Message::CancelModal);
+    assert!(cmd.is_none());
+    assert!(model.ui_state.modal.is_none());
+}
+
 #[test]
 fn sign_submit_stages_modal_with_message_preview_and_hash() {
     use tui_node::elm::model::Modal;
