@@ -37,11 +37,32 @@ pub enum Message {
     SetThreshold(u16),
     SetTotalParticipants(u16),
     ConfirmWalletCreation,
-    /// Emitted by the PasswordPromptComponent when the user confirms a
+    /// Emitted by the app-level keyboard handler when the user confirms a
     /// valid password. Handler stashes it on `Model.wallet_state.pending_password`
     /// and navigates forward to DKGProgress. `value` is the cleartext
     /// password — it gets cleared after keystore write in Stage 2.
+    ///
+    /// In the normal flow this is dispatched by
+    /// [`Message::PasswordSubmitDraft`] after validation; tests can call it
+    /// directly to skip the typing/validation step.
     SubmitPassword { value: String },
+    // ----- Keystroke-level password-prompt messages -----
+    // The PasswordPrompt screen's draft lives on `Model.wallet_state` rather
+    // than inside the component, because tuirealm's per-component `on()` is
+    // bypassed by the app-level `handle_key_event` in this codebase. Keys
+    // reach the Model through these four messages; the component only
+    // renders.
+    /// Append a character to whichever field currently has focus (see
+    /// `password_focus_confirm`). Clears any stale `password_error`.
+    PasswordTypeChar(char),
+    /// Pop one character from the focused field. Clears stale error.
+    PasswordBackspace,
+    /// Flip `password_focus_confirm`. Emitted on Tab / BackTab.
+    PasswordToggleField,
+    /// Run validation on the current `password_draft` / `confirm_draft`.
+    /// On success: clear drafts + dispatch `SubmitPassword { value }`.
+    /// On failure: set `password_error` so the view can render it.
+    PasswordSubmitDraft,
     
     // DKG operations
     InitiateDKG { params: DKGParams },

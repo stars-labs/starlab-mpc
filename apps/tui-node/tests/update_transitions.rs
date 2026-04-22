@@ -366,3 +366,207 @@ fn submit_password_with_neither_flow_configured_goes_home() {
         model.current_screen
     );
 }
+
+// -----------------------------------------------------------------
+// PasswordPrompt keystroke-level handlers (Substep 1.3 rework)
+// -----------------------------------------------------------------
+//
+// These exercise the path where `app.rs::handle_key_event` routes
+// printable chars / backspace / tab / enter through the
+// `Password*` messages to mutate `Model.wallet_state`. The component
+// only renders from that state; all logic lives here.
+//
+// Rationale for moving off the tuirealm `on()` API: the codebase's
+// `handle_key_event` intercepts crossterm events directly and never
+// delegates to per-component `on()`, so the previous substep's
+// component-internal input handler was dead code.
+
+#[test]
+fn type_char_appends_to_password_field_when_focused() {
+    let mut model = fresh_model();
+    model.current_screen = Screen::PasswordPrompt;
+    for c in "abcd".chars() {
+        let cmd = update(&mut model, Message::PasswordTypeChar(c));
+        assert!(cmd.is_none(), "typing should not produce a Command");
+    }
+    assert_eq!(model.wallet_state.password_draft, "abcd");
+    assert_eq!(model.wallet_state.confirm_draft, "");
+}
+
+#[test]
+fn toggle_field_routes_typing_to_confirm() {
+    let mut model = fresh_model();
+    model.current_screen = Screen::PasswordPrompt;
+
+    update(&mut model, Message::PasswordTypeChar('a'));
+    update(&mut model, Message::PasswordToggleField);
+    update(&mut model, Message::PasswordTypeChar('z'));
+
+    assert_eq!(model.wallet_state.password_draft, "a");
+    assert_eq!(model.wallet_state.confirm_draft, "z");
+    assert!(
+        model.wallet_state.password_focus_confirm,
+        "toggle must flip focus onto confirm"
+    );
+}
+
+#[test]
+fn toggle_field_is_idempotent_pair() {
+    // Pair of toggles returns focus to password — the two-field form has
+    // no distinction between next/prev, so Tab/BackTab are both just a
+    // flip. This verifies the invariant.
+    let mut model = fresh_model();
+    update(&mut model, Message::PasswordToggleField);
+    update(&mut model, Message::PasswordToggleField);
+    assert!(!model.wallet_state.password_focus_confirm);
+}
+
+#[test]
+fn backspace_pops_from_focused_field() {
+    let mut model = fresh_model();
+    for c in "abcd".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    update(&mut model, Message::PasswordBackspace);
+    assert_eq!(model.wallet_state.password_draft, "abc");
+
+    update(&mut model, Message::PasswordToggleField);
+    update(&mut model, Message::PasswordTypeChar('X'));
+    update(&mut model, Message::PasswordBackspace);
+    assert_eq!(
+        model.wallet_state.confirm_draft, "",
+        "backspace after focus-flip must act on the confirm field, not password"
+    );
+    assert_eq!(
+        model.wallet_state.password_draft, "abc",
+        "backspace on empty confirm must not bleed back into password"
+    );
+}
+
+#[test]
+fn typing_clears_stale_error() {
+    let mut model = fresh_model();
+    model.wallet_state.password_error = Some("old error".to_string());
+    update(&mut model, Message::PasswordTypeChar('x'));
+    assert!(
+        model.wallet_state.password_error.is_none(),
+        "any typing should clear the previous validation error"
+    );
+}
+
+#[test]
+fn backspace_clears_stale_error() {
+    // Symmetry with typing: editing should also wipe the complaint.
+    let mut model = fresh_model();
+    update(&mut model, Message::PasswordTypeChar('x'));
+    model.wallet_state.password_error = Some("old".to_string());
+    update(&mut model, Message::PasswordBackspace);
+    assert!(model.wallet_state.password_error.is_none());
+}
+
+#[test]
+fn submit_draft_short_password_sets_error_and_does_not_route() {
+    let mut model = creator_on_password_prompt();
+    for c in "short".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    let cmd = update(&mut model, Message::PasswordSubmitDraft);
+    assert!(cmd.is_none(), "failed validation must not emit a Command");
+    assert!(
+        model
+            .wallet_state
+            .password_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("at least"),
+        "error copy should mention the length requirement; got {:?}",
+        model.wallet_state.password_error
+    );
+    // Drafts stay so the user can edit, not retype from scratch.
+    assert_eq!(model.wallet_state.password_draft, "short");
+}
+
+#[test]
+fn submit_draft_mismatched_confirm_sets_error() {
+    let mut model = creator_on_password_prompt();
+    for c in "longenoughpw".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    update(&mut model, Message::PasswordToggleField);
+    for c in "different".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    let cmd = update(&mut model, Message::PasswordSubmitDraft);
+    assert!(cmd.is_none());
+    assert!(
+        model
+            .wallet_state
+            .password_error
+            .as_deref()
+            .unwrap_or("")
+            .contains("match"),
+        "error should mention matching; got {:?}",
+        model.wallet_state.password_error
+    );
+}
+
+#[test]
+fn submit_draft_valid_dispatches_submit_password_and_clears_drafts() {
+    let mut model = creator_on_password_prompt();
+    for c in "longenoughpw".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    update(&mut model, Message::PasswordToggleField);
+    for c in "longenoughpw".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+
+    let cmd = update(&mut model, Message::PasswordSubmitDraft);
+
+    match cmd {
+        Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+            assert_eq!(value, "longenoughpw");
+        }
+        other => panic!(
+            "valid submit must dispatch SendMessage(SubmitPassword), got {:?}",
+            other
+        ),
+    }
+
+    // Drafts wiped immediately — cleartext must not outlive the handoff.
+    assert_eq!(model.wallet_state.password_draft, "");
+    assert_eq!(model.wallet_state.confirm_draft, "");
+    assert!(model.wallet_state.password_error.is_none());
+    assert!(
+        !model.wallet_state.password_focus_confirm,
+        "focus should reset to password for any next attempt"
+    );
+}
+
+#[test]
+fn navigate_back_from_password_prompt_wipes_draft() {
+    // Security invariant: if the user bails out, the cleartext in the
+    // draft buffers must not survive. The same rule applies to
+    // NavigateHome / PopScreen (see below).
+    let mut model = fresh_model();
+    model.push_screen(Screen::PasswordPrompt);
+    for c in "typedstuff".chars() {
+        update(&mut model, Message::PasswordTypeChar(c));
+    }
+    assert_eq!(model.wallet_state.password_draft, "typedstuff");
+
+    update(&mut model, Message::NavigateBack);
+
+    assert_eq!(model.wallet_state.password_draft, "");
+    assert_eq!(model.wallet_state.confirm_draft, "");
+    assert!(model.wallet_state.password_error.is_none());
+}
+
+#[test]
+fn navigate_home_from_password_prompt_wipes_draft() {
+    let mut model = fresh_model();
+    model.current_screen = Screen::PasswordPrompt;
+    update(&mut model, Message::PasswordTypeChar('a'));
+    update(&mut model, Message::NavigateHome);
+    assert_eq!(model.wallet_state.password_draft, "");
+}

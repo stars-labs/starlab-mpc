@@ -89,7 +89,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             debug!("🔙 NavigateBack message received!");
             debug!("Current screen: {:?}", model.current_screen);
             debug!("Navigation stack length: {}", model.navigation_stack.len());
-            
+
+            // If the user is leaving PasswordPrompt, wipe the draft so the
+            // cleartext password never outlives the screen that collected it.
+            if matches!(model.current_screen, Screen::PasswordPrompt) {
+                model.wallet_state.clear_password_draft();
+            }
+
             // Check if we're at the root screen (main menu with empty stack)
             if model.navigation_stack.is_empty() && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome) {
                 // At root level - Esc should quit the app
@@ -142,16 +148,24 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
         
         Message::NavigateHome => {
+            // Same invariant as NavigateBack: leaving PasswordPrompt must
+            // wipe the draft, whichever route the user takes out.
+            if matches!(model.current_screen, Screen::PasswordPrompt) {
+                model.wallet_state.clear_password_draft();
+            }
             model.go_home();
             None
         }
-        
+
         Message::PushScreen(screen) => {
             model.push_screen(screen);
             None
         }
-        
+
         Message::PopScreen => {
+            if matches!(model.current_screen, Screen::PasswordPrompt) {
+                model.wallet_state.clear_password_draft();
+            }
             model.pop_screen();
             None
         }
@@ -164,6 +178,71 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
         
         // ============= Wallet Management Messages =============
+
+        // ----- PasswordPrompt draft input (keystroke-level) -----
+        // These four messages own the live-edit state on PasswordPrompt.
+        // They exist because `handle_key_event` in app.rs bypasses
+        // tuirealm's per-component `on()` and routes keys through Messages
+        // directly; the component renders from `Model.wallet_state` rather
+        // than from internal state.
+        Message::PasswordTypeChar(c) => {
+            // Any typing clears the stale error so the user isn't left
+            // staring at a complaint about input they've already changed.
+            model.wallet_state.password_error = None;
+            if model.wallet_state.password_focus_confirm {
+                model.wallet_state.confirm_draft.push(c);
+            } else {
+                model.wallet_state.password_draft.push(c);
+            }
+            None
+        }
+
+        Message::PasswordBackspace => {
+            model.wallet_state.password_error = None;
+            if model.wallet_state.password_focus_confirm {
+                model.wallet_state.confirm_draft.pop();
+            } else {
+                model.wallet_state.password_draft.pop();
+            }
+            None
+        }
+
+        Message::PasswordToggleField => {
+            model.wallet_state.password_focus_confirm =
+                !model.wallet_state.password_focus_confirm;
+            None
+        }
+
+        Message::PasswordSubmitDraft => {
+            // Validation lives here (not in the component) so the rules are
+            // exercised by the same test harness as every other state
+            // transition and can't silently drift if the component's
+            // `on()` is ever re-enabled.
+            const MIN_PW_LEN: usize = 8;
+            let pw = model.wallet_state.password_draft.clone();
+            let cf = model.wallet_state.confirm_draft.clone();
+
+            if pw.len() < MIN_PW_LEN {
+                model.wallet_state.password_error = Some(format!(
+                    "Password must be at least {MIN_PW_LEN} characters"
+                ));
+                return None;
+            }
+            if pw != cf {
+                model.wallet_state.password_error =
+                    Some("Confirm does not match password".to_string());
+                return None;
+            }
+
+            // Valid: wipe the drafts immediately so the cleartext doesn't
+            // outlive the handoff. `SubmitPassword` stashes it on
+            // `pending_password` and drives the DKG flow forward.
+            model.wallet_state.password_draft.clear();
+            model.wallet_state.confirm_draft.clear();
+            model.wallet_state.password_error = None;
+            model.wallet_state.password_focus_confirm = false;
+            Some(Command::SendMessage(Message::SubmitPassword { value: pw }))
+        }
 
         // Route the staged password to the right downstream flow. This
         // handler is the single join point where both the creator and the

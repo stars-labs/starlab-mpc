@@ -393,13 +393,17 @@ where
                 self.app.active(&Id::DKGProgress)?;
             }
             Screen::PasswordPrompt => {
-                // Substep 1.2 placeholder mount. Real input fields arrive in
-                // Substep 1.3 — for now the component is stateless and just
-                // renders "WIP — press Esc to go back" so we can manually
-                // verify the navigation edges work end-to-end.
+                // Sync the live draft (lengths only) from Model so the
+                // freshly-mounted component matches whatever the user has
+                // typed so far. The component is remounted after every
+                // keystroke — see `needs_component_update` — so this is
+                // the single place we have to keep in sync.
+                let mut password_prompt =
+                    crate::elm::components::PasswordPromptComponent::new();
+                password_prompt.set_from_model(&self.model.wallet_state);
                 self.app.mount(
                     Id::PasswordPrompt,
-                    Box::new(crate::elm::components::PasswordPromptComponent::new()),
+                    Box::new(password_prompt),
                     vec![]
                 )?;
                 self.app.active(&Id::PasswordPrompt)?;
@@ -452,7 +456,22 @@ where
         }
         
         // Check if this is a scroll message that needs component update
-        let needs_component_update = matches!(msg, Message::ScrollUp | Message::ScrollDown | Message::ScrollLeft | Message::ScrollRight);
+        // Remount after any message that mutates state the component reads
+        // from Model at mount time. For PasswordPrompt that's every
+        // keystroke — the component's rendered bullets/focus/error come
+        // from `wallet_state.*_draft` / `password_error`, which are only
+        // copied into the component via its setter during mount.
+        let needs_component_update = matches!(
+            msg,
+            Message::ScrollUp
+                | Message::ScrollDown
+                | Message::ScrollLeft
+                | Message::ScrollRight
+                | Message::PasswordTypeChar(_)
+                | Message::PasswordBackspace
+                | Message::PasswordToggleField
+                | Message::PasswordSubmitDraft
+        );
         
         // Check if this is a force remount message
         let force_remount = matches!(msg, Message::ForceRemount);
@@ -720,6 +739,31 @@ where
             }
         }
         
+        // PasswordPrompt screen — this is a text-entry screen, so every
+        // printable character, backspace, tab, and Enter routes through
+        // dedicated messages that mutate `Model.wallet_state.*_draft`.
+        // The component renders from that state; there is no per-component
+        // `on()` handler in play (the architecture pushes everything
+        // through `handle_key_event` → Message → update → render). Esc is
+        // handled globally above, so we don't match it here.
+        if matches!(self.model.current_screen, Screen::PasswordPrompt) {
+            match key.code {
+                KeyCode::Char(c) => {
+                    return Some(Message::PasswordTypeChar(c));
+                }
+                KeyCode::Backspace => {
+                    return Some(Message::PasswordBackspace);
+                }
+                KeyCode::Tab | KeyCode::BackTab => {
+                    return Some(Message::PasswordToggleField);
+                }
+                KeyCode::Enter => {
+                    return Some(Message::PasswordSubmitDraft);
+                }
+                _ => return None, // ignore arrows / fn keys here
+            }
+        }
+
         // For DKGProgress screen, handle Left/Right to switch between action buttons
         if matches!(self.model.current_screen, Screen::DKGProgress { .. }) {
             match key.code {

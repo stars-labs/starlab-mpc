@@ -76,6 +76,18 @@ impl Model {
     }
 }
 
+impl WalletState {
+    /// Zero-out the PasswordPrompt draft buffers + associated UI state.
+    /// Called on every exit from `Screen::PasswordPrompt` (Esc, go_home,
+    /// successful submit) so cleartext never outlives the screen.
+    pub fn clear_password_draft(&mut self) {
+        self.password_draft.clear();
+        self.confirm_draft.clear();
+        self.password_error = None;
+        self.password_focus_confirm = false;
+    }
+}
+
 /// Wallet-related state
 #[derive(Clone, Default)]
 pub struct WalletState {
@@ -99,6 +111,22 @@ pub struct WalletState {
     /// memory any longer than necessary. `None` outside the wallet-creation
     /// window.
     pub pending_password: Option<String>,
+    /// Live input buffer for the password field on `Screen::PasswordPrompt`.
+    /// Mutated keystroke-by-keystroke through the `Password*` messages and
+    /// cleared the moment `PasswordSubmitDraft` validates — the cleartext
+    /// is not allowed to linger after handoff to `pending_password`.
+    pub password_draft: String,
+    /// Live input buffer for the confirm field. Same lifetime as
+    /// `password_draft`.
+    pub confirm_draft: String,
+    /// Which of the two fields the keyboard currently types into.
+    /// `false` = password field, `true` = confirm field. Toggled by Tab /
+    /// BackTab via `Message::PasswordToggleField`.
+    pub password_focus_confirm: bool,
+    /// Inline validation error from the most recent submit attempt; cleared
+    /// the moment the user types anything (stale errors are worse than
+    /// none).
+    pub password_error: Option<String>,
 }
 
 // Manual Debug implementation for WalletState
@@ -116,6 +144,11 @@ impl std::fmt::Debug for WalletState {
             // Never log the actual password, even at debug level — just
             // report whether one is currently staged.
             .field("pending_password", &self.pending_password.as_ref().map(|_| "<redacted>"))
+            // Redact cleartext but keep lengths/focus/error visible for debugging.
+            .field("password_draft_len", &self.password_draft.len())
+            .field("confirm_draft_len", &self.confirm_draft.len())
+            .field("password_focus_confirm", &self.password_focus_confirm)
+            .field("password_error", &self.password_error)
             .finish()
     }
 }
