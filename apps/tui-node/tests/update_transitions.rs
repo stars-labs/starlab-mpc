@@ -2055,6 +2055,174 @@ fn select_item_on_manage_wallets_uses_selected_indices_for_target() {
     );
 }
 
+// -----------------------------------------------------------------
+// Signing-request push notification (Stage 1 of the signing network
+// flow): when the WebSocket broadcasts a signing SessionDiscovered
+// and we're a listed participant, interrupt the user with a Modal::
+// Confirm. Without this the co-signer has to be sitting on JoinSession
+// to know a request exists, which defeats "2-of-3, any 2 online is
+// enough".
+// -----------------------------------------------------------------
+fn signing_session(session_id: &str, participants: Vec<&str>, proposer: &str) -> tui_node::protocal::signal::SessionInfo {
+    use tui_node::protocal::signal::{SessionInfo, SessionType};
+    SessionInfo {
+        session_id: session_id.to_string(),
+        proposer_id: proposer.to_string(),
+        total: 3,
+        threshold: 2,
+        participants: participants.into_iter().map(|s| s.to_string()).collect(),
+        session_type: SessionType::Signing {
+            wallet_name: "wallet-dkg_xx".to_string(),
+            curve_type: "secp256k1".to_string(),
+            blockchain: "ethereum".to_string(),
+            group_public_key: "aabbccdd".to_string(),
+        },
+        curve_type: "secp256k1".to_string(),
+        coordination_type: "Network".to_string(),
+        signing_message_hex: Some(hex::encode(b"hello from alice")),
+    }
+}
+
+fn dkg_session(session_id: &str, participants: Vec<&str>, proposer: &str) -> tui_node::protocal::signal::SessionInfo {
+    use tui_node::protocal::signal::{SessionInfo, SessionType};
+    SessionInfo {
+        session_id: session_id.to_string(),
+        proposer_id: proposer.to_string(),
+        total: 3,
+        threshold: 2,
+        participants: participants.into_iter().map(|s| s.to_string()).collect(),
+        session_type: SessionType::DKG,
+        curve_type: "secp256k1".to_string(),
+        coordination_type: "Network".to_string(),
+        signing_message_hex: None,
+    }
+}
+
+#[test]
+fn session_discovered_signing_pops_modal_for_participant() {
+    use tui_node::elm::model::Modal;
+
+    let mut model = fresh_model(); // device_id = "test-device"
+    model.current_screen = Screen::MainMenu;
+    assert!(model.ui_state.modal.is_none());
+
+    let session = signing_session("sign-1", vec!["test-device", "alice", "bob"], "alice");
+    let _ = update(&mut model, Message::SessionDiscovered { session });
+
+    match &model.ui_state.modal {
+        Some(Modal::Confirm { title, message, .. }) => {
+            assert!(title.contains("Signing Request"));
+            assert!(message.contains("alice"), "modal should name the proposer");
+            assert!(
+                message.contains("hello from alice") || message.contains("\""),
+                "modal should preview the message body; got: {}",
+                message
+            );
+        }
+        other => panic!("expected Modal::Confirm, got {:?}", other),
+    }
+}
+
+#[test]
+fn session_discovered_signing_ignored_when_not_participant() {
+    let mut model = fresh_model(); // "test-device" not in participants below
+    let session = signing_session("sign-2", vec!["alice", "bob", "charlie"], "alice");
+    let _ = update(&mut model, Message::SessionDiscovered { session });
+    assert!(
+        model.ui_state.modal.is_none(),
+        "must not interrupt a non-participant"
+    );
+}
+
+#[test]
+fn session_discovered_signing_ignored_for_self_proposed() {
+    // Creator already has SigningProgress pushed; they don't need a
+    // self-addressed modal about their own request.
+    let mut model = fresh_model();
+    let session = signing_session(
+        "sign-3",
+        vec!["test-device", "alice", "bob"],
+        "test-device",
+    );
+    let _ = update(&mut model, Message::SessionDiscovered { session });
+    assert!(
+        model.ui_state.modal.is_none(),
+        "must not modal-notify the proposer about their own request"
+    );
+}
+
+#[test]
+fn session_discovered_dkg_does_not_pop_signing_modal() {
+    let mut model = fresh_model();
+    let session = dkg_session("dkg-1", vec!["test-device", "alice", "bob"], "alice");
+    let _ = update(&mut model, Message::SessionDiscovered { session });
+    assert!(
+        model.ui_state.modal.is_none(),
+        "DKG discoveries must not trigger the signing-request modal"
+    );
+}
+
+#[test]
+fn session_discovered_suppresses_modal_on_join_session_screen() {
+    let mut model = fresh_model();
+    // If the user is already looking at JoinSession they'll see the
+    // new row appear in the list; a modal would be noise.
+    model.current_screen = Screen::JoinSession;
+    let session = signing_session("sign-4", vec!["test-device", "alice"], "alice");
+    let _ = update(&mut model, Message::SessionDiscovered { session });
+    assert!(model.ui_state.modal.is_none());
+}
+
+#[test]
+fn review_signing_request_navigates_to_join_session_signing_tab() {
+    use tui_node::elm::model::ComponentId;
+
+    let mut model = fresh_model();
+    // Populate two invites so we can assert the Signing-tab index is
+    // computed against the filtered (signing-only) list, not the
+    // mixed `session_invites` vec.
+    model.session_invites = vec![
+        dkg_session("dkg-a", vec!["test-device"], "proposer-1"),
+        signing_session("sign-a", vec!["test-device"], "alice"),
+        signing_session("sign-b", vec!["test-device", "alice"], "alice"),
+    ];
+
+    let _ = update(
+        &mut model,
+        Message::ReviewSigningRequest {
+            session_id: "sign-b".to_string(),
+        },
+    );
+
+    assert_eq!(model.current_screen, Screen::JoinSession);
+    assert_eq!(model.ui_state.join_session_tab, 1, "must land on Signing tab");
+    assert_eq!(
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::JoinSession),
+        Some(&1),
+        "selected index must be computed vs. the filtered Signing list (sign-b is idx 1 there)"
+    );
+    assert!(
+        model.ui_state.modal.is_none(),
+        "must clear the triggering modal"
+    );
+}
+
+#[test]
+fn review_signing_request_for_unknown_session_is_safe_noop() {
+    let mut model = fresh_model();
+    let screen_before = model.current_screen.clone();
+    let _ = update(
+        &mut model,
+        Message::ReviewSigningRequest {
+            session_id: "ghost".to_string(),
+        },
+    );
+    assert_eq!(model.current_screen, screen_before);
+}
+
 /// ScrollUp/Down on ManageWallets with NO wallets must be a safe no-op.
 /// Guards against an underflow or panic when the list is empty (e.g.
 /// cold-start before any DKG).

@@ -2518,14 +2518,83 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 "Session discovered via push: {} ({}/{})",
                 session.session_id, session.threshold, session.total
             );
+
+            // Signing-request push notification (Stage 1 of the signing-
+            // network flow). If this is a Signing session *for us* — we're
+            // listed as a participant, we're not the proposer, we're not
+            // already on the JoinSession screen, and there's no modal
+            // already commanding the user's attention — pop a
+            // `Modal::Confirm` asking if they want to review it. This
+            // closes the gap where co-signers on other screens (MainMenu,
+            // ManageWallets, idle) would miss a signing request entirely
+            // and the creator would time out waiting.
+            let is_signing = matches!(session.session_type, SessionType::Signing { .. });
+            let am_participant = session.participants.contains(&model.device_id);
+            let am_proposer = session.proposer_id == model.device_id;
+            let can_interrupt = !matches!(model.current_screen, Screen::JoinSession)
+                && model.ui_state.modal.is_none();
+            let should_notify =
+                is_signing && am_participant && !am_proposer && can_interrupt;
+
             if let Some(slot) = model
                 .session_invites
                 .iter_mut()
                 .find(|s| s.session_id == session.session_id)
             {
-                *slot = session;
+                *slot = session.clone();
             } else {
-                model.session_invites.push(session);
+                model.session_invites.push(session.clone());
+            }
+
+            if should_notify {
+                // Preview the message the creator is asking us to sign.
+                // Show as UTF-8 when valid + printable, otherwise hex.
+                // Note: for EIP-191 signatures the payload is already the
+                // 32-byte keccak hash, which won't be valid UTF-8 — that's
+                // fine, we fall through to hex.
+                let preview = match session.signing_message_hex.as_ref() {
+                    Some(hex_str) => match hex::decode(hex_str) {
+                        Ok(bytes) => match std::str::from_utf8(&bytes) {
+                            Ok(s) if s.chars().all(|c| !c.is_control() || c == '\n') => {
+                                let truncated: String = s.chars().take(80).collect();
+                                if truncated.chars().count() < s.chars().count() {
+                                    format!("\"{}…\"", truncated)
+                                } else {
+                                    format!("\"{}\"", s)
+                                }
+                            }
+                            _ => {
+                                if hex_str.len() > 32 {
+                                    format!("0x{}…", &hex_str[..32])
+                                } else {
+                                    format!("0x{}", hex_str)
+                                }
+                            }
+                        },
+                        Err(_) => format!("<invalid hex> {}", hex_str),
+                    },
+                    None => "<no payload>".to_string(),
+                };
+                let wallet_name = if let SessionType::Signing { wallet_name, .. } = &session.session_type {
+                    wallet_name.clone()
+                } else {
+                    "wallet".to_string()
+                };
+                let message_body = format!(
+                    "From {proposer}\nWallet: {wallet}\nThreshold: {k}-of-{n}\n\nMessage: {preview}\n\nReview and sign?",
+                    proposer = session.proposer_id,
+                    wallet = wallet_name,
+                    k = session.threshold,
+                    n = session.total,
+                );
+                model.ui_state.modal = Some(Modal::Confirm {
+                    title: "📝 Signing Request".to_string(),
+                    message: message_body,
+                    on_confirm: Box::new(Message::ReviewSigningRequest {
+                        session_id: session.session_id.clone(),
+                    }),
+                    on_cancel: Box::new(Message::CloseModal),
+                });
             }
 
             if matches!(model.current_screen, Screen::JoinSession) {
@@ -2533,6 +2602,40 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             } else {
                 None
             }
+        }
+
+        Message::ReviewSigningRequest { session_id } => {
+            // Co-signer accepted the push notification. Jump them to
+            // JoinSession on the Signing tab with this session highlighted
+            // so they can confirm the exact payload before unlocking.
+            let signing_index = model
+                .session_invites
+                .iter()
+                .filter(|s| matches!(s.session_type, SessionType::Signing { .. }))
+                .position(|s| s.session_id == session_id);
+            if signing_index.is_none() {
+                warn!(
+                    "ReviewSigningRequest: session {} no longer in invites; dropping",
+                    session_id
+                );
+                return None;
+            }
+            info!(
+                "ReviewSigningRequest: navigating to JoinSession (Signing tab, idx {})",
+                signing_index.unwrap_or(0)
+            );
+            model.ui_state.modal = None;
+            model.ui_state.join_session_tab = 1; // Signing tab
+            model
+                .ui_state
+                .selected_indices
+                .insert(
+                    crate::elm::model::ComponentId::JoinSession,
+                    signing_index.unwrap_or(0),
+                );
+            model.push_screen(Screen::JoinSession);
+            model.ui_state.focus = crate::elm::model::ComponentId::JoinSession;
+            None
         }
 
         Message::RemoveSession { session_id } => {

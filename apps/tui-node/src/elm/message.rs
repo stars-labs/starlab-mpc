@@ -144,6 +144,17 @@ pub enum Message {
         signature: Vec<u8>,
     },
     SigningFailed { request_id: String, error: String },
+    /// Co-signer accepted a pushed-notification signing request and wants
+    /// to review it. Jumps the user to `Screen::JoinSession` on the
+    /// Signing tab with the matching session pre-selected so the user
+    /// can see the full invite before pressing Enter → PasswordPrompt →
+    /// JoinSigning. Emitted from the `Modal::Confirm` we auto-open when
+    /// `Message::SessionDiscovered` lands a `SessionType::Signing` where
+    /// this device is listed as a participant. Intentionally distinct
+    /// from pressing Enter on the session in JoinSession: this only
+    /// *navigates*; no wallet is unlocked and no active_session is set
+    /// yet, so the user can still back out.
+    ReviewSigningRequest { session_id: String },
     /// Received a peer's Round 1 signing commitment over the WebRTC mesh.
     /// Dispatched by the primary data-channel reader after decoding
     /// `SIGN_COMMIT:<base64>`; the handler forwards to
