@@ -241,7 +241,17 @@ pub struct WalletMetadata {
     
     /// Serialized FROST group public key (source of truth for addresses)
     pub group_public_key: String,
-    
+
+    /// Device IDs of every participant in the DKG that produced this
+    /// wallet. Used by cold-start signing to reconstruct the session
+    /// (participant list + threshold + total) when `AppState.session`
+    /// is empty post-restart. `#[serde(default)]` keeps wallets
+    /// written by pre-field-add code deserializable — they come
+    /// through with an empty `Vec`, and cold-start signing degrades
+    /// to announcing with `participants=[]` exactly like before.
+    #[serde(default)]
+    pub participants: Vec<String>,
+
     /// ISO 8601 timestamp when created
     pub created_at: String,
     
@@ -280,7 +290,10 @@ pub struct WalletMetadata {
 }
 
 impl WalletMetadata {
-    /// Creates a new simplified wallet metadata
+    /// Creates a new wallet metadata with an empty participants list
+    /// (callers that know the participant list should call
+    /// [`Self::with_participants`] instead, or set
+    /// [`Self::participants`] directly).
     pub fn new(
         session_id: String,
         device_id: String,
@@ -289,6 +302,33 @@ impl WalletMetadata {
         total_participants: u16,
         participant_index: u16,
         group_public_key: String,
+    ) -> Self {
+        Self::with_participants(
+            session_id,
+            device_id,
+            curve_type,
+            threshold,
+            total_participants,
+            participant_index,
+            group_public_key,
+            Vec::new(),
+        )
+    }
+
+    /// Creates wallet metadata including the full participant list from
+    /// the DKG ceremony. Cold-start signing reads this back from disk
+    /// to reconstruct the session's `participants` / `total` /
+    /// `threshold` fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_participants(
+        session_id: String,
+        device_id: String,
+        curve_type: String,
+        threshold: u16,
+        total_participants: u16,
+        participant_index: u16,
+        group_public_key: String,
+        participants: Vec<String>,
     ) -> Self {
         let now = chrono::Utc::now().to_rfc3339();
         Self {
@@ -299,6 +339,7 @@ impl WalletMetadata {
             total_participants,
             participant_index,
             group_public_key,
+            participants,
             created_at: now.clone(),
             last_modified: now,
             // All legacy fields set to None

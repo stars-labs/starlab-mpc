@@ -120,6 +120,7 @@ impl Keystore {
     /// Creates a new wallet in the keystore
     /// Creates a wallet with simplified metadata (KISS principle)
     /// Blockchain addresses are derived from group_public_key + curve_type
+    #[allow(clippy::too_many_arguments)]
     pub fn create_wallet_multi_chain(
         &mut self,
         name: &str,
@@ -133,6 +134,11 @@ impl Keystore {
         _tags: Vec<String>, // Deprecated parameter
         _description: Option<String>, // Deprecated parameter
         participant_index: u16,
+        // Full device_id list from the DKG session. Read back by
+        // cold-start signing to reconstruct the session metadata.
+        // Pass an empty `Vec` on code paths that don't know the
+        // list — cold-start signing will degrade gracefully.
+        participants: Vec<String>,
     ) -> Result<String> {
         // Use the wallet name as the wallet ID (for session name convention)
         // Sanitize the name to ensure it's a valid filename
@@ -145,8 +151,8 @@ impl Keystore {
             )));
         }
 
-        // Create simplified wallet metadata - no blockchain info stored
-        let metadata = WalletMetadata::new(
+        // Create wallet metadata including the participants list.
+        let metadata = WalletMetadata::with_participants(
             wallet_id.clone(),
             self.device_id.clone(),
             curve_type.to_string(),
@@ -154,6 +160,7 @@ impl Keystore {
             total_participants,
             participant_index,
             group_public_key.to_string(),
+            participants,
         );
 
         // Save the wallet with embedded metadata
@@ -181,7 +188,9 @@ impl Keystore {
         description: Option<String>,
         participant_index: u16,
     ) -> Result<String> {
-        // Just call the simplified version - blockchain info is not stored
+        // Just call the simplified version - blockchain info is not stored.
+        // Legacy wrapper doesn't know participants; pass empty so cold-start
+        // signing degrades gracefully (old behaviour preserved).
         self.create_wallet_multi_chain(
             name,
             curve_type,
@@ -194,6 +203,7 @@ impl Keystore {
             tags,
             description,
             participant_index,
+            Vec::new(),
         )
     }
 
@@ -355,6 +365,10 @@ impl Keystore {
                         threshold: wallet_info.threshold,
                         total_participants: wallet_info.total_participants,
                         participant_index,
+                        // Legacy wallet migration can't reconstruct the
+                        // original DKG participant list; leave empty so
+                        // cold-start signing degrades gracefully.
+                        participants: Vec::new(),
                         identifier: None, // Deprecated field
                         group_public_key: wallet_info.group_public_key.clone(),
                         created_at: chrono::DateTime::from_timestamp(wallet_info.created_at as i64, 0)
@@ -423,6 +437,10 @@ impl Keystore {
                         threshold: wallet_info.threshold,
                         total_participants: wallet_info.total_participants,
                         participant_index,
+                        // Legacy wallet migration can't reconstruct the
+                        // original DKG participant list; leave empty so
+                        // cold-start signing degrades gracefully.
+                        participants: Vec::new(),
                         identifier: None, // Deprecated field
                         group_public_key: wallet_info.group_public_key.clone(),
                         created_at: chrono::DateTime::from_timestamp(wallet_info.created_at as i64, 0)
@@ -475,5 +493,79 @@ impl Keystore {
 }
 
 #[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
 
-mod tests { #[test] fn test_placeholder() { assert!(true); } }
+    #[test]
+    fn wallet_metadata_round_trips_participants_field() {
+        // Phase-D cold-start prerequisite: writing a wallet must
+        // persist the participants list so a restarted node can
+        // reconstruct the session's `participants` / `threshold` /
+        // `total` without relying on in-memory state.
+        let tmp = TempDir::new().expect("tempdir");
+        let mut ks = Keystore::new(tmp.path(), "mpc-1").expect("keystore");
+        let wallet_id = ks
+            .create_wallet_multi_chain(
+                "test-wallet",
+                "secp256k1",
+                Vec::new(),
+                2,
+                3,
+                "aa".repeat(33).as_str(),
+                b"ENCRYPTED-PAYLOAD",
+                "password-12345",
+                Vec::new(),
+                None,
+                1,
+                vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+            )
+            .expect("create_wallet_multi_chain");
+
+        // Construct a fresh Keystore over the same directory to force
+        // a reload-from-disk — exactly what cold-start does.
+        let ks2 = Keystore::new(tmp.path(), "mpc-1").expect("reload");
+        let wallet = ks2
+            .get_wallet(&wallet_id)
+            .expect("wallet visible after reload");
+        assert_eq!(
+            wallet.participants,
+            vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+            "participants must round-trip through disk"
+        );
+        assert_eq!(wallet.threshold, 2);
+        assert_eq!(wallet.total_participants, 3);
+    }
+
+    #[test]
+    fn legacy_wallet_without_participants_deserializes_as_empty() {
+        // Pre-field-add wallets wrote JSON without a `participants`
+        // field. #[serde(default)] on WalletMetadata::participants
+        // must keep them loadable — we just get an empty Vec, and
+        // cold-start signing degrades gracefully (warn logged).
+        let legacy_json = serde_json::json!({
+            "version": "2.0",
+            "encrypted": true,
+            "algorithm": "AES-256-GCM-PBKDF2",
+            "data": "ZmFrZQ==",
+            "metadata": {
+                "session_id": "legacy-wallet",
+                "device_id": "mpc-1",
+                "curve_type": "secp256k1",
+                "threshold": 2,
+                "total_participants": 3,
+                "participant_index": 1,
+                "group_public_key": "03aa",
+                "created_at": "2025-01-01T00:00:00+00:00",
+                "last_modified": "2025-01-01T00:00:00+00:00"
+                // No `participants` field.
+            }
+        });
+        let file: WalletFile =
+            serde_json::from_value(legacy_json).expect("legacy wallet must deserialize");
+        assert!(
+            file.metadata.participants.is_empty(),
+            "missing participants field must default to empty Vec"
+        );
+    }
+}

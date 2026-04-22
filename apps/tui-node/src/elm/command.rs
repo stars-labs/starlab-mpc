@@ -1476,6 +1476,7 @@ impl Command {
                     threshold,
                     total_participants,
                     participant_index,
+                    participants_sorted,
                     key_share_data,
                     group_pubkey_hex,
                     addresses,
@@ -1577,6 +1578,10 @@ impl Command {
                         session.threshold,
                         session.total,
                         participant_index,
+                        // Canonical-sorted participant list — persisted
+                        // so cold-start signing (after restart) can
+                        // reconstruct the session metadata from disk.
+                        sorted.clone(),
                         key_share_data,
                         hex::encode(&group_pubkey_bytes),
                         addresses,
@@ -1616,6 +1621,7 @@ impl Command {
                     Vec::new(),          // tags (deprecated)
                     None,                // description (deprecated)
                     participant_index,
+                    participants_sorted,
                 ) {
                     Ok(id) => id,
                     Err(e) => {
@@ -1787,25 +1793,31 @@ impl Command {
 
                 // Record the session on AppState so the protocol layer's
                 // broadcast helper has somewhere to read `participants`
-                // from. If a DKG session is still active (same tmux run)
-                // reuse its participant list and session_id; otherwise
-                // mint a new signing session id.
+                // from. Two paths:
+                //
+                // 1. Warm — a session already lives on AppState (from
+                //    the prior DKG in this run, or a previous sign).
+                //    Mutate its session_type to Signing + reuse the
+                //    existing participant list + session_id.
+                //
+                // 2. Cold — no session. Rebuild one from the persisted
+                //    wallet metadata we just unlocked: threshold,
+                //    total_participants and the participant device_id
+                //    list were written at DKG finalize time (see
+                //    `WalletMetadata::participants`). Mint a fresh
+                //    signing session_id and stamp it on AppState so
+                //    joiners can discover us. If the metadata lacks a
+                //    participant list (pre-participants-field wallet),
+                //    degrade to empty — the announcement will go out
+                //    with `participants=[]` and `canonical_identifier`
+                //    on the peer side will reject, but we fail loudly
+                //    later rather than silently producing a broken
+                //    ceremony.
                 let session_id = {
                     let mut state = app_state.lock().await;
-                    let sid = match state.session.as_ref() {
-                        Some(s) => s.session_id.clone(),
-                        None => format!("sign_{}", uuid::Uuid::new_v4()),
-                    };
-                    if state.session.is_none() {
-                        warn!(
-                            "StartSigning with no existing session — \
-                             cold-start signing mesh setup isn't implemented \
-                             yet; this will only work if peers are already \
-                             in the mesh from a prior ceremony"
-                        );
-                    } else {
-                        // Mutate session_type to mark this as a signing
-                        // ceremony — some UI code keys off it.
+                    if state.session.is_some() {
+                        // Warm path
+                        let sid = state.session.as_ref().unwrap().session_id.clone();
                         if let Some(ref mut session) = state.session {
                             use crate::protocal::signal::SessionType;
                             session.session_type = SessionType::Signing {
@@ -1815,8 +1827,65 @@ impl Command {
                                 group_public_key: group_pubkey_hex.clone(),
                             };
                         }
+                        sid
+                    } else {
+                        // Cold path — reconstruct from keystore metadata.
+                        let wallet_meta = state
+                            .keystore
+                            .as_ref()
+                            .and_then(|ks| ks.get_wallet(&request.wallet_id).cloned());
+
+                        let (cold_threshold, cold_total, cold_participants) = match wallet_meta {
+                            Some(m) => {
+                                let ps = m.participants.clone();
+                                if ps.is_empty() {
+                                    warn!(
+                                        "StartSigning cold-start: wallet {} has no \
+                                         participants list in metadata (pre-field-add \
+                                         wallet?) — announce will have participants=[] \
+                                         and peers can't join. Re-run DKG to regenerate.",
+                                        request.wallet_id
+                                    );
+                                }
+                                (m.threshold, m.total_participants, ps)
+                            }
+                            None => {
+                                warn!(
+                                    "StartSigning cold-start: wallet {} not in keystore \
+                                     cache — announce will have empty metadata",
+                                    request.wallet_id
+                                );
+                                (0, 0, Vec::new())
+                            }
+                        };
+
+                        let sid = format!("sign_{}", uuid::Uuid::new_v4());
+                        state.session = Some(crate::protocal::signal::SessionInfo {
+                            session_id: sid.clone(),
+                            proposer_id: self_device_id.clone(),
+                            total: cold_total,
+                            threshold: cold_threshold,
+                            participants: cold_participants,
+                            session_type: crate::protocal::signal::SessionType::Signing {
+                                wallet_name: request.wallet_id.clone(),
+                                curve_type: request.chain.clone(),
+                                blockchain: request.chain.clone(),
+                                group_public_key: group_pubkey_hex.clone(),
+                            },
+                            curve_type: request.chain.clone(),
+                            coordination_type: "Network".to_string(),
+                            signing_message_hex: None,
+                        });
+                        info!(
+                            "StartSigning cold-start: rebuilt session {} with \
+                             {}-of-{} + {} participants from wallet metadata",
+                            sid,
+                            cold_threshold,
+                            cold_total,
+                            state.session.as_ref().unwrap().participants.len()
+                        );
+                        sid
                     }
-                    sid
                 };
 
                 // Announce over the signal server so any peer that is
