@@ -883,6 +883,7 @@ fn signing_complete_stashes_snapshot_and_navigates_to_signature_complete() {
         &mut model,
         Message::SigningComplete {
             request_id: "inline".to_string(),
+            message: b"hello world".to_vec(),
             signature: signature_bytes.clone(),
         },
     );
@@ -920,6 +921,7 @@ fn signing_complete_back_navigation_lands_on_main_menu() {
         &mut model,
         Message::SigningComplete {
             request_id: "x".into(),
+            message: b"x".to_vec(),
             signature: vec![0u8; 64],
         },
     );

@@ -495,13 +495,25 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // Dispatched by the SignTransaction screen (C.3) once the user
         // confirms a message to sign. We assume the wallet is already
         // unlocked — UnlockWallet is dispatched upstream. Kick off the
-        // ceremony.
+        // ceremony AND push SigningProgress so the user gets a "waiting
+        // for peers" screen instead of sitting on the input form after
+        // they've submitted. The session_id on AppState is reused as the
+        // request_id for the progress screen so the joiner path lands on
+        // the same screen key.
         Message::InitiateSigning { request } => {
             info!(
                 "Initiating signing for wallet '{}' ({} bytes of transaction data)",
                 request.wallet_id,
                 request.transaction_data.len()
             );
+            let request_id = model
+                .active_session
+                .as_ref()
+                .map(|s| s.session_id.clone())
+                .unwrap_or_else(|| "inline".to_string());
+            model.push_screen(Screen::SigningProgress {
+                request_id: request_id.clone(),
+            });
             Some(Command::StartSigning { request })
         }
 
@@ -513,20 +525,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // threshold-many to hear from each other in larger quorums.
         // Stash the snapshot + push SignatureComplete + clear all
         // transient signing state so the next ceremony starts clean.
-        Message::SigningComplete { request_id, signature } => {
+        Message::SigningComplete { request_id, message, signature } => {
             info!(
                 "🎉 Signing complete: request_id={} signature={} bytes",
                 request_id,
                 signature.len()
             );
 
-            // Rebuild the message bytes + wallet_id from Model state —
-            // the protocol layer already cleared `signing_message` but
-            // we stash a copy on Model (below) before dispatching the
-            // terminal nav, so tests can read them back.
-            //
-            // In practice, by this point the fields the user sees come
-            // from active_session + wallet_state cached data.
             let wallet_id = model
                 .wallet_state
                 .last_finalized_wallet
@@ -546,17 +551,6 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         })
                 })
                 .unwrap_or_else(|| "(unknown)".to_string());
-
-            // Reconstruct the message bytes from the pending-sign stash
-            // if still present (joiner path), or from the draft (creator
-            // path). Best-effort — if neither is available the view
-            // will still render the signature, just with an empty
-            // message preview.
-            let message = model
-                .wallet_state
-                .pending_sign_message
-                .clone()
-                .unwrap_or_else(|| model.wallet_state.sign_message_draft.as_bytes().to_vec());
 
             model.wallet_state.last_completed_signature =
                 Some(crate::elm::model::CompletedSignatureInfo {

@@ -111,9 +111,18 @@ pub async fn handle_start_signing<C>(
             }
         };
 
-        // Reset any leftover state from a prior ceremony so an aborted
-        // attempt doesn't contaminate this one.
-        guard.frost_commitments.clear();
+        // Reset transient state from a prior ceremony so an aborted
+        // attempt doesn't contaminate this one. Caveat on `frost_commitments`:
+        // we deliberately do NOT clear that map here. Reason: on the
+        // joiner path, handle_start_signing runs AFTER the node has
+        // already buffered the creator's SIGN_COMMIT via
+        // `process_signing_round1`. Clearing would drop that buffered
+        // commit and stall the ceremony at threshold - 1. Inserts are
+        // keyed by `Identifier<C>`, so stale entries from a previous
+        // ceremony with the same participants get overwritten by the
+        // fresh commit below rather than accumulated. If a prior
+        // ceremony had DIFFERENT participants you'd get cross-contamination,
+        // but we don't support concurrent ceremonies this phase.
         guard.frost_signature_shares.clear();
         guard.frost_nonces = None;
         guard.signing_message = Some(message.clone());
@@ -500,6 +509,7 @@ where
     );
     let _ = ui_tx.send(Message::SigningComplete {
         request_id: INLINE_SIGNING_ID.to_string(),
+        message: message.clone(),
         signature: signature_bytes,
     });
 }

@@ -134,7 +134,15 @@ pub enum Message {
     ApproveSignature { request_id: String },
     RejectSignature { request_id: String },
     UpdateSigningProgress { request_id: String, progress: f32 },
-    SigningComplete { request_id: String, signature: Vec<u8> },
+    SigningComplete {
+        request_id: String,
+        /// Raw bytes that were signed. Embedded here so the handler can
+        /// stash them on `wallet_state.last_completed_signature`
+        /// without re-fetching — the protocol layer has already cleared
+        /// the AppState-side copy by the time this fires.
+        message: Vec<u8>,
+        signature: Vec<u8>,
+    },
     SigningFailed { request_id: String, error: String },
     /// Received a peer's Round 1 signing commitment over the WebRTC mesh.
     /// Dispatched by the primary data-channel reader after decoding
