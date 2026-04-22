@@ -430,6 +430,23 @@ where
                 )?;
                 self.app.active(&Id::WalletComplete)?;
             }
+            Screen::SignTransaction { ref wallet_id } => {
+                // Phase C.3: the screen itself is view-only. Every keystroke
+                // flows through `handle_key_event` → `SignTypeChar` /
+                // `SignBackspace` / `SignSubmit`, mutating
+                // `wallet_state.sign_message_draft` which the component
+                // reads at mount time.
+                let mut sign = crate::elm::components::SignTransactionComponent::new(
+                    wallet_id.clone(),
+                );
+                sign.set_from_model(&self.model.wallet_state);
+                self.app.mount(
+                    Id::SignTransaction,
+                    Box::new(sign),
+                    vec![]
+                )?;
+                self.app.active(&Id::SignTransaction)?;
+            }
             _ => {
                 // Default to main menu for unimplemented screens
                 let wallet_count = self.model.wallet_state.wallets.len();
@@ -493,6 +510,8 @@ where
                 | Message::PasswordBackspace
                 | Message::PasswordToggleField
                 | Message::PasswordSubmitDraft
+                | Message::SignTypeChar(_)
+                | Message::SignBackspace
         );
         
         // Check if this is a force remount message
@@ -588,6 +607,7 @@ where
             Screen::DKGProgress { .. } => !self.app.mounted(&Id::DKGProgress),
             Screen::PasswordPrompt => !self.app.mounted(&Id::PasswordPrompt),
             Screen::WalletComplete { .. } => !self.app.mounted(&Id::WalletComplete),
+            Screen::SignTransaction { .. } => !self.app.mounted(&Id::SignTransaction),
             _ => false,
         }
     }
@@ -778,6 +798,19 @@ where
             }
         }
 
+        // SignTransaction screen (Phase C.3): free-text message input.
+        // Same pattern as PasswordPrompt — Esc is globally handled,
+        // printable chars/backspace/Enter route through dedicated
+        // Messages that mutate `Model.wallet_state.sign_message_draft`.
+        if matches!(self.model.current_screen, Screen::SignTransaction { .. }) {
+            match key.code {
+                KeyCode::Char(c) => return Some(Message::SignTypeChar(c)),
+                KeyCode::Backspace => return Some(Message::SignBackspace),
+                KeyCode::Enter => return Some(Message::SignSubmit),
+                _ => return None,
+            }
+        }
+
         // PasswordPrompt screen — this is a text-entry screen, so every
         // printable character, backspace, tab, and Enter routes through
         // dedicated messages that mutate `Model.wallet_state.*_draft`.
@@ -921,6 +954,9 @@ where
                 }
                 Screen::WalletComplete { .. } => {
                     self.app.view(&Id::WalletComplete, f, main_area);
+                }
+                Screen::SignTransaction { .. } => {
+                    self.app.view(&Id::SignTransaction, f, main_area);
                 }
                 _ => {
                     // Fallback to main menu

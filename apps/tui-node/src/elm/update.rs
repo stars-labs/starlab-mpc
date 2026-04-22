@@ -95,6 +95,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             if matches!(model.current_screen, Screen::PasswordPrompt) {
                 model.wallet_state.clear_password_draft();
             }
+            // Similarly, clear any in-progress sign-message draft on exit
+            // from SignTransaction. Message bytes aren't sensitive but a
+            // stale half-typed message has no business surviving Esc.
+            if matches!(model.current_screen, Screen::SignTransaction { .. }) {
+                model.wallet_state.clear_sign_draft();
+            }
 
             // Check if we're at the root screen (main menu with empty stack)
             if model.navigation_stack.is_empty() && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome) {
@@ -376,6 +382,110 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             Some(Command::LoadWallets)
         }
         
+        // Phase C.2/C.3 bridge: peer signing frames routed through the
+        // protocol-layer Commands. Pure pass-through on purpose — the
+        // update layer doesn't mutate Model state for these; all the
+        // state lives on AppState and `protocal::signing` handles it
+        // directly. Keeping this thin means the UI remount logic
+        // doesn't have to distinguish between "got a SIGN_COMMIT" and
+        // "got a SIGN_SHARE" — both just advance the async driver.
+        Message::ProcessSigningRound1 { from_device, commitment_bytes } => {
+            debug!(
+                "Routing SIGN_COMMIT from {} ({} bytes) to the protocol layer",
+                from_device,
+                commitment_bytes.len()
+            );
+            Some(Command::ProcessSigningRound1 {
+                from_device,
+                commitment_bytes,
+            })
+        }
+
+        Message::ProcessSigningRound2 { from_device, share_bytes } => {
+            debug!(
+                "Routing SIGN_SHARE from {} ({} bytes) to the protocol layer",
+                from_device,
+                share_bytes.len()
+            );
+            Some(Command::ProcessSigningRound2 {
+                from_device,
+                share_bytes,
+            })
+        }
+
+        // Dispatched by the SignTransaction screen (C.3) once the user
+        // confirms a message to sign. We assume the wallet is already
+        // unlocked — UnlockWallet is dispatched upstream. Kick off the
+        // ceremony.
+        Message::InitiateSigning { request } => {
+            info!(
+                "Initiating signing for wallet '{}' ({} bytes of transaction data)",
+                request.wallet_id,
+                request.transaction_data.len()
+            );
+            Some(Command::StartSigning { request })
+        }
+
+        // ----- SignTransaction screen input (Phase C.3) -----
+        Message::SignTypeChar(c) => {
+            model.wallet_state.sign_message_draft.push(c);
+            None
+        }
+        Message::SignBackspace => {
+            model.wallet_state.sign_message_draft.pop();
+            None
+        }
+        Message::SignSubmit => {
+            // Empty-message check: FROST will happily sign an empty byte
+            // string, but doing so accidentally would be awful UX.
+            // Surface as an inline notification for now (C.5 adds the
+            // proper SignatureComplete screen).
+            if model.wallet_state.sign_message_draft.is_empty() {
+                model.ui_state.notifications.push(Notification {
+                    id: Uuid::new_v4().to_string(),
+                    text: "Message is empty — type something to sign".to_string(),
+                    kind: NotificationKind::Warning,
+                    timestamp: Utc::now(),
+                    dismissible: true,
+                });
+                return None;
+            }
+
+            // Derive wallet_id from the current screen if we're on
+            // SignTransaction; fall back to the selected wallet
+            // otherwise. One or the other is always populated by the
+            // navigation path (WalletDetail → Sign action → push
+            // SignTransaction { wallet_id }).
+            let wallet_id = match &model.current_screen {
+                Screen::SignTransaction { wallet_id } => wallet_id.clone(),
+                _ => match &model.wallet_state.selected_wallet {
+                    Some(id) => id.clone(),
+                    None => {
+                        warn!(
+                            "SignSubmit with no wallet_id available — navigation \
+                             path broke upstream"
+                        );
+                        return None;
+                    }
+                },
+            };
+
+            let message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
+            // Clear immediately so the sign button can't be re-triggered
+            // for the same message by accident.
+            model.wallet_state.clear_sign_draft();
+
+            // Curve and chain_id fields aren't used by the protocol layer
+            // but fill them in honestly for logs/future use.
+            let request = crate::elm::message::SigningRequest {
+                wallet_id,
+                transaction_data: message_bytes,
+                chain: model.wallet_state.curve_type.to_string(),
+                metadata: None,
+            };
+            Some(Command::SendMessage(Message::InitiateSigning { request }))
+        }
+
         // Phase C.1: signing-time keystore hydration results. These are
         // emitted by `Command::UnlockWallet`. On success we just log + push
         // a notification; actual follow-up navigation (→ SignTransaction or
@@ -1716,6 +1826,40 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         }
                         None
                     }
+                }
+                Screen::ManageWallets => {
+                    // Phase C shortcut: Enter on a wallet row goes
+                    // straight into the signing flow instead of
+                    // WalletDetail (which is being iterated on
+                    // separately). Populate `selected_wallet` so the
+                    // SignTransaction screen has a wallet id to target.
+                    let selected = model
+                        .ui_state
+                        .selected_indices
+                        .get(&crate::elm::model::ComponentId::WalletList)
+                        .copied()
+                        .unwrap_or(0);
+                    if let Some(wallet) = model.wallet_state.wallets.get(selected) {
+                        let wallet_id = wallet.session_id.clone();
+                        info!(
+                            "ManageWallets SelectItem[{}] → SignTransaction({})",
+                            selected, wallet_id
+                        );
+                        model.selected_wallet = Some(wallet_id.clone());
+                        model.wallet_state.clear_sign_draft();
+                        model.push_screen(Screen::SignTransaction {
+                            wallet_id,
+                        });
+                        model.ui_state.focus =
+                            crate::elm::model::ComponentId::SignTransaction;
+                    } else {
+                        warn!(
+                            "ManageWallets SelectItem[{}] but list only has {} wallets",
+                            selected,
+                            model.wallet_state.wallets.len()
+                        );
+                    }
+                    None
                 }
                 _ => None,
             }

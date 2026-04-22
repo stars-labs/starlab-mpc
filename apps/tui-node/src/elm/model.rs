@@ -86,6 +86,14 @@ impl WalletState {
         self.password_error = None;
         self.password_focus_confirm = false;
     }
+
+    /// Zero-out the SignTransaction draft. Called on exit + on successful
+    /// submit. No security need to wipe this (the message is not secret),
+    /// but clearing it stops stale input from bleeding into the next
+    /// sign attempt.
+    pub fn clear_sign_draft(&mut self) {
+        self.sign_message_draft.clear();
+    }
 }
 
 /// Wallet-related state
@@ -143,6 +151,10 @@ pub struct WalletState {
     /// from here instead — keeps session announcements honest about
     /// what curve is actually running.
     pub curve_type: &'static str,
+    /// Live draft of the message the user is typing on the
+    /// `SignTransaction` screen. Cleared on submit and on every exit
+    /// from the screen (same discipline as `password_draft`).
+    pub sign_message_draft: String,
 }
 
 /// Snapshot of the data the `WalletComplete` screen needs to render.
@@ -362,6 +374,8 @@ pub enum ComponentId {
     PasswordPrompt,
     /// Focus target for the post-DKG wallet-complete screen.
     WalletComplete,
+    /// Focus target for the SignTransaction screen (Phase C).
+    SignTransaction,
     Custom(String),
 }
 

@@ -743,6 +743,124 @@ fn creator_create_wallet_announces_real_curve_from_model() {
     );
 }
 
+// -----------------------------------------------------------------
+// Phase C.3: SignTransaction screen input
+// -----------------------------------------------------------------
+
+#[test]
+fn sign_type_char_appends_to_draft() {
+    let mut model = fresh_model();
+    model.current_screen = Screen::SignTransaction {
+        wallet_id: "wallet-test".to_string(),
+    };
+    for c in "hello".chars() {
+        update(&mut model, Message::SignTypeChar(c));
+    }
+    assert_eq!(model.wallet_state.sign_message_draft, "hello");
+}
+
+#[test]
+fn sign_backspace_pops_from_draft() {
+    let mut model = fresh_model();
+    for c in "hi!".chars() {
+        update(&mut model, Message::SignTypeChar(c));
+    }
+    update(&mut model, Message::SignBackspace);
+    assert_eq!(model.wallet_state.sign_message_draft, "hi");
+}
+
+#[test]
+fn sign_submit_on_empty_draft_warns_and_returns_none() {
+    let mut model = fresh_model();
+    model.current_screen = Screen::SignTransaction {
+        wallet_id: "wallet-empty".to_string(),
+    };
+    let before = model.ui_state.notifications.len();
+    let cmd = update(&mut model, Message::SignSubmit);
+    assert!(cmd.is_none(), "empty-draft submit must not dispatch");
+    assert_eq!(
+        model.ui_state.notifications.len(),
+        before + 1,
+        "empty submit must push a warning notification"
+    );
+    // Draft stays so the user can edit the (empty) input — no clearing
+    assert_eq!(model.wallet_state.sign_message_draft, "");
+}
+
+#[test]
+fn sign_submit_dispatches_initiate_signing_and_clears_draft() {
+    use tui_node::elm::command::Command;
+    let mut model = fresh_model();
+    model.current_screen = Screen::SignTransaction {
+        wallet_id: "wallet-test".to_string(),
+    };
+    model.wallet_state.curve_type = "secp256k1";
+    for c in "Sign this".chars() {
+        update(&mut model, Message::SignTypeChar(c));
+    }
+
+    let cmd = update(&mut model, Message::SignSubmit);
+
+    match cmd {
+        Some(Command::SendMessage(Message::InitiateSigning { request })) => {
+            assert_eq!(request.wallet_id, "wallet-test");
+            assert_eq!(request.transaction_data, b"Sign this");
+            assert_eq!(request.chain, "secp256k1");
+        }
+        other => panic!(
+            "SignSubmit must dispatch SendMessage(InitiateSigning); got {:?}",
+            other
+        ),
+    }
+    // Draft cleared so the sign button can't double-fire
+    assert_eq!(model.wallet_state.sign_message_draft, "");
+}
+
+#[test]
+fn initiate_signing_dispatches_start_signing_command() {
+    // The bridge handler: Message::InitiateSigning → Command::StartSigning.
+    // This is what the UI sees; protocal layer is a sibling problem.
+    use tui_node::elm::command::Command;
+    use tui_node::elm::message::SigningRequest;
+    let mut model = fresh_model();
+    let req = SigningRequest {
+        wallet_id: "w".into(),
+        transaction_data: b"xx".to_vec(),
+        chain: "secp256k1".into(),
+        metadata: None,
+    };
+    let cmd = update(
+        &mut model,
+        Message::InitiateSigning {
+            request: req.clone(),
+        },
+    );
+    match cmd {
+        Some(Command::StartSigning { request }) => {
+            assert_eq!(request.wallet_id, req.wallet_id);
+            assert_eq!(request.transaction_data, req.transaction_data);
+        }
+        other => panic!("expected Command::StartSigning; got {:?}", other),
+    }
+}
+
+#[test]
+fn navigate_back_from_sign_transaction_wipes_draft() {
+    let mut model = fresh_model();
+    model.push_screen(Screen::SignTransaction {
+        wallet_id: "w".to_string(),
+    });
+    update(&mut model, Message::SignTypeChar('x'));
+    assert_eq!(model.wallet_state.sign_message_draft, "x");
+
+    update(&mut model, Message::NavigateBack);
+
+    assert_eq!(
+        model.wallet_state.sign_message_draft, "",
+        "draft must clear on exit so a re-entry starts fresh"
+    );
+}
+
 #[test]
 fn navigate_home_clears_last_finalized_wallet() {
     // If the user runs DKG a second time, the first wallet's snapshot

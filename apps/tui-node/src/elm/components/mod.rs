@@ -23,6 +23,9 @@ pub mod offline_dkg_process;
 pub mod sd_card_manager;
 pub mod wallet_complete;
 
+// Signing components (Phase C)
+pub mod sign_transaction;
+
 // Main exports
 pub use main_menu::MainMenu;
 pub use create_wallet::CreateWalletComponent;
@@ -42,6 +45,7 @@ pub use dkg_progress::DKGProgressComponent;
 pub use offline_dkg_process::{OfflineDKGProcessComponent, ParticipantRole};
 pub use sd_card_manager::SDCardManagerComponent;
 pub use wallet_complete::WalletCompleteComponent;
+pub use sign_transaction::SignTransactionComponent;
 
 use tuirealm::component::AppComponent;
 
@@ -78,6 +82,8 @@ pub enum Id {
     /// Mount slot for the post-DKG success screen that shows the group
     /// verifying key + all derived chain addresses.
     WalletComplete,
+    /// Mount slot for the SignTransaction input screen (Phase C).
+    SignTransaction,
 }
 
 /// User events emitted by components

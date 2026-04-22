@@ -145,6 +145,19 @@ pub enum Message {
     /// Received a peer's Round 2 signature share over the WebRTC mesh.
     /// Shape mirrors `ProcessSigningRound1`.
     ProcessSigningRound2 { from_device: String, share_bytes: Vec<u8> },
+    // ----- SignTransaction screen input (Phase C.3) -----
+    // Same routing pattern as the PasswordPrompt screen: keystrokes
+    // don't reach the component's `on()` — they go through the app-level
+    // handler into these messages, which mutate
+    // `Model.wallet_state.sign_message_draft`. The component renders
+    // from that draft.
+    SignTypeChar(char),
+    SignBackspace,
+    /// Run validation + dispatch `InitiateSigning`. On failure, populate
+    /// an inline error; on success, navigate forward (C.5 adds
+    /// SignatureComplete; today we stay on the screen and rely on the
+    /// protocol-layer notifications).
+    SignSubmit,
     
     // Network events
     WebSocketConnected,

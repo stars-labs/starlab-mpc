@@ -97,6 +97,12 @@ pub enum Command {
     StartSigning { request: SigningRequest },
     ApproveSignature { request_id: String },
     RejectSignature { request_id: String },
+    /// Forward a peer's Round-1 signing commitment to the protocol layer.
+    /// Dispatched by the `Message::ProcessSigningRound1` handler after the
+    /// primary WebRTC reader decoded the `SIGN_COMMIT:<b64>` frame.
+    ProcessSigningRound1 { from_device: String, commitment_bytes: Vec<u8> },
+    /// Same shape for Round-2 signature shares.
+    ProcessSigningRound2 { from_device: String, share_bytes: Vec<u8> },
     
     // UI operations
     SendMessage(Message),
@@ -1688,6 +1694,75 @@ impl Command {
 
                 info!("✅ Wallet '{}' unlocked — ready to sign", wallet_id);
                 let _ = tx.send(Message::WalletUnlocked { wallet_id });
+            }
+
+            // ============= Phase C.2 — signing-protocol executors =============
+            // These are the thin bridges that let UI-layer Messages reach
+            // the async FROST driver in `protocal::signing`. Nothing substantive
+            // happens here — the handlers own the real work.
+
+            Command::StartSigning { request } => {
+                info!(
+                    "🖊️  StartSigning dispatch: wallet={} chain={} message_bytes={}",
+                    request.wallet_id,
+                    request.chain,
+                    request.transaction_data.len()
+                );
+                let self_device_id = {
+                    let state = app_state.lock().await;
+                    state.device_id.clone()
+                };
+                crate::protocal::signing::handle_start_signing::<C>(
+                    app_state.clone(),
+                    self_device_id,
+                    request.transaction_data,
+                    tx.clone(),
+                )
+                .await;
+            }
+
+            Command::ProcessSigningRound1 { from_device, commitment_bytes } => {
+                let self_device_id = {
+                    let state = app_state.lock().await;
+                    state.device_id.clone()
+                };
+                crate::protocal::signing::process_signing_round1::<C>(
+                    app_state.clone(),
+                    self_device_id,
+                    from_device,
+                    commitment_bytes,
+                    tx.clone(),
+                )
+                .await;
+            }
+
+            Command::ProcessSigningRound2 { from_device, share_bytes } => {
+                crate::protocal::signing::process_signing_round2::<C>(
+                    app_state.clone(),
+                    from_device,
+                    share_bytes,
+                    tx.clone(),
+                )
+                .await;
+            }
+
+            // Placeholder arms for the request-queue approval flow — that's a
+            // Phase E concern; Phase C does synchronous "sign now" via
+            // `Command::StartSigning`. Log if they fire so future regressions
+            // (accidental dispatch) surface.
+            Command::ApproveSignature { request_id } => {
+                warn!(
+                    "Command::ApproveSignature({}) dispatched but not implemented — \
+                     Phase E will handle the approval queue",
+                    request_id
+                );
+            }
+            Command::RejectSignature { request_id } => {
+                warn!(
+                    "Command::RejectSignature({}) dispatched but not implemented — \
+                     Phase E will handle the approval queue",
+                    request_id
+                );
             }
 
             Command::ReconnectWebSocket => {
