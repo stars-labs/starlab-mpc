@@ -66,7 +66,11 @@ Notes for future reference:
 - Negative: force `Keystore::create_wallet_multi_chain` to fail (e.g. pre-create the wallet file so the "already exists" branch triggers), verify `Message::DKGFailed` fires with the right error text
 - Unit: mock `AppState` with populated `key_package`, confirm `Command::FinalizeWalletFromDkg` dispatches `DKGFinalized` with the expected `group_pubkey_hex`
 
-**Status**: Not Started
+**Status**: Complete (commits cf7022c, af45b48, 9668c02).
+Notes for future reference:
+- `Keystore::create_wallet_multi_chain` ignores its `_blockchains: Vec<BlockchainInfo>` parameter — addresses are re-derived on demand from `metadata.group_public_key + curve_type`, so the wallet metadata file itself only carries the group key. The `Message::DKGFinalized` carries addresses for UI convenience (Stage 3 will consume them).
+- Writable `Keystore` is constructed locally in the Command rather than mutating the `Arc<Keystore>` in `AppState` — post-write, we rehydrate the shared Arc by calling `Keystore::new` again, which rescans the directory. `Arc::get_mut` doesn't work because the Model holds a second clone.
+- `participant_index` must use the canonical (sorted-lexicographic) ordering of `session.participants`, matching `protocal::dkg::canonical_identifier`. The wire ordering puts each node's self-id at the end, which meant every node stored `participant_index = 3` until the canonical-sort fix.
 
 ---
 
