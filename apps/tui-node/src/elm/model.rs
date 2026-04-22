@@ -197,6 +197,17 @@ pub struct WalletState {
     /// (rather than inside Message::Confirm's boxed payload) avoids
     /// threading Vec<u8> through the modal plumbing.
     pub pending_sign_preview: Option<PendingSignPreview>,
+    /// Device ids of co-signers whose FROST round-1 commitment has
+    /// landed on this node. Used by the SigningProgress screen to
+    /// render a live acceptance roster ("Bob ✓ committed"). Populated
+    /// by `Message::ProcessSigningRound1`; cleared on InitiateSigning
+    /// (fresh ceremony) and on SigningComplete / SigningFailed /
+    /// NavigateHome.
+    pub signing_commitments_received: std::collections::HashSet<String>,
+    /// Device ids of co-signers whose FROST round-2 signature share
+    /// has landed. Tracks the second ceremony phase; shown on the
+    /// progress screen as "✓✓" to differentiate from commit-only.
+    pub signing_shares_received: std::collections::HashSet<String>,
 }
 
 /// Ephemeral snapshot of a signing request that's awaiting user

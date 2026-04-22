@@ -180,6 +180,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            // Stage 4: signing-acceptance roster is ceremony-specific.
+            // Leaving home means any in-flight ceremony is either done
+            // or abandoned — either way the next mount should start empty.
+            model.wallet_state.signing_commitments_received.clear();
+            model.wallet_state.signing_shares_received.clear();
             model.go_home();
             None
         }
@@ -542,6 +547,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 from_device,
                 commitment_bytes.len()
             );
+            // Stage 4: record this device as "committed" so the
+            // SigningProgress roster can flip their row to Round1Complete.
+            // This is also the "they accepted" signal — a peer who
+            // received the session invite but chose Decline / ignored it
+            // never sends a commitment.
+            model
+                .wallet_state
+                .signing_commitments_received
+                .insert(from_device.clone());
             Some(Command::ProcessSigningRound1 {
                 from_device,
                 commitment_bytes,
@@ -554,6 +568,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 from_device,
                 share_bytes.len()
             );
+            // Stage 4: record share receipt → advances the roster row
+            // from "✓ committed" to "✓✓ shared".
+            model
+                .wallet_state
+                .signing_shares_received
+                .insert(from_device.clone());
             Some(Command::ProcessSigningRound2 {
                 from_device,
                 share_bytes,
@@ -579,6 +599,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .as_ref()
                 .map(|s| s.session_id.clone())
                 .unwrap_or_else(|| "inline".to_string());
+            // Stage 4: wipe any stale roster from a previous ceremony
+            // before the new one starts recording commitments.
+            model.wallet_state.signing_commitments_received.clear();
+            model.wallet_state.signing_shares_received.clear();
             model.push_screen(Screen::SigningProgress {
                 request_id: request_id.clone(),
             });
@@ -664,6 +688,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
             model.wallet_state.clear_sign_draft();
+            // Stage 4: the acceptance roster has served its purpose;
+            // retain nothing into the next ceremony.
+            model.wallet_state.signing_commitments_received.clear();
+            model.wallet_state.signing_shares_received.clear();
 
             // Same stack-reset pattern as DKGFinalized: go_home first so
             // pop_screen from SignatureComplete cleanly lands on MainMenu.
@@ -684,6 +712,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
             model.wallet_state.clear_sign_draft();
+            // Stage 4: wipe the acceptance roster too so a retry
+            // doesn't render as if the prior commitments are still live.
+            model.wallet_state.signing_commitments_received.clear();
+            model.wallet_state.signing_shares_received.clear();
             None
         }
 

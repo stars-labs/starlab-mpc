@@ -2266,6 +2266,129 @@ fn review_signing_request_navigates_to_join_session_signing_tab() {
 // -----------------------------------------------------------------
 
 // -----------------------------------------------------------------
+// Stage 4: signing-ceremony acceptance roster on WalletState.
+// ProcessSigningRound1/2 messages record the sender in
+// signing_commitments_received / signing_shares_received so the
+// creator's SigningProgress screen can show live "Bob ✓ committed"
+// rows. Resets fire on InitiateSigning (fresh ceremony),
+// SigningComplete, SigningFailed, NavigateHome.
+// -----------------------------------------------------------------
+
+#[test]
+fn process_signing_round1_records_committer() {
+    let mut model = fresh_model();
+    assert!(model.wallet_state.signing_commitments_received.is_empty());
+
+    let _ = update(
+        &mut model,
+        Message::ProcessSigningRound1 {
+            from_device: "bob".to_string(),
+            commitment_bytes: vec![0u8; 32],
+        },
+    );
+
+    assert!(
+        model
+            .wallet_state
+            .signing_commitments_received
+            .contains("bob"),
+        "round-1 commitment from bob must land on the roster"
+    );
+    // A commitment doesn't imply a share yet.
+    assert!(model.wallet_state.signing_shares_received.is_empty());
+}
+
+#[test]
+fn process_signing_round2_records_sharer() {
+    let mut model = fresh_model();
+    let _ = update(
+        &mut model,
+        Message::ProcessSigningRound2 {
+            from_device: "charlie".to_string(),
+            share_bytes: vec![0u8; 32],
+        },
+    );
+    assert!(
+        model
+            .wallet_state
+            .signing_shares_received
+            .contains("charlie"),
+    );
+}
+
+#[test]
+fn initiate_signing_clears_stale_roster_from_prior_ceremony() {
+    use tui_node::elm::message::SigningRequest;
+
+    let mut model = fresh_model();
+    // Pollute the roster as if a prior ceremony had run.
+    model
+        .wallet_state
+        .signing_commitments_received
+        .insert("ghost".to_string());
+    model
+        .wallet_state
+        .signing_shares_received
+        .insert("ghost".to_string());
+
+    let req = SigningRequest {
+        wallet_id: "w".into(),
+        transaction_data: b"new".to_vec(),
+        chain: "secp256k1".into(),
+        metadata: None,
+        raw_message: None,
+    };
+    let _ = update(&mut model, Message::InitiateSigning { request: req });
+
+    assert!(
+        model.wallet_state.signing_commitments_received.is_empty(),
+        "a fresh ceremony must start with an empty commitments roster"
+    );
+    assert!(model.wallet_state.signing_shares_received.is_empty());
+}
+
+#[test]
+fn signing_failed_clears_roster_so_retry_starts_fresh() {
+    let mut model = fresh_model();
+    model
+        .wallet_state
+        .signing_commitments_received
+        .insert("alice".to_string());
+    model
+        .wallet_state
+        .signing_shares_received
+        .insert("alice".to_string());
+
+    let _ = update(
+        &mut model,
+        Message::SigningFailed {
+            request_id: "r".to_string(),
+            error: "peer dropped".to_string(),
+        },
+    );
+    assert!(model.wallet_state.signing_commitments_received.is_empty());
+    assert!(model.wallet_state.signing_shares_received.is_empty());
+}
+
+#[test]
+fn navigate_home_clears_signing_roster() {
+    let mut model = fresh_model();
+    model
+        .wallet_state
+        .signing_commitments_received
+        .insert("bob".to_string());
+    model
+        .wallet_state
+        .signing_shares_received
+        .insert("bob".to_string());
+
+    let _ = update(&mut model, Message::NavigateHome);
+
+    assert!(model.wallet_state.signing_commitments_received.is_empty());
+    assert!(model.wallet_state.signing_shares_received.is_empty());
+}
+
+// -----------------------------------------------------------------
 // Modal Enter/Esc routing: Enter dispatches ConfirmModal (fires
 // on_confirm), Esc dispatches CancelModal (fires on_cancel). Prior
 // to the fix both keys dispatched CloseModal, silently dropping both

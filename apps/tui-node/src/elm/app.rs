@@ -513,6 +513,34 @@ where
                                 crate::elm::components::dkg_progress::ParticipantStatus::Waiting,
                             );
                         }
+
+                        // Stage 4: overlay signing-ceremony progress on
+                        // top of the WebRTC-status row. Commitments win
+                        // over mesh state because once a commitment
+                        // arrived, "mesh ready" is implied. Shares win
+                        // over commitments for the same reason.
+                        use crate::elm::components::dkg_progress::ParticipantStatus;
+                        if self
+                            .model
+                            .wallet_state
+                            .signing_shares_received
+                            .contains(p)
+                        {
+                            progress.update_participant(
+                                p.clone(),
+                                ParticipantStatus::Round2Complete,
+                            );
+                        } else if self
+                            .model
+                            .wallet_state
+                            .signing_commitments_received
+                            .contains(p)
+                        {
+                            progress.update_participant(
+                                p.clone(),
+                                ParticipantStatus::Round1Complete,
+                            );
+                        }
                     }
                 }
                 self.app.mount(Id::DKGProgress, Box::new(progress), vec![])?;
@@ -587,6 +615,13 @@ where
                 | Message::PasswordSubmitDraft
                 | Message::SignTypeChar(_)
                 | Message::SignBackspace
+                // Stage 4: signing-round messages mutate the
+                // acceptance roster on WalletState; the SigningProgress
+                // component reads that roster at mount time, so each
+                // commitment/share needs a remount for the row to
+                // actually flip to Round1/Round2Complete.
+                | Message::ProcessSigningRound1 { .. }
+                | Message::ProcessSigningRound2 { .. }
         );
         
         // Check if this is a force remount message
