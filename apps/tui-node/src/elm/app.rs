@@ -447,6 +447,16 @@ where
                 )?;
                 self.app.active(&Id::SignTransaction)?;
             }
+            Screen::SignatureComplete { .. } => {
+                // Phase C.5: terminal signing screen. Same view-only
+                // pattern as WalletComplete — data flows from
+                // `wallet_state.last_completed_signature`.
+                let mut sc =
+                    crate::elm::components::SignatureCompleteComponent::new();
+                sc.set_from_model(&self.model.wallet_state);
+                self.app.mount(Id::SignatureComplete, Box::new(sc), vec![])?;
+                self.app.active(&Id::SignatureComplete)?;
+            }
             Screen::SigningProgress { ref request_id } => {
                 // Phase C.4: reuse DKGProgressComponent for now — it
                 // already renders the participant mesh + a round
@@ -654,6 +664,7 @@ where
             // SigningProgress reuses the DKGProgress component, so remount
             // when the DKGProgress slot is empty.
             Screen::SigningProgress { .. } => !self.app.mounted(&Id::DKGProgress),
+            Screen::SignatureComplete { .. } => !self.app.mounted(&Id::SignatureComplete),
             _ => false,
         }
     }
@@ -844,6 +855,18 @@ where
             }
         }
 
+        // SignatureComplete mirrors WalletComplete — Enter dismisses
+        // back to MainMenu, Esc does the same via the global arm.
+        if matches!(self.model.current_screen, Screen::SignatureComplete { .. }) {
+            match key.code {
+                KeyCode::Enter => {
+                    info!("✅ SignatureComplete Enter → NavigateBack → MainMenu");
+                    return Some(Message::NavigateBack);
+                }
+                _ => return None,
+            }
+        }
+
         // SignTransaction screen (Phase C.3): free-text message input.
         // Same pattern as PasswordPrompt — Esc is globally handled,
         // printable chars/backspace/Enter route through dedicated
@@ -1007,6 +1030,9 @@ where
                 Screen::SigningProgress { .. } => {
                     // Reuses DKGProgress slot — see mount_components.
                     self.app.view(&Id::DKGProgress, f, main_area);
+                }
+                Screen::SignatureComplete { .. } => {
+                    self.app.view(&Id::SignatureComplete, f, main_area);
                 }
                 _ => {
                     // Fallback to main menu

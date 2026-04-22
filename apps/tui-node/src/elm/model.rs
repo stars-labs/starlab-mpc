@@ -165,6 +165,11 @@ pub struct WalletState {
     pub pending_sign_wallet_id: Option<String>,
     /// Which signing session we're about to join. Same lifecycle.
     pub pending_sign_session_id: Option<String>,
+    /// Snapshot of the most recently produced signature. Populated by
+    /// `Message::SigningComplete`; rendered by the `SignatureComplete`
+    /// screen. Cleared on `NavigateHome` so a second signing attempt
+    /// doesn't render stale data.
+    pub last_completed_signature: Option<CompletedSignatureInfo>,
 }
 
 /// Snapshot of the data the `WalletComplete` screen needs to render.
@@ -186,6 +191,31 @@ pub struct CompletedWalletInfo {
     /// `blockchain_config::get_compatible_chains`, which is stable per
     /// curve.
     pub addresses: Vec<(String, String)>,
+}
+
+/// Snapshot of the data the `SignatureComplete` screen needs. Populated
+/// by the `Message::SigningComplete` handler after FROST `aggregate`
+/// produces a signature that verifies under the group key. The raw
+/// `signature` + `message` bytes are retained so the component can
+/// show both hex renderings; the `verified` flag is the outcome of the
+/// explicit verifying_key check the protocol layer runs before
+/// emitting SigningComplete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedSignatureInfo {
+    pub request_id: String,
+    pub wallet_id: String,
+    /// Bytes that were signed. Rendered as hex in the view; an ASCII
+    /// toggle would be nice but isn't shipped this phase.
+    pub message: Vec<u8>,
+    /// Aggregated FROST signature as the FROST library returned it.
+    /// For secp256k1 that's 64 bytes; ed25519 is also 64 bytes.
+    pub signature: Vec<u8>,
+    /// Result of `verifying_key.verify(&message, &signature)` the
+    /// protocol layer ran before emitting SigningComplete. Always
+    /// `true` on the happy path; a `false` here means something went
+    /// wrong before the emit and this screen shouldn't actually be
+    /// reachable — but we surface the flag defensively.
+    pub verified: bool,
 }
 
 // Manual Debug implementation for WalletState
@@ -312,7 +342,13 @@ pub enum Screen {
     // Signing flow
     SignTransaction { wallet_id: String },
     SigningProgress { request_id: String },
-    SignatureComplete { signature: String },
+    /// Terminal screen shown after a successful FROST aggregate.
+    /// `request_id` is the signing ceremony id used by
+    /// `Message::SigningComplete`; the full signature payload lives
+    /// on `Model.wallet_state.last_completed_signature` so the
+    /// rendered component can pull it via `set_from_model` without
+    /// the variant carrying unbounded data.
+    SignatureComplete { request_id: String },
     
     // Settings
     Settings,
@@ -386,6 +422,8 @@ pub enum ComponentId {
     WalletComplete,
     /// Focus target for the SignTransaction screen (Phase C).
     SignTransaction,
+    /// Focus target for the SignatureComplete success screen (Phase C.5).
+    SignatureComplete,
     Custom(String),
 }
 

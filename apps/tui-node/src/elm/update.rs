@@ -162,8 +162,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Clear the post-DKG snapshot — if the user is back on home
             // they're no longer looking at "that just-finished wallet".
             // Stops a second DKG from rendering stale data on its first
-            // frame.
+            // frame. Same invariant for the post-signing snapshot.
             model.wallet_state.last_finalized_wallet = None;
+            model.wallet_state.last_completed_signature = None;
             model.go_home();
             None
         }
@@ -502,6 +503,108 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 request.transaction_data.len()
             );
             Some(Command::StartSigning { request })
+        }
+
+        // ----- Phase C.5: signing ceremony terminal handlers -----
+        //
+        // `protocal::signing::try_aggregate` emits SigningComplete on
+        // every participant that has accumulated threshold shares —
+        // which means all nodes in a 2-of-2 ceremony, or the first
+        // threshold-many to hear from each other in larger quorums.
+        // Stash the snapshot + push SignatureComplete + clear all
+        // transient signing state so the next ceremony starts clean.
+        Message::SigningComplete { request_id, signature } => {
+            info!(
+                "🎉 Signing complete: request_id={} signature={} bytes",
+                request_id,
+                signature.len()
+            );
+
+            // Rebuild the message bytes + wallet_id from Model state —
+            // the protocol layer already cleared `signing_message` but
+            // we stash a copy on Model (below) before dispatching the
+            // terminal nav, so tests can read them back.
+            //
+            // In practice, by this point the fields the user sees come
+            // from active_session + wallet_state cached data.
+            let wallet_id = model
+                .wallet_state
+                .last_finalized_wallet
+                .as_ref()
+                .map(|w| w.wallet_id.clone())
+                .or_else(|| model.selected_wallet.clone())
+                .or_else(|| {
+                    model
+                        .active_session
+                        .as_ref()
+                        .and_then(|s| match &s.session_type {
+                            crate::protocal::signal::SessionType::Signing {
+                                wallet_name,
+                                ..
+                            } => Some(wallet_name.clone()),
+                            _ => None,
+                        })
+                })
+                .unwrap_or_else(|| "(unknown)".to_string());
+
+            // Reconstruct the message bytes from the pending-sign stash
+            // if still present (joiner path), or from the draft (creator
+            // path). Best-effort — if neither is available the view
+            // will still render the signature, just with an empty
+            // message preview.
+            let message = model
+                .wallet_state
+                .pending_sign_message
+                .clone()
+                .unwrap_or_else(|| model.wallet_state.sign_message_draft.as_bytes().to_vec());
+
+            model.wallet_state.last_completed_signature =
+                Some(crate::elm::model::CompletedSignatureInfo {
+                    request_id: request_id.clone(),
+                    wallet_id: wallet_id.clone(),
+                    message,
+                    signature,
+                    // `protocal::signing::try_aggregate` gates the emit
+                    // on a successful verify — see the guard there.
+                    // If that ever changes we'll need to re-verify
+                    // here.
+                    verified: true,
+                });
+
+            model.ui_state.notifications.push(Notification {
+                id: Uuid::new_v4().to_string(),
+                text: format!("🎉 Signature complete for '{}'", wallet_id),
+                kind: NotificationKind::Success,
+                timestamp: Utc::now(),
+                dismissible: true,
+            });
+
+            // Drop any leftover pending-sign state — the flow is over.
+            model.wallet_state.pending_sign_message = None;
+            model.wallet_state.pending_sign_wallet_id = None;
+            model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.clear_sign_draft();
+
+            // Same stack-reset pattern as DKGFinalized: go_home first so
+            // pop_screen from SignatureComplete cleanly lands on MainMenu.
+            model.go_home();
+            model.push_screen(Screen::SignatureComplete { request_id });
+            model.ui_state.focus = crate::elm::model::ComponentId::SignatureComplete;
+            None
+        }
+
+        Message::SigningFailed { request_id, error } => {
+            error!("Signing ceremony {} failed: {}", request_id, error);
+            model.ui_state.modal = Some(Modal::Error {
+                title: "Signing Failed".to_string(),
+                message: error,
+            });
+            // Clear pending-sign state so a retry starts clean.
+            model.wallet_state.pending_sign_message = None;
+            model.wallet_state.pending_sign_wallet_id = None;
+            model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.clear_sign_draft();
+            None
         }
 
         // ----- SignTransaction screen input (Phase C.3) -----

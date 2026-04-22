@@ -845,6 +845,143 @@ fn initiate_signing_dispatches_start_signing_command() {
     }
 }
 
+// -----------------------------------------------------------------
+// Phase C.5: SigningComplete / SigningFailed terminal handlers
+// -----------------------------------------------------------------
+
+#[test]
+fn signing_complete_stashes_snapshot_and_navigates_to_signature_complete() {
+    use tui_node::SessionInfo;
+    use tui_node::protocal::signal::SessionType;
+    let mut model = fresh_model();
+    // Simulate mid-signing state
+    model.wallet_state.pending_sign_message = Some(b"hello world".to_vec());
+    model.wallet_state.pending_sign_wallet_id = Some("wallet-test".to_string());
+    model.wallet_state.pending_sign_session_id = Some("sign_abc".to_string());
+    model.active_session = Some(SessionInfo {
+        session_id: "sign_abc".to_string(),
+        proposer_id: "mpc-1".to_string(),
+        total: 3,
+        threshold: 2,
+        participants: vec!["mpc-1".into()],
+        session_type: SessionType::Signing {
+            wallet_name: "wallet-test".to_string(),
+            curve_type: "secp256k1".to_string(),
+            blockchain: "secp256k1".to_string(),
+            group_public_key: "abcd".to_string(),
+        },
+        curve_type: "secp256k1".to_string(),
+        coordination_type: "Network".to_string(),
+        signing_message_hex: None,
+    });
+    model.current_screen = Screen::SigningProgress {
+        request_id: "sign_abc".to_string(),
+    };
+
+    let signature_bytes = vec![0xAAu8; 64];
+    let _ = update(
+        &mut model,
+        Message::SigningComplete {
+            request_id: "inline".to_string(),
+            signature: signature_bytes.clone(),
+        },
+    );
+
+    let info = model
+        .wallet_state
+        .last_completed_signature
+        .as_ref()
+        .expect("SigningComplete must stash a CompletedSignatureInfo");
+    assert_eq!(info.request_id, "inline");
+    assert_eq!(info.wallet_id, "wallet-test");
+    assert_eq!(info.message, b"hello world");
+    assert_eq!(info.signature, signature_bytes);
+    assert!(info.verified, "protocol layer gates emit on verify success");
+
+    // Stack reset: we should be on SignatureComplete with a single
+    // MainMenu frame behind it so NavigateBack drops us home.
+    assert!(
+        matches!(model.current_screen, Screen::SignatureComplete { .. }),
+        "must land on SignatureComplete; got {:?}",
+        model.current_screen
+    );
+
+    // All pending-sign state must be drained so a future sign starts clean.
+    assert!(model.wallet_state.pending_sign_message.is_none());
+    assert!(model.wallet_state.pending_sign_wallet_id.is_none());
+    assert!(model.wallet_state.pending_sign_session_id.is_none());
+    assert_eq!(model.wallet_state.sign_message_draft, "");
+}
+
+#[test]
+fn signing_complete_back_navigation_lands_on_main_menu() {
+    let mut model = fresh_model();
+    let _ = update(
+        &mut model,
+        Message::SigningComplete {
+            request_id: "x".into(),
+            signature: vec![0u8; 64],
+        },
+    );
+    assert!(matches!(model.current_screen, Screen::SignatureComplete { .. }));
+
+    let _ = update(&mut model, Message::NavigateBack);
+    assert!(
+        matches!(model.current_screen, Screen::MainMenu),
+        "NavigateBack from SignatureComplete must land on MainMenu (not \
+         SigningProgress — that's stale); got {:?}",
+        model.current_screen
+    );
+}
+
+#[test]
+fn signing_failed_surfaces_error_modal_and_clears_pending_state() {
+    use tui_node::elm::model::Modal;
+    let mut model = fresh_model();
+    model.wallet_state.pending_sign_message = Some(b"x".to_vec());
+    model.wallet_state.pending_sign_wallet_id = Some("w".to_string());
+    model.wallet_state.pending_sign_session_id = Some("s".to_string());
+
+    let _ = update(
+        &mut model,
+        Message::SigningFailed {
+            request_id: "x".into(),
+            error: "FROST part3 crashed".to_string(),
+        },
+    );
+
+    // Modal surfaced so the user can't silently proceed with bad data.
+    match model.ui_state.modal.as_ref() {
+        Some(Modal::Error { message, .. }) => {
+            assert!(
+                message.contains("FROST part3"),
+                "error modal must carry the failure reason; got {:?}",
+                message
+            );
+        }
+        other => panic!("expected Modal::Error; got {:?}", other),
+    }
+    // Pending state drained.
+    assert!(model.wallet_state.pending_sign_message.is_none());
+    assert!(model.wallet_state.pending_sign_wallet_id.is_none());
+    assert!(model.wallet_state.pending_sign_session_id.is_none());
+}
+
+#[test]
+fn navigate_home_clears_last_completed_signature() {
+    use tui_node::elm::model::CompletedSignatureInfo;
+    let mut model = fresh_model();
+    model.wallet_state.last_completed_signature = Some(CompletedSignatureInfo {
+        request_id: "x".into(),
+        wallet_id: "w".into(),
+        message: vec![],
+        signature: vec![],
+        verified: true,
+    });
+    update(&mut model, Message::NavigateHome);
+    assert!(model.wallet_state.last_completed_signature.is_none());
+}
+
 #[test]
 fn submit_password_on_signing_session_dispatches_unlock_and_stashes_payload() {
     // Joiner path for Phase C.4: when active_session is a Signing

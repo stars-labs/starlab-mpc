@@ -25,6 +25,7 @@ pub mod wallet_complete;
 
 // Signing components (Phase C)
 pub mod sign_transaction;
+pub mod signature_complete;
 
 // Main exports
 pub use main_menu::MainMenu;
@@ -46,6 +47,7 @@ pub use offline_dkg_process::{OfflineDKGProcessComponent, ParticipantRole};
 pub use sd_card_manager::SDCardManagerComponent;
 pub use wallet_complete::WalletCompleteComponent;
 pub use sign_transaction::SignTransactionComponent;
+pub use signature_complete::SignatureCompleteComponent;
 
 use tuirealm::component::AppComponent;
 
@@ -84,6 +86,8 @@ pub enum Id {
     WalletComplete,
     /// Mount slot for the SignTransaction input screen (Phase C).
     SignTransaction,
+    /// Mount slot for the SignatureComplete success screen (Phase C.5).
+    SignatureComplete,
 }
 
 /// User events emitted by components
