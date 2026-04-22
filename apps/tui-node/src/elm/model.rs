@@ -160,6 +160,12 @@ pub struct WalletState {
     /// SubmitPassword handler when it sees a `SessionType::Signing`;
     /// consumed by `WalletUnlocked` once the KeyPackage is loaded.
     pub pending_sign_message: Option<Vec<u8>>,
+    /// The USER-facing message (pre-EIP-191-hash) that the creator
+    /// typed on SignTransaction. Stashed alongside
+    /// `pending_sign_message` (which is the hash bytes for
+    /// secp256k1) so `SigningComplete` can display both. `None` on
+    /// the joiner path — joiners only have the hash from the announce.
+    pub pending_raw_message: Option<Vec<u8>>,
     /// Which wallet to unlock for the pending signing flow. Same
     /// lifecycle as `pending_sign_message`.
     pub pending_sign_wallet_id: Option<String>,
@@ -216,11 +222,20 @@ pub struct CompletedWalletInfo {
 pub struct CompletedSignatureInfo {
     pub request_id: String,
     pub wallet_id: String,
-    /// Bytes that were signed. Rendered as hex in the view; an ASCII
-    /// toggle would be nice but isn't shipped this phase.
+    /// The USER-visible message — what they typed on SignTransaction.
+    /// Held separately from `signed_hash` because for secp256k1 we
+    /// sign the EIP-191 hash of this message (what ecrecover
+    /// expects), not the message bytes themselves.
     pub message: Vec<u8>,
+    /// What FROST actually signed. For secp256k1 this is the 32-byte
+    /// EIP-191 hash of `message`; for ed25519 it's the message bytes
+    /// themselves (ed25519 signs variable-length input directly).
+    /// `None` means "same as `message`" and preserves the pre-EIP-191
+    /// semantics for raw-bytes signing.
+    pub signed_hash: Option<Vec<u8>>,
     /// Aggregated FROST signature as the FROST library returned it.
-    /// For secp256k1 that's 64 bytes; ed25519 is also 64 bytes.
+    /// For secp256k1 that's 65 bytes (compressed group-key prefix +
+    /// 32-byte z); ed25519 is 64 bytes.
     pub signature: Vec<u8>,
     /// Result of `verifying_key.verify(&message, &signature)` the
     /// protocol layer ran before emitting SigningComplete. Always

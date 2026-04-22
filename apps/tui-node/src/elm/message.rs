@@ -284,9 +284,18 @@ pub struct DKGResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SigningRequest {
     pub wallet_id: String,
+    /// The bytes FROST should actually sign — for secp256k1 Ethereum
+    /// flows this is the 32-byte EIP-191 hash; for raw-bytes mode
+    /// it's the user's message itself.
     pub transaction_data: Vec<u8>,
     pub chain: String,
     pub metadata: Option<String>,
+    /// The user-visible message the hash was derived from. `None`
+    /// means "same as `transaction_data`" (raw-bytes mode, pre-D.1
+    /// behaviour). Preserved so the SignatureComplete screen can
+    /// show the user what they typed alongside the cryptographic
+    /// hash.
+    pub raw_message: Option<Vec<u8>>,
 }
 
 impl Message {

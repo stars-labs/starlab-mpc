@@ -810,8 +810,21 @@ fn sign_submit_dispatches_initiate_signing_and_clears_draft() {
     match cmd {
         Some(Command::SendMessage(Message::InitiateSigning { request })) => {
             assert_eq!(request.wallet_id, "wallet-test");
-            assert_eq!(request.transaction_data, b"Sign this");
             assert_eq!(request.chain, "secp256k1");
+            // secp256k1 signs the EIP-191 hash, not the raw bytes —
+            // so `transaction_data` is 32 bytes, not `b"Sign this"`.
+            // Cross-check against the canonical helper.
+            assert_eq!(
+                request.transaction_data,
+                tui_node::utils::eth_helper::eip191_hash(b"Sign this"),
+                "secp256k1 SignSubmit must hash with EIP-191 before FROST"
+            );
+            assert_eq!(
+                request.raw_message.as_deref(),
+                Some(b"Sign this".as_ref()),
+                "raw_message must round-trip through the request so \
+                 SignatureComplete can render the user's message"
+            );
         }
         other => panic!(
             "SignSubmit must dispatch SendMessage(InitiateSigning); got {:?}",
@@ -834,6 +847,7 @@ fn initiate_signing_dispatches_start_signing_command() {
         transaction_data: b"xx".to_vec(),
         chain: "secp256k1".into(),
         metadata: None,
+        raw_message: None,
     };
     let cmd = update(
         &mut model,
@@ -1014,6 +1028,7 @@ fn navigate_home_clears_last_completed_signature() {
         request_id: "x".into(),
         wallet_id: "w".into(),
         message: vec![],
+        signed_hash: None,
         signature: vec![],
         verified: true,
     });
@@ -1043,7 +1058,12 @@ fn sign_submit_when_wallet_unlocked_dispatches_initiate_signing_directly() {
     match cmd {
         Some(Command::SendMessage(Message::InitiateSigning { request })) => {
             assert_eq!(request.wallet_id, "w-warm");
-            assert_eq!(request.transaction_data, b"hi");
+            // secp256k1 → transaction_data is the EIP-191 hash.
+            assert_eq!(
+                request.transaction_data,
+                tui_node::utils::eth_helper::eip191_hash(b"hi")
+            );
+            assert_eq!(request.raw_message.as_deref(), Some(b"hi".as_ref()));
         }
         other => panic!(
             "warm-session SignSubmit must dispatch InitiateSigning directly; got {:?}",
@@ -1051,9 +1071,14 @@ fn sign_submit_when_wallet_unlocked_dispatches_initiate_signing_directly() {
         ),
     }
     // Pending-sign state stays empty because we didn't route through
-    // PasswordPrompt.
+    // PasswordPrompt. Note `pending_raw_message` IS set — it's the
+    // user-facing message for SigningComplete to display.
     assert!(model.wallet_state.pending_sign_message.is_none());
     assert!(model.wallet_state.pending_sign_wallet_id.is_none());
+    assert_eq!(
+        model.wallet_state.pending_raw_message.as_deref(),
+        Some(b"hi".as_ref())
+    );
 }
 
 #[test]

@@ -90,24 +90,53 @@ impl Component for SignatureCompleteComponent {
             ])
             .split(inner);
 
-        // Message hex (what was signed).
+        // Message + hash section. When `signed_hash` is Some we're
+        // showing a user-facing message that got EIP-191 wrapped
+        // before signing — render both the message (as ASCII if
+        // valid UTF-8, else hex) AND the hash that actually went
+        // into FROST. When None, just show the raw bytes.
+        let (message_label, message_preview) = match &info.signed_hash {
+            Some(hash) => {
+                let preview = match std::str::from_utf8(&info.message) {
+                    Ok(s) => format!("\"{}\"", s),
+                    Err(_) => hex::encode(&info.message),
+                };
+                (
+                    format!(
+                        "EIP-191 Message ({} bytes) — signed hash: 0x{}",
+                        info.message.len(),
+                        hex::encode(hash)
+                    ),
+                    preview,
+                )
+            }
+            None => (
+                format!("Message ({} bytes):", info.message.len()),
+                hex::encode(&info.message),
+            ),
+        };
         frame.render_widget(
-            Paragraph::new(format!("Message ({} bytes):", info.message.len()))
-                .style(Style::default().fg(Color::Yellow)),
+            Paragraph::new(message_label).style(Style::default().fg(Color::Yellow)),
             rows[0],
         );
-        let msg_hex = hex::encode(&info.message);
         frame.render_widget(
-            Paragraph::new(msg_hex)
+            Paragraph::new(message_preview)
                 .style(Style::default().fg(Color::White))
                 .wrap(Wrap { trim: true }),
             rows[1],
         );
 
         // Signature hex.
+        let sig_label = if info.signed_hash.is_some() {
+            format!(
+                "FROST signature ({} bytes) — ecrecover-ready personal_sign:",
+                info.signature.len()
+            )
+        } else {
+            format!("FROST signature ({} bytes):", info.signature.len())
+        };
         frame.render_widget(
-            Paragraph::new(format!("FROST signature ({} bytes):", info.signature.len()))
-                .style(Style::default().fg(Color::Yellow)),
+            Paragraph::new(sig_label).style(Style::default().fg(Color::Yellow)),
             rows[3],
         );
         let sig_hex = hex::encode(&info.signature);
@@ -197,6 +226,7 @@ mod tests {
             request_id: "inline".to_string(),
             wallet_id: "wallet-dkg_abcd".to_string(),
             message: b"hello world".to_vec(),
+            signed_hash: None,
             signature: vec![0xABu8; 64],
             verified: true,
         }
@@ -220,5 +250,56 @@ mod tests {
         let mut c = SignatureCompleteComponent::new();
         c.set_from_model(&ws);
         assert!(c.info.is_none());
+    }
+
+    /// When signed_hash is populated, render must label the signature
+    /// as `ecrecover-ready personal_sign` so users know it's usable
+    /// as an Ethereum `personal_sign` output (not just a FROST blob).
+    #[test]
+    fn signed_hash_present_renders_ethereum_labels() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let mut ws = WalletState::default();
+        ws.last_completed_signature = Some(CompletedSignatureInfo {
+            request_id: "inline".into(),
+            wallet_id: "w".into(),
+            message: b"hello".to_vec(),
+            signed_hash: Some(vec![0xDEu8; 32]),
+            signature: vec![0xAAu8; 65],
+            verified: true,
+        });
+
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = Terminal::new(backend).expect("TestBackend");
+        let mut c = SignatureCompleteComponent::new();
+        c.set_from_model(&ws);
+        terminal
+            .draw(|f| c.view(f, f.area()))
+            .expect("draw");
+        let buf = terminal.backend().buffer();
+        let area = buf.area();
+        let mut rendered = String::new();
+        for y in 0..area.height {
+            for x in 0..area.width {
+                if let Some(cell) = buf.cell((x, y)) {
+                    rendered.push_str(cell.symbol());
+                }
+            }
+            rendered.push('\n');
+        }
+
+        assert!(
+            rendered.contains("EIP-191 Message"),
+            "signed_hash Some must produce the EIP-191 label; got: {rendered}"
+        );
+        assert!(
+            rendered.contains("personal_sign"),
+            "must advertise Ethereum personal_sign compatibility"
+        );
+        assert!(
+            rendered.contains("\"hello\""),
+            "user's typed message must render as ASCII when UTF-8 valid"
+        );
     }
 }

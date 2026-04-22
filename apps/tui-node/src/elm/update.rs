@@ -170,6 +170,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // sign needs to re-unlock". Same logic as clearing the
             // DKG-time drafts.
             model.wallet_state.wallet_unlocked_id = None;
+            // Stale pre-hash message shouldn't outlive the flow.
+            model.wallet_state.pending_raw_message = None;
             model.go_home();
             None
         }
@@ -599,11 +601,29 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 })
                 .unwrap_or_else(|| "(unknown)".to_string());
 
+            // If the creator typed a message, `message` (passed in from
+            // `Message::SigningComplete`) is the 32-byte EIP-191 hash
+            // FROST actually signed. Use `pending_raw_message` for the
+            // user-facing "Message: ..." display, and record the hash
+            // separately as `signed_hash` so the SignatureComplete
+            // screen can show both — and call out that this is
+            // `personal_sign` compatible. Joiner sides never
+            // populated `pending_raw_message`; they render the hash
+            // only.
+            let raw_message = model.wallet_state.pending_raw_message.take();
+            let signed_hash = if raw_message.is_some() {
+                Some(message.clone())
+            } else {
+                None
+            };
+            let display_message = raw_message.clone().unwrap_or_else(|| message.clone());
+
             model.wallet_state.last_completed_signature =
                 Some(crate::elm::model::CompletedSignatureInfo {
                     request_id: request_id.clone(),
                     wallet_id: wallet_id.clone(),
-                    message,
+                    message: display_message,
+                    signed_hash,
                     signature,
                     // `protocal::signing::try_aggregate` gates the emit
                     // on a successful verify — see the guard there.
@@ -750,7 +770,22 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 },
             };
 
-            let message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
+            let raw_message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
+            // For secp256k1 wallets, sign the EIP-191 hash of the message
+            // rather than the raw bytes. That's what `ecrecover`
+            // expects — so the resulting signature is directly usable
+            // as an Ethereum `personal_sign` output. For ed25519 /
+            // future curves, the raw bytes ARE the payload (Ed25519
+            // signs variable-length input natively).
+            let curve = model.wallet_state.curve_type;
+            let (bytes_to_sign, raw_for_display) = if curve == "secp256k1" {
+                let hash =
+                    crate::utils::eth_helper::eip191_hash(&raw_message_bytes).to_vec();
+                (hash, Some(raw_message_bytes.clone()))
+            } else {
+                (raw_message_bytes.clone(), None)
+            };
+
             // Clear the draft so the user can't accidentally re-submit
             // the same message twice if they hit Enter repeatedly.
             model.wallet_state.clear_sign_draft();
@@ -766,12 +801,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // into this flow via the `WalletUnlocked` handler (which
             // checks for a pending_sign_message without a
             // pending_sign_session_id and dispatches InitiateSigning).
+            // Stash the user-facing message on Model so SigningComplete
+            // can show both "what I typed" and "what was signed"
+            // (the EIP-191 hash). Warm + cold paths both populate this.
+            model.wallet_state.pending_raw_message = raw_for_display.clone();
+
             if model.wallet_state.wallet_unlocked_id.as_deref() == Some(&wallet_id) {
                 let request = crate::elm::message::SigningRequest {
                     wallet_id,
-                    transaction_data: message_bytes,
+                    transaction_data: bytes_to_sign,
                     chain: model.wallet_state.curve_type.to_string(),
                     metadata: None,
+                    raw_message: raw_for_display,
                 };
                 Some(Command::SendMessage(Message::InitiateSigning { request }))
             } else {
@@ -779,7 +820,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     "SignSubmit: wallet '{}' not unlocked — routing through PasswordPrompt",
                     wallet_id
                 );
-                model.wallet_state.pending_sign_message = Some(message_bytes);
+                // Stash the hash-to-sign (EIP-191 for secp256k1). The
+                // cold-path WalletUnlocked handler reuses this as
+                // `transaction_data` directly — no second hashing.
+                // raw_for_display isn't threaded through the cold
+                // path yet (a small Model-field cost); cold-started
+                // SignatureComplete will show the hash hex without
+                // the user-facing message preview. Warm path has
+                // both.
+                model.wallet_state.pending_sign_message = Some(bytes_to_sign);
                 model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
                 // Leave pending_sign_session_id as None — that's the
                 // flag WalletUnlocked uses to distinguish creator
@@ -863,6 +912,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         transaction_data: msg,
                         chain: model.wallet_state.curve_type.to_string(),
                         metadata: None,
+                        // Cold-start: raw_message was set by SignSubmit
+                        // into pending_raw_message; re-surface it via
+                        // the request so downstream paths treat this
+                        // identically to the warm flow. (SigningComplete
+                        // reads it back out of Model regardless; having
+                        // it on the request is mostly for logging.)
+                        raw_message: model.wallet_state.pending_raw_message.clone(),
                     };
                     Some(Command::SendMessage(Message::InitiateSigning { request }))
                 }
