@@ -103,6 +103,15 @@ pub enum Command {
     ProcessSigningRound1 { from_device: String, commitment_bytes: Vec<u8> },
     /// Same shape for Round-2 signature shares.
     ProcessSigningRound2 { from_device: String, share_bytes: Vec<u8> },
+    /// Joiner-side counterpart of `StartSigning`: record the
+    /// just-accepted signing session on AppState, then (after the wallet
+    /// has been unlocked) kick off `handle_start_signing` on the joiner's
+    /// node. Mesh setup is reused from the prior DKG when available;
+    /// cold-start mesh establishment is deferred to a later phase.
+    JoinSigning {
+        session_id: String,
+        message_bytes: Vec<u8>,
+    },
     
     // UI operations
     SendMessage(Message),
@@ -260,17 +269,62 @@ pub(crate) fn parse_session_info(
         .unwrap_or("Network")
         .to_string();
 
+    // `session_type` on the wire is a flat string flag: `"dkg"` or
+    // `"signing"`. For signing sessions we also carry `wallet_name` and
+    // `group_public_key` in the announcement JSON so joiners can
+    // cross-check against their local keystore without a separate query.
+    let session_type_tag = session_info
+        .get("session_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("dkg");
+    let session_type = if session_type_tag == "signing" {
+        // Degrade gracefully: if the signing-specific fields aren't
+        // present we still produce a Signing variant with empty
+        // strings, since the downstream matches care about the variant
+        // shape more than the payload.
+        let wallet_name = session_info
+            .get("wallet_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let group_public_key = session_info
+            .get("group_public_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let blockchain = session_info
+            .get("blockchain")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        SessionType::Signing {
+            wallet_name,
+            curve_type: curve_type.clone(),
+            blockchain,
+            group_public_key,
+        }
+    } else {
+        SessionType::DKG
+    };
+
+    // Pull `signing_message_hex` out of the signing announce if present —
+    // joiners use this to run the same ceremony the creator started.
+    let signing_message_hex = session_info
+        .get("signing_message_hex")
+        .or_else(|| session_info.get("message_hex"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     Some(SessionInfo {
         session_id,
         proposer_id,
         total,
         threshold,
         participants,
-        // We only surface DKG discovery on the primary reader for now; signing
-        // sessions are still announced over the DKG-side socket.
-        session_type: SessionType::DKG,
+        session_type,
         curve_type,
         coordination_type,
+        signing_message_hex,
     })
 }
 
@@ -540,6 +594,7 @@ impl Command {
                             session_type: crate::protocal::signal::SessionType::DKG,
                             curve_type: announced_curve.to_string(),
                             coordination_type: "Network".to_string(),
+                            signing_message_hex: None,
                         });
                     }
 
@@ -890,6 +945,7 @@ impl Command {
                         session_type: crate::protocal::signal::SessionType::DKG,
                         curve_type,
                         coordination_type: "Network".to_string(),
+                        signing_message_hex: None,
                     });
                 }
 
@@ -1708,6 +1764,148 @@ impl Command {
                     request.chain,
                     request.transaction_data.len()
                 );
+
+                // Snapshot what we need in one short lock: device id, the
+                // primary WebSocket handle (may be absent on cold start —
+                // treat as a no-op announce in that case), and the
+                // `PublicKeyPackage` we need to announce the group key so
+                // joiners can cross-check.
+                let (self_device_id, ws_tx_opt, group_pubkey_hex) = {
+                    let state = app_state.lock().await;
+                    let group_pubkey_hex = state
+                        .public_key_package
+                        .as_ref()
+                        .and_then(|pkp| pkp.verifying_key().serialize().ok())
+                        .map(hex::encode)
+                        .unwrap_or_default();
+                    (
+                        state.device_id.clone(),
+                        state.websocket_msg_tx.clone(),
+                        group_pubkey_hex,
+                    )
+                };
+
+                // Record the session on AppState so the protocol layer's
+                // broadcast helper has somewhere to read `participants`
+                // from. If a DKG session is still active (same tmux run)
+                // reuse its participant list and session_id; otherwise
+                // mint a new signing session id.
+                let session_id = {
+                    let mut state = app_state.lock().await;
+                    let sid = match state.session.as_ref() {
+                        Some(s) => s.session_id.clone(),
+                        None => format!("sign_{}", uuid::Uuid::new_v4()),
+                    };
+                    if state.session.is_none() {
+                        warn!(
+                            "StartSigning with no existing session — \
+                             cold-start signing mesh setup isn't implemented \
+                             yet; this will only work if peers are already \
+                             in the mesh from a prior ceremony"
+                        );
+                    } else {
+                        // Mutate session_type to mark this as a signing
+                        // ceremony — some UI code keys off it.
+                        if let Some(ref mut session) = state.session {
+                            use crate::protocal::signal::SessionType;
+                            session.session_type = SessionType::Signing {
+                                wallet_name: request.wallet_id.clone(),
+                                curve_type: request.chain.clone(),
+                                blockchain: request.chain.clone(),
+                                group_public_key: group_pubkey_hex.clone(),
+                            };
+                        }
+                    }
+                    sid
+                };
+
+                // Announce over the signal server so any peer that is
+                // joining can discover this signing ceremony. Best-effort —
+                // if the websocket isn't up we press on anyway; the
+                // in-mesh broadcast still works for same-run ceremonies.
+                if let Some(ws_tx) = ws_tx_opt {
+                    let announced_curve =
+                        <C as crate::utils::curve_traits::CurveIdentifier>::curve_type();
+                    let n_participants = {
+                        let state = app_state.lock().await;
+                        state
+                            .session
+                            .as_ref()
+                            .map(|s| s.total)
+                            .unwrap_or(0)
+                    };
+                    let threshold = {
+                        let state = app_state.lock().await;
+                        state
+                            .session
+                            .as_ref()
+                            .map(|s| s.threshold)
+                            .unwrap_or(0)
+                    };
+                    let participants = {
+                        let state = app_state.lock().await;
+                        state
+                            .session
+                            .as_ref()
+                            .map(|s| s.participants.clone())
+                            .unwrap_or_default()
+                    };
+                    let session_info = serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "total": n_participants,
+                        "threshold": threshold,
+                        "session_type": "signing",
+                        "proposer_id": self_device_id.clone(),
+                        "participants": participants,
+                        "curve_type": announced_curve,
+                        "coordination_type": "Network",
+                        "wallet_name": request.wallet_id.clone(),
+                        "group_public_key": group_pubkey_hex,
+                        "blockchain": request.chain.clone(),
+                        // Joiners need the exact bytes to sign — embed them in
+                        // the announce rather than requiring an extra round.
+                        "signing_message_hex": hex::encode(&request.transaction_data),
+                    });
+                    let announce = webrtc_signal_server::ClientMsg::AnnounceSession {
+                        session_info,
+                    };
+                    match serde_json::to_string(&announce) {
+                        Ok(json) => {
+                            info!("Announcing signing session: {}", session_id);
+                            if ws_tx.send(json).is_err() {
+                                warn!(
+                                    "Signing announcement dropped: primary \
+                                     WebSocket channel closed"
+                                );
+                            }
+                        }
+                        Err(e) => error!("Serialize signing AnnounceSession: {}", e),
+                    }
+                }
+
+                // Kick off the local half of the ceremony. Peers race us —
+                // whoever gathers threshold commitments first advances.
+                crate::protocal::signing::handle_start_signing::<C>(
+                    app_state.clone(),
+                    self_device_id,
+                    request.transaction_data,
+                    tx.clone(),
+                )
+                .await;
+            }
+
+            Command::JoinSigning { session_id, message_bytes } => {
+                // Joiner-side counterpart of `StartSigning`. The session
+                // was already recorded on AppState by the accept-path
+                // update handler (`SubmitPassword` / joiner branch).
+                // Here we just kick off the same ceremony entry point —
+                // the protocol layer is symmetric between creator and
+                // joiner from Round 1 onward.
+                info!(
+                    "🖊️  JoinSigning: session={} message_bytes={}",
+                    session_id,
+                    message_bytes.len()
+                );
                 let self_device_id = {
                     let state = app_state.lock().await;
                     state.device_id.clone()
@@ -1715,7 +1913,7 @@ impl Command {
                 crate::protocal::signing::handle_start_signing::<C>(
                     app_state.clone(),
                     self_device_id,
-                    request.transaction_data,
+                    message_bytes,
                     tx.clone(),
                 )
                 .await;

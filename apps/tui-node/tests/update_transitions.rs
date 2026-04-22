@@ -268,6 +268,7 @@ fn joiner_on_password_prompt() -> tui_node::elm::Model {
         session_type: SessionType::DKG,
         curve_type: "secp256k1".to_string(),
         coordination_type: "online".to_string(),
+        signing_message_hex: None,
     });
     model
 }
@@ -845,6 +846,126 @@ fn initiate_signing_dispatches_start_signing_command() {
 }
 
 #[test]
+fn submit_password_on_signing_session_dispatches_unlock_and_stashes_payload() {
+    // Joiner path for Phase C.4: when active_session is a Signing
+    // variant, SubmitPassword must dispatch Command::UnlockWallet
+    // (not JoinDKG) AND stash the message bytes + session id on the
+    // Model so WalletUnlocked can pick up the signing flow.
+    use tui_node::SessionInfo;
+    use tui_node::elm::command::Command;
+    use tui_node::protocal::signal::SessionType;
+
+    let mut model = fresh_model();
+    model.current_screen = Screen::PasswordPrompt;
+    model.wallet_state.keystore_path = "/tmp/k".to_string();
+    model.active_session = Some(SessionInfo {
+        session_id: "sign_xyz".to_string(),
+        proposer_id: "mpc-1".to_string(),
+        total: 3,
+        threshold: 2,
+        participants: vec!["mpc-1".into(), "mpc-2".into()],
+        session_type: SessionType::Signing {
+            wallet_name: "wallet-dkg_abcd".to_string(),
+            curve_type: "secp256k1".to_string(),
+            blockchain: "secp256k1".to_string(),
+            group_public_key: "dead".to_string(),
+        },
+        curve_type: "secp256k1".to_string(),
+        coordination_type: "Network".to_string(),
+        signing_message_hex: Some("68656c6c6f".to_string()), // "hello"
+    });
+
+    let cmd = update(
+        &mut model,
+        Message::SubmitPassword {
+            value: "a-password-123".to_string(),
+        },
+    );
+
+    match cmd {
+        Some(Command::UnlockWallet { wallet_id, keystore_path, .. }) => {
+            assert_eq!(wallet_id, "wallet-dkg_abcd");
+            assert_eq!(keystore_path, "/tmp/k");
+        }
+        other => panic!(
+            "SubmitPassword on signing session must dispatch UnlockWallet; got {:?}",
+            other
+        ),
+    }
+    assert_eq!(
+        model.wallet_state.pending_sign_message.as_deref(),
+        Some(b"hello".as_ref()),
+        "message bytes must be stashed for WalletUnlocked to pick up"
+    );
+    assert_eq!(
+        model.wallet_state.pending_sign_wallet_id.as_deref(),
+        Some("wallet-dkg_abcd"),
+    );
+    assert_eq!(
+        model.wallet_state.pending_sign_session_id.as_deref(),
+        Some("sign_xyz"),
+    );
+}
+
+#[test]
+fn wallet_unlocked_with_pending_sign_dispatches_join_signing() {
+    // The second half of the joiner signing flow: once the wallet is
+    // decrypted and key_package is on AppState, WalletUnlocked must
+    // consume the stashed payload + session id and dispatch
+    // Command::JoinSigning.
+    use tui_node::elm::command::Command;
+
+    let mut model = fresh_model();
+    model.wallet_state.pending_sign_message = Some(b"hello".to_vec());
+    model.wallet_state.pending_sign_wallet_id = Some("wallet-dkg_abcd".to_string());
+    model.wallet_state.pending_sign_session_id = Some("sign_xyz".to_string());
+
+    let cmd = update(
+        &mut model,
+        Message::WalletUnlocked {
+            wallet_id: "wallet-dkg_abcd".to_string(),
+        },
+    );
+
+    match cmd {
+        Some(Command::JoinSigning { session_id, message_bytes }) => {
+            assert_eq!(session_id, "sign_xyz");
+            assert_eq!(message_bytes, b"hello");
+        }
+        other => panic!(
+            "WalletUnlocked with pending sign must dispatch JoinSigning; got {:?}",
+            other
+        ),
+    }
+    // Model fields drained — a later wallet unlock (e.g. re-entering
+    // for another sign) must not re-run this chain with stale data.
+    assert!(model.wallet_state.pending_sign_message.is_none());
+    assert!(model.wallet_state.pending_sign_wallet_id.is_none());
+    assert!(model.wallet_state.pending_sign_session_id.is_none());
+    // Current screen should be SigningProgress.
+    assert!(
+        matches!(model.current_screen, Screen::SigningProgress { .. }),
+        "must push SigningProgress screen; got {:?}",
+        model.current_screen
+    );
+}
+
+#[test]
+fn wallet_unlocked_without_pending_sign_is_a_noop_command() {
+    // Plain unlock (not part of a signing flow) doesn't dispatch
+    // anything — the success notification already fired earlier in
+    // the handler.
+    let mut model = fresh_model();
+    let cmd = update(
+        &mut model,
+        Message::WalletUnlocked {
+            wallet_id: "wallet-dkg_abcd".to_string(),
+        },
+    );
+    assert!(cmd.is_none(), "plain unlock must not dispatch a Command");
+}
+
+#[test]
 fn navigate_back_from_sign_transaction_wipes_draft() {
     let mut model = fresh_model();
     model.push_screen(Screen::SignTransaction {
@@ -932,6 +1053,7 @@ fn fixture_ready_to_finalize() -> tui_node::elm::Model {
         session_type: SessionType::DKG,
         curve_type: "secp256k1".to_string(),
         coordination_type: "online".to_string(),
+        signing_message_hex: None,
     });
     model
 }
@@ -1087,6 +1209,7 @@ fn dkg_key_generated_derives_wallet_name_idempotently_per_session() {
             session_type: SessionType::DKG,
             curve_type: "secp256k1".to_string(),
             coordination_type: "online".to_string(),
+            signing_message_hex: None,
         });
         let cmd = update(&mut model, sample_dkg_key_generated_msg());
 

@@ -155,6 +155,16 @@ pub struct WalletState {
     /// `SignTransaction` screen. Cleared on submit and on every exit
     /// from the screen (same discipline as `password_draft`).
     pub sign_message_draft: String,
+    /// Stashed bytes-to-sign for the signing flow that threads through
+    /// PasswordPrompt → UnlockWallet → JoinSigning. Set by the
+    /// SubmitPassword handler when it sees a `SessionType::Signing`;
+    /// consumed by `WalletUnlocked` once the KeyPackage is loaded.
+    pub pending_sign_message: Option<Vec<u8>>,
+    /// Which wallet to unlock for the pending signing flow. Same
+    /// lifecycle as `pending_sign_message`.
+    pub pending_sign_wallet_id: Option<String>,
+    /// Which signing session we're about to join. Same lifecycle.
+    pub pending_sign_session_id: Option<String>,
 }
 
 /// Snapshot of the data the `WalletComplete` screen needs to render.

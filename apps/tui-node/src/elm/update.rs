@@ -277,19 +277,96 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_password = Some(value);
 
             if let Some(session) = model.active_session.clone() {
-                // Joiner path — the session is known; JoinDKG will send
-                // the SessionStatusUpdate and await Round 1 packages.
+                // Joiner path — fork on session_type. DKG sessions go
+                // through the existing JoinDKG flow → DKGProgress;
+                // signing sessions unlock the wallet, decode the
+                // embedded message, and kick off JoinSigning.
                 let session_id = session.session_id.clone();
-                model.push_screen(Screen::DKGProgress {
-                    session_id: session_id.clone(),
-                });
-                model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
-                model
-                    .ui_state
-                    .selected_indices
-                    .entry(crate::elm::model::ComponentId::DKGProgress)
-                    .or_insert(0);
-                Some(Command::JoinDKG { session_id })
+                match &session.session_type {
+                    crate::protocal::signal::SessionType::DKG => {
+                        model.push_screen(Screen::DKGProgress {
+                            session_id: session_id.clone(),
+                        });
+                        model.ui_state.focus =
+                            crate::elm::model::ComponentId::DKGProgress;
+                        model
+                            .ui_state
+                            .selected_indices
+                            .entry(crate::elm::model::ComponentId::DKGProgress)
+                            .or_insert(0);
+                        Some(Command::JoinDKG { session_id })
+                    }
+                    crate::protocal::signal::SessionType::Signing {
+                        wallet_name, ..
+                    } => {
+                        // Pull the message bytes from the announcement
+                        // that came with the session. Hex decode is
+                        // safe — the creator encoded it cleanly.
+                        let Some(ref hex_msg) = session.signing_message_hex else {
+                            warn!(
+                                "SubmitPassword on signing session {} but \
+                                 signing_message_hex is missing — can't sign",
+                                session_id
+                            );
+                            model.ui_state.modal = Some(Modal::Error {
+                                title: "Corrupt signing session".to_string(),
+                                message: "The signing announcement is missing the \
+                                          message payload. Try rejoining."
+                                    .to_string(),
+                            });
+                            model.wallet_state.pending_password = None;
+                            return None;
+                        };
+                        let message_bytes = match hex::decode(hex_msg) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                warn!(
+                                    "Signing announcement had invalid hex message: {}",
+                                    e
+                                );
+                                model.ui_state.modal = Some(Modal::Error {
+                                    title: "Corrupt signing session".to_string(),
+                                    message: format!(
+                                        "Bad message hex in announcement: {}",
+                                        e
+                                    ),
+                                });
+                                model.wallet_state.pending_password = None;
+                                return None;
+                            }
+                        };
+
+                        // Need the cleartext password once more to hand to
+                        // UnlockWallet — then re-dispatch the signing kickoff
+                        // after WalletUnlocked fires. We stash message_bytes
+                        // + wallet_id on Model so the WalletUnlocked handler
+                        // can pick it back up.
+                        let password = model
+                            .wallet_state
+                            .pending_password
+                            .take()
+                            .unwrap_or_default();
+                        model.wallet_state.pending_sign_message = Some(message_bytes);
+                        model.wallet_state.pending_sign_wallet_id = Some(wallet_name.clone());
+                        // Also stash session_id so JoinSigning knows which
+                        // session we're joining.
+                        model.wallet_state.pending_sign_session_id = Some(session_id.clone());
+
+                        info!(
+                            "SubmitPassword on signing session {}: dispatching \
+                             UnlockWallet for wallet '{}'",
+                            session_id, wallet_name
+                        );
+                        Some(Command::UnlockWallet {
+                            wallet_id: wallet_name.clone(),
+                            password,
+                            keystore_path: model
+                                .wallet_state
+                                .keystore_path
+                                .clone(),
+                        })
+                    }
+                }
             } else if let Some(cw) = model.wallet_state.creating_wallet.clone() {
                 // Creator path — build the `WalletConfig` out of whatever
                 // the user configured on `ThresholdConfig` (preferred) or
@@ -351,6 +428,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 session_type: SessionType::DKG,
                 curve_type: model.wallet_state.curve_type.to_string(),
                 coordination_type: "online".to_string(),
+                signing_message_hex: None,
             });
             
             // Navigate to DKG Progress screen with placeholder
@@ -487,10 +565,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         // Phase C.1: signing-time keystore hydration results. These are
-        // emitted by `Command::UnlockWallet`. On success we just log + push
-        // a notification; actual follow-up navigation (→ SignTransaction or
-        // SigningProgress) is driven by the next-stage Commands that
-        // dispatched the unlock in the first place.
+        // emitted by `Command::UnlockWallet`.
+        //
+        // If we're in the middle of a pending signing flow (joiner path
+        // routed through PasswordPrompt → UnlockWallet), take the
+        // stashed session_id + message_bytes and dispatch
+        // `Command::JoinSigning` now that the key share is loaded. Also
+        // push a SigningProgress screen so the user sees what's happening.
+        //
+        // For a plain "just unlocked, no queued action" flow we just log
+        // + show a toast.
         Message::WalletUnlocked { wallet_id } => {
             info!("✅ Wallet unlocked: {}", wallet_id);
             model.ui_state.notifications.push(Notification {
@@ -500,6 +584,41 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 timestamp: Utc::now(),
                 dismissible: true,
             });
+
+            let pending_msg = model.wallet_state.pending_sign_message.take();
+            let pending_sid = model.wallet_state.pending_sign_session_id.take();
+            let pending_wallet = model.wallet_state.pending_sign_wallet_id.take();
+
+            if let (Some(msg), Some(sid), Some(wid)) =
+                (pending_msg, pending_sid, pending_wallet)
+            {
+                if wid != wallet_id {
+                    warn!(
+                        "WalletUnlocked for {} but pending_sign_wallet_id was {} — \
+                         proceeding with unlocked wallet",
+                        wallet_id, wid
+                    );
+                }
+                info!(
+                    "🖊️  WalletUnlocked with pending signing ({} bytes) — \
+                     dispatching JoinSigning on session {}",
+                    msg.len(),
+                    sid
+                );
+                // SigningProgress screen: for Phase C we reuse
+                // DKGProgress's mount route (the component renders
+                // participant mesh status, which is exactly what we
+                // want to show during signing too). A dedicated
+                // component is a polish item for Phase D.
+                model.push_screen(Screen::SigningProgress {
+                    request_id: sid.clone(),
+                });
+                return Some(Command::JoinSigning {
+                    session_id: sid,
+                    message_bytes: msg,
+                });
+            }
+
             None
         }
 

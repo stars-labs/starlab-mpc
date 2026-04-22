@@ -447,6 +447,49 @@ where
                 )?;
                 self.app.active(&Id::SignTransaction)?;
             }
+            Screen::SigningProgress { ref request_id } => {
+                // Phase C.4: reuse DKGProgressComponent for now — it
+                // already renders the participant mesh + a round
+                // indicator, which is exactly the view we want during
+                // signing. The round label stays at Initialization →
+                // Round1 since signing has its own phases (commit /
+                // share / aggregate) but the DKGRound enum doesn't
+                // model those. A dedicated SigningProgress component
+                // is a Phase D polish task.
+                let (total_participants, threshold) = self
+                    .model
+                    .active_session
+                    .as_ref()
+                    .map(|s| (s.total, s.threshold))
+                    .unwrap_or((3, 2));
+
+                let mut progress = crate::elm::components::DKGProgressComponent::new(
+                    request_id.clone(),
+                    total_participants,
+                    threshold,
+                );
+                progress.set_round(self.model.wallet_state.dkg_round.clone());
+                progress.set_websocket_connected(self.model.network_state.connected);
+                if let Some(ref session) = self.model.active_session {
+                    for p in &session.participants {
+                        if p == &self.model.device_id {
+                            continue;
+                        }
+                        if let Some(&(wc, dc)) =
+                            self.model.network_state.participant_webrtc_status.get(p)
+                        {
+                            progress.update_webrtc_status(p.clone(), wc, dc);
+                        } else {
+                            progress.update_participant(
+                                p.clone(),
+                                crate::elm::components::dkg_progress::ParticipantStatus::Waiting,
+                            );
+                        }
+                    }
+                }
+                self.app.mount(Id::DKGProgress, Box::new(progress), vec![])?;
+                self.app.active(&Id::DKGProgress)?;
+            }
             _ => {
                 // Default to main menu for unimplemented screens
                 let wallet_count = self.model.wallet_state.wallets.len();
@@ -608,6 +651,9 @@ where
             Screen::PasswordPrompt => !self.app.mounted(&Id::PasswordPrompt),
             Screen::WalletComplete { .. } => !self.app.mounted(&Id::WalletComplete),
             Screen::SignTransaction { .. } => !self.app.mounted(&Id::SignTransaction),
+            // SigningProgress reuses the DKGProgress component, so remount
+            // when the DKGProgress slot is empty.
+            Screen::SigningProgress { .. } => !self.app.mounted(&Id::DKGProgress),
             _ => false,
         }
     }
@@ -957,6 +1003,10 @@ where
                 }
                 Screen::SignTransaction { .. } => {
                     self.app.view(&Id::SignTransaction, f, main_area);
+                }
+                Screen::SigningProgress { .. } => {
+                    // Reuses DKGProgress slot — see mount_components.
+                    self.app.view(&Id::DKGProgress, f, main_area);
                 }
                 _ => {
                     // Fallback to main menu

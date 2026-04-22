@@ -53,6 +53,13 @@ pub struct SessionInfo {
     /// Coordination type from the proposer
     #[serde(default = "default_coordination_type")]
     pub coordination_type: String,
+    /// For signing sessions only: hex-encoded bytes the ceremony should
+    /// sign. The creator publishes this in the announce so joiners can
+    /// confirm+sign the exact same payload without an extra round-trip.
+    /// `None` on DKG sessions and on older signing announces that
+    /// pre-date this field. Default lets us round-trip legacy wire data.
+    #[serde(default)]
+    pub signing_message_hex: Option<String>,
 }
 
 // --- WebRTC Signaling Data (sent via Relay) ---
