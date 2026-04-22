@@ -2654,7 +2654,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     on_confirm: Box::new(Message::ReviewSigningRequest {
                         session_id: session.session_id.clone(),
                     }),
-                    on_cancel: Box::new(Message::CloseModal),
+                    on_cancel: Box::new(Message::DeclineSigningRequest {
+                        session_id: session.session_id.clone(),
+                    }),
                 });
             }
 
@@ -2699,6 +2701,33 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             None
         }
 
+        Message::DeclineSigningRequest { session_id } => {
+            // Co-signer clicked Cancel on the push-notification modal.
+            // Drop the session locally + confirm the decline with a
+            // toast. The creator won't learn about this automatically
+            // yet — wire-level decline propagation is a follow-up. For
+            // now the local ledger is correct and the user won't keep
+            // getting re-prompted about a request they've already said
+            // no to.
+            let existed = model
+                .session_invites
+                .iter()
+                .any(|s| s.session_id == session_id);
+            model.session_invites.retain(|s| s.session_id != session_id);
+            model.ui_state.modal = None;
+            if existed {
+                let notification = Notification {
+                    id: Uuid::new_v4().to_string(),
+                    text: format!("Declined signing request {}", short_session_id(&session_id)),
+                    kind: NotificationKind::Info,
+                    timestamp: Utc::now(),
+                    dismissible: true,
+                };
+                model.ui_state.notifications.push(notification);
+            }
+            None
+        }
+
         Message::RemoveSession { session_id } => {
             let before = model.session_invites.len();
             model.session_invites.retain(|s| s.session_id != session_id);
@@ -2716,6 +2745,17 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             debug!("Unhandled message: {:?}", msg);
             None
         }
+    }
+}
+
+/// Truncate a session_id for inline display — full UUIDs are 36
+/// chars and dominate narrow notification lines. Keep the prefix so
+/// ops-log cross-referencing still works.
+fn short_session_id(id: &str) -> String {
+    if id.len() > 16 {
+        format!("{}…", &id[..16])
+    } else {
+        id.to_string()
     }
 }
 

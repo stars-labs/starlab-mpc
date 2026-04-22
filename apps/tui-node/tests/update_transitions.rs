@@ -2266,6 +2266,126 @@ fn review_signing_request_navigates_to_join_session_signing_tab() {
 // -----------------------------------------------------------------
 
 // -----------------------------------------------------------------
+// Stage 5 (local-UX half): DeclineSigningRequest drops the session
+// from `session_invites`, closes the modal, and pushes a toast. Wire
+// propagation back to the creator is a later stage.
+// -----------------------------------------------------------------
+
+#[test]
+fn decline_signing_request_drops_invite_and_posts_notification() {
+    use tui_node::elm::model::{Modal, NotificationKind};
+
+    let mut model = fresh_model();
+    let sess = signing_session("sign-xyz", vec!["test-device", "alice"], "alice");
+    model.session_invites = vec![sess];
+    model.ui_state.modal = Some(Modal::Confirm {
+        title: "t".into(),
+        message: "m".into(),
+        on_confirm: Box::new(Message::CloseModal),
+        on_cancel: Box::new(Message::DeclineSigningRequest {
+            session_id: "sign-xyz".to_string(),
+        }),
+    });
+
+    let before_notifs = model.ui_state.notifications.len();
+    let _ = update(
+        &mut model,
+        Message::DeclineSigningRequest {
+            session_id: "sign-xyz".to_string(),
+        },
+    );
+
+    assert!(
+        model.session_invites.is_empty(),
+        "decline must purge the invite so we don't re-prompt"
+    );
+    assert!(model.ui_state.modal.is_none(), "modal dismissed");
+    assert_eq!(
+        model.ui_state.notifications.len(),
+        before_notifs + 1,
+        "decline must post one confirmation toast"
+    );
+    let n = model.ui_state.notifications.last().unwrap();
+    assert!(matches!(n.kind, NotificationKind::Info));
+    assert!(n.text.contains("Declined"));
+}
+
+#[test]
+fn decline_signing_request_for_unknown_session_posts_no_toast() {
+    // A ghost decline (user already acted, maybe via a duplicate
+    // event) should silently no-op — no spurious "Declined X"
+    // notification for a session that's already gone.
+    let mut model = fresh_model();
+    let before = model.ui_state.notifications.len();
+    let _ = update(
+        &mut model,
+        Message::DeclineSigningRequest {
+            session_id: "ghost".to_string(),
+        },
+    );
+    assert_eq!(model.ui_state.notifications.len(), before);
+    assert!(model.ui_state.modal.is_none());
+}
+
+/// End-to-end local flow: SessionDiscovered stages the modal with a
+/// DeclineSigningRequest on_cancel; firing CancelModal routes through
+/// to DeclineSigningRequest, which drops the invite. Guards against
+/// a regression where Cancel used to dispatch plain CloseModal and
+/// leave the invite sitting in session_invites forever.
+#[test]
+fn session_discovered_cancel_chain_purges_invite() {
+    use tui_node::elm::model::Modal;
+
+    let mut model = fresh_model();
+    let sess = signing_session("sign-chain", vec!["test-device", "alice"], "alice");
+    let _ = update(
+        &mut model,
+        Message::SessionDiscovered {
+            session: sess.clone(),
+        },
+    );
+    match &model.ui_state.modal {
+        Some(Modal::Confirm { on_cancel, .. }) => {
+            // Verify the modal's on_cancel payload carries the session id.
+            if !matches!(
+                **on_cancel,
+                Message::DeclineSigningRequest { ref session_id }
+                    if session_id == "sign-chain"
+            ) {
+                panic!(
+                    "on_cancel must be DeclineSigningRequest for this session; got {:?}",
+                    on_cancel
+                );
+            }
+        }
+        other => panic!("expected Modal::Confirm, got {:?}", other),
+    }
+    // Simulate the CancelModal → on_cancel dispatch that the key
+    // handler wires up.
+    let cancel_cmd = update(&mut model, Message::CancelModal);
+    // The SendMessage wrapper carries the DeclineSigningRequest payload.
+    use tui_node::elm::command::Command;
+    match cancel_cmd {
+        Some(Command::SendMessage(ref inner)) => match inner {
+            Message::DeclineSigningRequest { session_id } => {
+                assert_eq!(session_id, "sign-chain");
+            }
+            other => panic!("cancel chain inner must be Decline; got {:?}", other),
+        },
+        other => panic!("CancelModal must dispatch on_cancel; got {:?}", other),
+    }
+    // We still need to process the DeclineSigningRequest itself —
+    // the runtime would do this via process_message. Do it inline.
+    let _ = update(
+        &mut model,
+        Message::DeclineSigningRequest {
+            session_id: "sign-chain".to_string(),
+        },
+    );
+    assert!(model.session_invites.is_empty());
+}
+
+// -----------------------------------------------------------------
 // Stage 4: signing-ceremony acceptance roster on WalletState.
 // ProcessSigningRound1/2 messages record the sender in
 // signing_commitments_received / signing_shares_received so the

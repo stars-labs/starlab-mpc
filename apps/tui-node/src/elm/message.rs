@@ -155,6 +155,15 @@ pub enum Message {
     /// *navigates*; no wallet is unlocked and no active_session is set
     /// yet, so the user can still back out.
     ReviewSigningRequest { session_id: String },
+    /// Co-signer hit Esc / chose Cancel on the pushed-notification
+    /// signing-request modal. Semantically "I will not co-sign this
+    /// ceremony": drop the session from `session_invites` so the
+    /// modal does not re-pop if we get re-pushed, close the modal,
+    /// and surface a short info notification so the user knows the
+    /// decline was registered. Wire-propagation to the creator (so
+    /// their SigningProgress roster reflects the decline) is a
+    /// future stage — this only covers the local-UX half.
+    DeclineSigningRequest { session_id: String },
     /// Received a peer's Round 1 signing commitment over the WebRTC mesh.
     /// Dispatched by the primary data-channel reader after decoding
     /// `SIGN_COMMIT:<base64>`; the handler forwards to
