@@ -631,25 +631,96 @@ fn dkg_finalized_clears_pending_password_and_creating_wallet() {
 }
 
 #[test]
-fn dkg_finalized_navigates_home_and_dispatches_load_wallets() {
-    // Stage 2 ships with go_home as a placeholder for the WalletComplete
-    // nav (that arrives in Stage 3). The LoadWallets command is how the
-    // MainMenu picks up the newly-persisted wallet, so assert both.
+fn dkg_finalized_pushes_wallet_complete_and_dispatches_load_wallets() {
+    // Stage 3: DKGFinalized lands on WalletComplete (not MainMenu — that
+    // was the Stage-2 placeholder). LoadWallets still fires so the
+    // MainMenu behind the WalletComplete screen has a refreshed count
+    // ready for when the user presses Enter/Esc to dismiss.
     let mut model = finalized_fixture_model();
 
     let cmd = update(&mut model, sample_dkg_finalized_msg());
 
-    assert!(
-        matches!(model.current_screen, Screen::MainMenu),
-        "Stage 2 lands the user on MainMenu; got {:?}",
-        model.current_screen
-    );
+    match &model.current_screen {
+        Screen::WalletComplete { wallet_id } => {
+            assert_eq!(
+                wallet_id, "finalized-test",
+                "Screen variant must carry the right wallet_id"
+            );
+        }
+        other => panic!("expected WalletComplete, got {:?}", other),
+    }
     assert!(
         matches!(cmd, Some(Command::LoadWallets)),
         "DKGFinalized must dispatch LoadWallets so the wallet count \
          refreshes; got {:?}",
         cmd
     );
+}
+
+#[test]
+fn dkg_finalized_back_navigation_lands_on_main_menu() {
+    // The WalletComplete screen's Enter/Esc hints promise "Done" takes
+    // the user home, not back to DKGProgress. The handler implements
+    // this by resetting the stack before pushing WalletComplete, so a
+    // single pop_screen lands on MainMenu. Pin that behaviour.
+    use tui_node::elm::message::Message;
+    let mut model = finalized_fixture_model();
+    let _ = update(&mut model, sample_dkg_finalized_msg());
+    assert!(matches!(model.current_screen, Screen::WalletComplete { .. }));
+
+    let _ = update(&mut model, Message::NavigateBack);
+    assert!(
+        matches!(model.current_screen, Screen::MainMenu),
+        "NavigateBack from WalletComplete must land on MainMenu (not \
+         DKGProgress or PasswordPrompt — those are stale); got {:?}",
+        model.current_screen
+    );
+}
+
+#[test]
+fn dkg_finalized_stashes_completed_wallet_info() {
+    // The WalletComplete component pulls its render data off
+    // `wallet_state.last_finalized_wallet` via `set_from_model`. Make
+    // sure DKGFinalized actually populates it — otherwise the screen
+    // would render empty or fall back to its error diagnostic.
+    let mut model = finalized_fixture_model();
+    let _ = update(&mut model, sample_dkg_finalized_msg());
+
+    let info = model
+        .wallet_state
+        .last_finalized_wallet
+        .as_ref()
+        .expect("DKGFinalized must stash a CompletedWalletInfo snapshot");
+    assert_eq!(info.wallet_id, "finalized-test");
+    assert_eq!(info.curve_type, "secp256k1");
+    assert_eq!(
+        info.addresses.len(),
+        2,
+        "addresses must be copied across verbatim (not truncated or \
+         deduped); got {:?}",
+        info.addresses
+    );
+    assert_eq!(
+        info.addresses[0],
+        ("ethereum".to_string(), "0xabc123".to_string())
+    );
+}
+
+#[test]
+fn navigate_home_clears_last_finalized_wallet() {
+    // If the user runs DKG a second time, the first wallet's snapshot
+    // must not bleed into the next render. NavigateHome is the single
+    // point where the flow "starts fresh", so clear there.
+    use tui_node::elm::model::CompletedWalletInfo;
+    let mut model = fresh_model();
+    model.wallet_state.last_finalized_wallet = Some(CompletedWalletInfo {
+        wallet_id: "w1".to_string(),
+        group_pubkey_hex: "aa".to_string(),
+        curve_type: "secp256k1".to_string(),
+        addresses: vec![],
+    });
+    update(&mut model, Message::NavigateHome);
+    assert!(model.wallet_state.last_finalized_wallet.is_none());
 }
 
 #[test]

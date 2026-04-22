@@ -408,6 +408,22 @@ where
                 )?;
                 self.app.active(&Id::PasswordPrompt)?;
             }
+            Screen::WalletComplete { .. } => {
+                // The wallet-id is on the Screen variant for routing
+                // purposes, but the full snapshot (group key + addresses)
+                // is on `wallet_state.last_finalized_wallet`. Pass that
+                // into the component via `set_from_model` — same pattern
+                // as PasswordPrompt / DKGProgress.
+                let mut complete =
+                    crate::elm::components::WalletCompleteComponent::new();
+                complete.set_from_model(&self.model.wallet_state);
+                self.app.mount(
+                    Id::WalletComplete,
+                    Box::new(complete),
+                    vec![]
+                )?;
+                self.app.active(&Id::WalletComplete)?;
+            }
             _ => {
                 // Default to main menu for unimplemented screens
                 let wallet_count = self.model.wallet_state.wallets.len();
@@ -565,6 +581,7 @@ where
             Screen::JoinSession => !self.app.mounted(&Id::JoinSession),
             Screen::DKGProgress { .. } => !self.app.mounted(&Id::DKGProgress),
             Screen::PasswordPrompt => !self.app.mounted(&Id::PasswordPrompt),
+            Screen::WalletComplete { .. } => !self.app.mounted(&Id::WalletComplete),
             _ => false,
         }
     }
@@ -739,6 +756,22 @@ where
             }
         }
         
+        // WalletComplete is a terminal success screen — both Enter and
+        // Esc mean "I'm done, go home". Esc is already handled by the
+        // global arm above (→ NavigateBack, which pops our stack frame
+        // back to MainMenu), so we only need Enter here. Any other key
+        // is ignored so accidental typing doesn't drop the user into a
+        // stale selection model.
+        if matches!(self.model.current_screen, Screen::WalletComplete { .. }) {
+            match key.code {
+                KeyCode::Enter => {
+                    info!("✅ WalletComplete Enter → NavigateBack → MainMenu");
+                    return Some(Message::NavigateBack);
+                }
+                _ => return None,
+            }
+        }
+
         // PasswordPrompt screen — this is a text-entry screen, so every
         // printable character, backspace, tab, and Enter routes through
         // dedicated messages that mutate `Model.wallet_state.*_draft`.
@@ -879,6 +912,9 @@ where
                 }
                 Screen::PasswordPrompt => {
                     self.app.view(&Id::PasswordPrompt, f, main_area);
+                }
+                Screen::WalletComplete { .. } => {
+                    self.app.view(&Id::WalletComplete, f, main_area);
                 }
                 _ => {
                     // Fallback to main menu

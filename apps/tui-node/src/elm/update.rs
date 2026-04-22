@@ -153,6 +153,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             if matches!(model.current_screen, Screen::PasswordPrompt) {
                 model.wallet_state.clear_password_draft();
             }
+            // Clear the post-DKG snapshot — if the user is back on home
+            // they're no longer looking at "that just-finished wallet".
+            // Stops a second DKG from rendering stale data on its first
+            // frame.
+            model.wallet_state.last_finalized_wallet = None;
             model.go_home();
             None
         }
@@ -786,13 +791,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         // Fires after the keystore file has been written (see
-        // `Command::FinalizeWalletFromDkg`). Responsible for terminal
-        // cleanup only — navigation to the WalletComplete screen is still
-        // a Stage 3 concern, so for now we just drop the UI back to the
-        // MainMenu and stage a `LoadWallets` refresh so the new wallet
-        // appears in the list. Stage 4 wires up the automatic trigger
-        // from `DKGKeyGenerated`; today this handler only fires when a
-        // downstream (or test) explicitly dispatches the message.
+        // `Command::FinalizeWalletFromDkg`). Stashes a snapshot onto
+        // `wallet_state.last_finalized_wallet` for the WalletComplete
+        // screen to render, clears all the transient DKG/password state,
+        // and drops the user on that success screen with a refreshed
+        // wallet list waiting behind it.
         Message::DKGFinalized {
             wallet_id,
             group_pubkey_hex,
@@ -816,6 +819,17 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.creating_wallet = None;
             model.wallet_state.dkg_in_progress = false;
 
+            // Snapshot for the WalletComplete component to read.
+            // Stored BEFORE we push the screen so `mount_components` sees
+            // the value on its first remount.
+            model.wallet_state.last_finalized_wallet =
+                Some(crate::elm::model::CompletedWalletInfo {
+                    wallet_id: wallet_id.clone(),
+                    group_pubkey_hex: group_pubkey_hex.clone(),
+                    curve_type: curve_type.clone(),
+                    addresses: addresses.clone(),
+                });
+
             model.ui_state.notifications.push(Notification {
                 id: Uuid::new_v4().to_string(),
                 text: format!(
@@ -829,12 +843,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 dismissible: true,
             });
 
-            // Stage 3 will replace this with
-            // `model.push_screen(Screen::WalletComplete { wallet_id })`.
-            // For now, land the user on MainMenu so they see the refreshed
-            // wallet list.
+            // We want Esc/Enter on WalletComplete to land on MainMenu,
+            // not DKGProgress or PasswordPrompt (which are stale). Clear
+            // the stack, pin current_screen to MainMenu first, and only
+            // then push WalletComplete — this way pop_screen leaves us
+            // on a fresh MainMenu.
             model.go_home();
-            model.ui_state.focus = crate::elm::model::ComponentId::MainMenu;
+            model.push_screen(Screen::WalletComplete {
+                wallet_id: wallet_id.clone(),
+            });
+            model.ui_state.focus = crate::elm::model::ComponentId::WalletComplete;
 
             Some(Command::LoadWallets)
         }

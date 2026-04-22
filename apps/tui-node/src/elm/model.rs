@@ -127,6 +127,35 @@ pub struct WalletState {
     /// the moment the user types anything (stale errors are worse than
     /// none).
     pub password_error: Option<String>,
+    /// Snapshot of the most recently finalised wallet, populated by
+    /// `Message::DKGFinalized` and rendered by the `WalletComplete`
+    /// screen. We keep this on `WalletState` rather than re-deriving at
+    /// render time because the per-chain address list comes off
+    /// `AppState.blockchain_addresses` during the finalize Command —
+    /// the UI layer has no access to that. Cleared on next
+    /// `NavigateHome` so stale data doesn't bleed into a later flow.
+    pub last_finalized_wallet: Option<CompletedWalletInfo>,
+}
+
+/// Snapshot of the data the `WalletComplete` screen needs to render.
+/// Populated by `Message::DKGFinalized` after the keystore write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletedWalletInfo {
+    pub wallet_id: String,
+    /// Hex-encoded compressed group verifying key (33 bytes → 66 hex chars
+    /// for secp256k1, 32 → 64 for ed25519). This is what signers would
+    /// publish to the chain.
+    pub group_pubkey_hex: String,
+    /// `"secp256k1"` or `"ed25519"`. Used to pick the icon / address
+    /// format in the view; the keystore already knows this via
+    /// `metadata.curve_type`, but the component doesn't have a keystore
+    /// handle so we pass it through.
+    pub curve_type: String,
+    /// `(chain_id, address)` pairs as emitted by the finalize Command.
+    /// Guaranteed to be in the order returned by
+    /// `blockchain_config::get_compatible_chains`, which is stable per
+    /// curve.
+    pub addresses: Vec<(String, String)>,
 }
 
 // Manual Debug implementation for WalletState
@@ -323,6 +352,8 @@ pub enum ComponentId {
     DKGProgress,
     /// Focus target for the pre-DKG password-capture screen.
     PasswordPrompt,
+    /// Focus target for the post-DKG wallet-complete screen.
+    WalletComplete,
     Custom(String),
 }
 

@@ -99,7 +99,11 @@ Notes for future reference:
 - Manual: after DKG + finalize, all 3 nodes land on WalletComplete showing the same group key and the same address list (one per secp256k1 chain)
 - Accessibility smoke: Tab cycles focus, Copy actually writes to system clipboard (via `arboard` — already a dep)
 
-**Status**: Not Started
+**Status**: Core shipped. Minimum-viable screen renders wallet_id, group verifying key, and the full address list from `wallet_state.last_finalized_wallet`. Enter/Esc both dismiss to MainMenu. Smoke-verified on 3 nodes with matching group key + 4 EVM addresses.
+Deferred (follow-ups, not blockers for Stage 4):
+- Clipboard copy via `arboard` on focused row
+- Tab/Shift-Tab focus ring (all rows currently share the same style)
+- ed25519-curve address derivation (currently renders the "(none derived for this curve)" hint — correct under the current blockchain_config)
 
 ---
 

@@ -21,6 +21,7 @@ pub mod password_prompt;
 pub mod dkg_progress;
 pub mod offline_dkg_process;
 pub mod sd_card_manager;
+pub mod wallet_complete;
 
 // Main exports
 pub use main_menu::MainMenu;
@@ -40,6 +41,7 @@ pub use password_prompt::PasswordPromptComponent;
 pub use dkg_progress::DKGProgressComponent;
 pub use offline_dkg_process::{OfflineDKGProcessComponent, ParticipantRole};
 pub use sd_card_manager::SDCardManagerComponent;
+pub use wallet_complete::WalletCompleteComponent;
 
 use tuirealm::component::AppComponent;
 
@@ -73,6 +75,9 @@ pub enum Id {
     SDCardManager,
     /// Mount slot for the pre-DKG password-capture component.
     PasswordPrompt,
+    /// Mount slot for the post-DKG success screen that shows the group
+    /// verifying key + all derived chain addresses.
+    WalletComplete,
 }
 
 /// User events emitted by components

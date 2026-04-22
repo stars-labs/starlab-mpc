@@ -176,6 +176,97 @@ fn password_prompt_renders_keybinding_hints() {
     assert_contains(&rendered, "Esc", "cancel hint must render");
 }
 
+// -----------------------------------------------------------------
+// WalletCompleteComponent (Stage 3)
+// -----------------------------------------------------------------
+fn render_wallet_complete(info: Option<tui_node::elm::model::CompletedWalletInfo>) -> String {
+    use tui_node::elm::components::WalletCompleteComponent;
+    use tui_node::elm::model::WalletState;
+
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).expect("TestBackend::Terminal");
+
+    let mut ws = WalletState::default();
+    ws.last_finalized_wallet = info;
+    let mut component = WalletCompleteComponent::new();
+    component.set_from_model(&ws);
+
+    terminal
+        .draw(|frame| {
+            let area = frame.area();
+            component.view(frame, area);
+        })
+        .expect("TestBackend draw must succeed");
+
+    buffer_to_string(terminal.backend().buffer())
+}
+
+#[test]
+fn wallet_complete_renders_wallet_id_and_group_key() {
+    use tui_node::elm::model::CompletedWalletInfo;
+    let info = CompletedWalletInfo {
+        wallet_id: "wallet-dkg_abcd".to_string(),
+        group_pubkey_hex:
+            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        curve_type: "secp256k1".to_string(),
+        addresses: vec![
+            ("ethereum".to_string(), "0xDEADBEEF".to_string()),
+            ("bitcoin".to_string(), "bc1qWALLET".to_string()),
+        ],
+    };
+    let rendered = render_wallet_complete(Some(info));
+
+    assert_contains(
+        &rendered,
+        "wallet-dkg_abcd",
+        "wallet_id must appear in the screen title",
+    );
+    assert_contains(
+        &rendered,
+        "021de2d69979f0a03ea413e7ed6a32ad",
+        "group verifying key must be rendered in full (first 32 hex chars here)",
+    );
+    assert_contains(&rendered, "secp256k1", "curve type must be shown in the header");
+    assert_contains(&rendered, "ethereum", "ethereum row must render");
+    assert_contains(&rendered, "0xDEADBEEF", "ethereum address must render");
+    assert_contains(&rendered, "bitcoin", "bitcoin row must render");
+    assert_contains(&rendered, "bc1qWALLET", "bitcoin address must render");
+    assert_contains(&rendered, "Enter = Done", "the Enter hint must render");
+}
+
+#[test]
+fn wallet_complete_renders_hint_when_no_addresses_derived() {
+    // ed25519 sessions only produce Solana-family addresses — none of
+    // which we support on the happy path yet. Make sure the UI still
+    // reads as "success" rather than "broken" in that case.
+    use tui_node::elm::model::CompletedWalletInfo;
+    let info = CompletedWalletInfo {
+        wallet_id: "wallet-ed".to_string(),
+        group_pubkey_hex: "aa".repeat(32),
+        curve_type: "ed25519".to_string(),
+        addresses: vec![],
+    };
+    let rendered = render_wallet_complete(Some(info));
+    assert_contains(
+        &rendered,
+        "(none derived for this curve)",
+        "empty-address hint must render — not a silent blank row",
+    );
+}
+
+#[test]
+fn wallet_complete_renders_error_diagnostic_when_snapshot_missing() {
+    // Defensive: if the mount branch runs without `last_finalized_wallet`
+    // populated (shouldn't happen, would be a bug upstream) the screen
+    // must tell the user something is wrong — not render blank.
+    let rendered = render_wallet_complete(None);
+    assert_contains(
+        &rendered,
+        "no finalized-wallet snapshot",
+        "missing-snapshot diagnostic must render so the bug is visible",
+    );
+}
+
 #[test]
 fn password_prompt_explains_password_is_local_only() {
     // Critical UX: the password is *not* a shared secret. If this copy
