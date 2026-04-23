@@ -330,12 +330,17 @@ pub(crate) fn parse_session_info(
 
 impl Command {
     /// Execute the command and send resulting messages back to the update loop
-    pub async fn execute<C: frost_core::Ciphersuite + Send + Sync + 'static>(
+    pub async fn execute<C>(
         self,
         tx: UnboundedSender<Message>,
         app_state: &std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
     ) -> anyhow::Result<()>
     where
+        // Bounds all in the where-clause to avoid clippy's
+        // `multiple_bound_locations` lint (prior form had
+        // `<C: frost_core::Ciphersuite + ...>` on the fn header AND
+        // `C: CurveIdentifier` in the where-clause).
+        C: frost_core::Ciphersuite + Send + Sync + 'static,
         <<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
         <<<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
         // Needed by `process_dkg_round2` so the completion path can derive
