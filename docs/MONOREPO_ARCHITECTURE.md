@@ -19,7 +19,7 @@ mpc-wallet/
 ├── packages/@mpc-wallet/        # Shared packages
 │   ├── frost-core/              # Core FROST cryptography (Rust)
 │   ├── core-wasm/               # WebAssembly bindings (Rust → JS)
-│   ├── blockchain/              # Chain integrations (solana-sdk, ethers, bitcoin)
+│   ├── blockchain/              # Chain integrations (solana-sdk only; Ethereum/Bitcoin hand-rolled over sha2/sha3/bs58)
 │   └── types/                   # TypeScript type definitions
 │
 ├── scripts/                     # Monorepo build / test / clean scripts
@@ -124,8 +124,11 @@ cargo test                    # Rust tests
 ## Architecture Principles
 
 ### 1. Code Sharing
-- Cryptographic operations in `frost-core`
-- Business logic in shared packages
+- Cryptographic operations in `packages/@mpc-wallet/frost-core`
+- Business logic (WalletManager / SessionManager / DkgManager /
+  OfflineManager / ConnectionManager / SigningManager) lives in
+  `apps/tui-node/src/core/` and is re-exported via `tui-node::lib.rs`.
+  native-node consumes this as a Cargo dependency on `tui-node`.
 - UI-specific code in respective apps
 
 ### 2. Type Safety
@@ -140,8 +143,12 @@ cargo test                    # Rust tests
 
 ### 4. Modularity
 - Each app can be developed independently
-- Shared packages versioned separately
 - Clear dependency boundaries
+
+All workspace crates are currently at version `0.1.0` (except
+`webrtc-signal-server` at `0.1.1` from its pre-monorepo crates.io
+life). No independent versioning has been introduced yet — all
+crates move together on `main`.
 
 ## Communication Flow
 
@@ -169,12 +176,16 @@ All apps use the same:
 
 ## Future Expansion
 
-The monorepo structure enables:
-- Mobile applications (React Native)
-- Additional blockchain support
-- Hardware wallet integration
-- Enterprise features
-- Improved offline capabilities
+Not currently in development, but the monorepo structure wouldn't
+block any of these:
+
+- Mobile application targets
+- Additional blockchain integrations
+- Hardware-wallet co-signer integration
+- Improved offline-mode ergonomics
+
+There is no scheduled roadmap for these — they're noted here to
+clarify what the layout can accommodate, not what's under way.
 
 ## Troubleshooting
 
