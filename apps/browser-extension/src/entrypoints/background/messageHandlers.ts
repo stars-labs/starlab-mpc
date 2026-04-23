@@ -1628,13 +1628,17 @@ export class OffscreenMessageHandler {
                 this.handleSigningError(payload);
                 break;
 
-            case "dkg_complete":
-                this.handleDkgComplete(payload);
-                break;
-
-            case "dkg_state_update":
-                this.handleDkgStateUpdate(payload);
-                break;
+            // NOTE: dkgComplete and dkgStateUpdate are INTENTIONALLY
+            // not matched here. The corresponding stateManager
+            // handler (StateManager.handleOffscreenStateUpdate, via
+            // the default branch below) is the canonical path — it
+            // stashes pendingKeystoreJson + broadcasts to popup for
+            // the Ext-1d save-wallet flow. The local
+            // handleDkgComplete / handleDkgStateUpdate methods in
+            // this file are legacy dead code that reads a stale
+            // payload shape (payload.payload.keyShareData) not
+            // emitted by the current webrtc.ts. Kept as private
+            // methods for reference but not dispatched to.
 
             default:
                 // Forward to state manager for state updates
