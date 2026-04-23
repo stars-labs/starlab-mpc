@@ -438,8 +438,11 @@ describe('WalletController', () => {
         it('should return empty array when no current account', async () => {
             const accountService = AccountService.getInstance();
             // Clear all accounts to ensure empty state
-            accountService['accounts'] = [];
-            accountService['currentAccount'] = null;
+            // Reach into private fields via bracket access to clear
+            // state for the test — the actual field is
+            // currentAccountAddress, not currentAccount.
+            (accountService as any)['accounts'] = [];
+            (accountService as any)['currentAccountAddress'] = undefined;
 
             const accounts = await walletController.eth_accounts();
             expect(accounts).toEqual([]);

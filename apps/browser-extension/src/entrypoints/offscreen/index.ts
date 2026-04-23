@@ -693,7 +693,7 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
             if (webRTCManager) {
                 const status = {
                     dataChannelStatus: webRTCManager.getDataChannelStatus(),
-                    connecteddevices: webRTCManager.getConnecteddevices(),
+                    connecteddevices: webRTCManager.getConnectedPeers(),
                     peerConnectionStatus: webRTCManager.getPeerConnectionStatus(),
                     sessionInfo: webRTCManager.sessionInfo,
                     meshStatus: webRTCManager.meshStatus
