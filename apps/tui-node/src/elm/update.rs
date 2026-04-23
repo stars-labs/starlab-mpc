@@ -2831,7 +2831,7 @@ fn preview_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::elm::model::WalletMode;
+    
     use crossterm::event::KeyEvent;
     
     #[test]

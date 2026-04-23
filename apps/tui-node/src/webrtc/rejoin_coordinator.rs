@@ -339,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rejoin_request_handling() {
-        let mut coordinator = RejoinCoordinator::new(
+        let coordinator = RejoinCoordinator::new(
             "test-session".to_string(),
             vec![1, 2, 3],
             2,
@@ -360,7 +360,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_rejoin() {
-        let mut coordinator = RejoinCoordinator::new(
+        let coordinator = RejoinCoordinator::new(
             "test-session".to_string(),
             vec![1, 2, 3],
             2,
