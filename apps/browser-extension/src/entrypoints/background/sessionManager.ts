@@ -531,6 +531,129 @@ export class SessionManager {
             return { success: false, error: (error as Error).message };
         }
     }
+
+    /**
+     * Ext-1e: accept a DKG session that arrived via
+     * `session_available` discovery. Mirrors TUI's `JoinDKG` command:
+     *   1. Look up the invite (authoritative copy carries the
+     *      creator's threshold/total/curve — we inherit them rather
+     *      than trust the UI's config).
+     *   2. Sanity check: we're not the proposer (creators join
+     *      implicitly via createDkgWallet), we're not already in
+     *      `participants` (idempotent), there's room for one more
+     *      participant.
+     *   3. Stash as our own `sessionInfo` and push dkgState to
+     *      Initializing so the popup's wallet-status-banner shows
+     *      the ceremony in progress.
+     *   4. Emit `session_status_update` — server appends us to the
+     *      participants list and broadcasts a refreshed
+     *      `session_available` to everyone.
+     *
+     * Does NOT start FROST rounds. Ceremony kickoff is the next
+     * wire-up (Ext-1e full) — once total participants === total,
+     * everyone has enough info to init DkgManager and start WebRTC
+     * mesh setup.
+     */
+    async joinDkgSession(sessionId: string): Promise<{
+        success: boolean;
+        sessionInfo?: SessionInfo;
+        error?: string;
+    }> {
+        if (!this.wsClient || this.wsClient.getReadyState() !== WebSocket.OPEN) {
+            return { success: false, error: "WebSocket not connected" };
+        }
+        const invite = (this.appState.invites ?? []).find(
+            (s) => s.session_id === sessionId,
+        );
+        if (!invite) {
+            return {
+                success: false,
+                error: `No known invite for session ${sessionId}`,
+            };
+        }
+        const currentDeviceId = this.stateManager
+            ? this.stateManager.getState().deviceId
+            : this.appState.deviceId;
+        if (!currentDeviceId) {
+            return { success: false, error: "Device id not set yet" };
+        }
+        if (invite.proposer_id === currentDeviceId) {
+            return {
+                success: false,
+                error: "You're the proposer of this session — no need to join",
+            };
+        }
+        // Already a participant? Still succeed (idempotent) but
+        // don't re-emit the status update.
+        const alreadyJoined = invite.participants.includes(currentDeviceId);
+        if (
+            !alreadyJoined &&
+            invite.participants.length >= invite.total
+        ) {
+            return {
+                success: false,
+                error: "Session is full",
+            };
+        }
+
+        // Inherit authoritative session_info from the creator's
+        // announcement. We optimistically append ourselves locally
+        // so the popup reflects the joined state before the
+        // server echoes the update; the echo will overwrite this
+        // entry with the canonical `participants` list from server.
+        const newParticipants = alreadyJoined
+            ? [...invite.participants]
+            : [...invite.participants, currentDeviceId];
+        const local: SessionInfo = {
+            ...invite,
+            participants: newParticipants,
+            accepted_devices: Array.from(
+                new Set([...(invite.accepted_devices ?? []), currentDeviceId]),
+            ),
+        };
+        this.appState.sessionInfo = local;
+        this.appState.dkgState = DkgState.Initializing;
+        if (this.stateManager) {
+            this.stateManager.updateState({
+                sessionInfo: local,
+                dkgState: DkgState.Initializing,
+                blockchain:
+                    (local.curve_type ?? "secp256k1") === "ed25519"
+                        ? "solana"
+                        : "ethereum",
+            });
+        }
+
+        try {
+            if (!alreadyJoined) {
+                this.wsClient.sendSessionStatusUpdate(sessionId, currentDeviceId);
+                console.log(
+                    `[SessionManager] Joined DKG session ${sessionId} as ${currentDeviceId}`,
+                );
+            } else {
+                console.log(
+                    `[SessionManager] Already in session ${sessionId}, no update sent`,
+                );
+            }
+            this.broadcastToPopup({
+                type: "dkgSessionJoined",
+                sessionInfo: local,
+            } as any);
+            return { success: true, sessionInfo: local };
+        } catch (err) {
+            // Roll back local state on wire failure so the UI doesn't
+            // show a false "joined" state.
+            this.appState.sessionInfo = null;
+            this.appState.dkgState = DkgState.Idle;
+            if (this.stateManager) {
+                this.stateManager.updateState({
+                    sessionInfo: null,
+                    dkgState: DkgState.Idle,
+                });
+            }
+            return { success: false, error: (err as Error).message };
+        }
+    }
 }
 
 /**

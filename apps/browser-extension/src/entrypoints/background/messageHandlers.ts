@@ -170,6 +170,11 @@ export class PopupMessageHandler {
                     await this.handleCreateDkgWalletRequest(message, sendResponse);
                     break;
 
+                case MESSAGE_TYPES.JOIN_DKG_SESSION:
+                    console.log("🔐 [PopupMessageHandler] JOIN_DKG_SESSION: Joining discovered DKG session");
+                    await this.handleJoinDkgSessionRequest(message, sendResponse);
+                    break;
+
                 case MESSAGE_TYPES.ACCEPT_SESSION:
                     console.log("🔐 [PopupMessageHandler] ACCEPT_SESSION: Accepting MPC session invite");
                     await this.handleAcceptSessionRequest(message, sendResponse);
@@ -563,6 +568,29 @@ export class PopupMessageHandler {
             threshold,
             curve,
         });
+        sendResponse(result);
+    }
+
+    /**
+     * Ext-1e popup→background handler for "join this DKG session I
+     * saw in the invites list". Payload is just `{ session_id }`;
+     * the invite carries everything else (threshold, curve, etc.)
+     * from the creator's announcement and sessionManager looks it
+     * up in `appState.invites` authoritatively.
+     */
+    private async handleJoinDkgSessionRequest(
+        message: any,
+        sendResponse: (response: any) => void,
+    ): Promise<void> {
+        const sessionId = message.session_id;
+        if (typeof sessionId !== "string" || sessionId.length === 0) {
+            sendResponse({
+                success: false,
+                error: "session_id (string) required",
+            });
+            return;
+        }
+        const result = await this.sessionManager.joinDkgSession(sessionId);
         sendResponse(result);
     }
 

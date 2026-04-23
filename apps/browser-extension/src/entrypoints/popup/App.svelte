@@ -1166,6 +1166,76 @@
             </div>
         {/if}
 
+        <!-- Ext-1e: Join Session. Render every discovered DKG invite
+             we could join: session_type is DKG, we're a listed
+             participant intent or the session has room, we're NOT
+             the proposer, and we haven't already joined (dkgState
+             is Idle or we'd already be mid-ceremony). -->
+        {#if !appState.sessionInfo && appState.invites && appState.invites.length > 0}
+            {@const joinable = appState.invites.filter(
+                (inv) =>
+                    (inv.session_type ?? "dkg") === "dkg" &&
+                    inv.proposer_id !== appState.deviceId &&
+                    (inv.participants?.length ?? 0) <
+                        (inv.total ?? Number.POSITIVE_INFINITY),
+            )}
+            {#if joinable.length > 0}
+                <div class="mb-4 rounded border border-gray-200 bg-white p-3">
+                    <h3 class="mb-2 text-sm font-semibold">Discovered DKG Sessions</h3>
+                    {#each joinable as inv (inv.session_id)}
+                        <div class="mb-2 flex items-center justify-between rounded bg-gray-50 p-2">
+                            <div class="min-w-0 pr-3">
+                                <p class="text-sm font-medium">
+                                    {inv.threshold}-of-{inv.total}
+                                    {inv.curve_type ?? "secp256k1"}
+                                </p>
+                                <p class="truncate text-xs text-gray-600 font-mono">
+                                    {inv.session_id}
+                                </p>
+                                <p class="text-xs text-gray-500">
+                                    from {inv.proposer_id}
+                                    • {inv.participants?.length ?? 0}/{inv.total} joined
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                class="rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
+                                on:click={async () => {
+                                    try {
+                                        const response = await chrome.runtime.sendMessage(
+                                            {
+                                                type: MESSAGE_TYPES.JOIN_DKG_SESSION,
+                                                session_id: inv.session_id,
+                                            },
+                                        );
+                                        if (!response?.success) {
+                                            console.error(
+                                                "[UI] Join failed:",
+                                                response?.error,
+                                            );
+                                            alert(
+                                                `Join failed: ${response?.error ?? "unknown error"}`,
+                                            );
+                                        } else {
+                                            console.log(
+                                                "[UI] Joined session",
+                                                inv.session_id,
+                                            );
+                                        }
+                                    } catch (e) {
+                                        console.error("[UI] Join exception:", e);
+                                    }
+                                }}
+                                disabled={!appState.wsConnected}
+                            >
+                                Join
+                            </button>
+                        </div>
+                    {/each}
+                </div>
+            {/if}
+        {/if}
+
         <!-- Wallet Status Banner -->
         <div class="mb-4 p-3 border rounded">
             <div class="mb-2">

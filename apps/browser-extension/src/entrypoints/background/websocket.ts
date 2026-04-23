@@ -126,6 +126,29 @@ export class WebSocketClient {
         this.sendMessage({ type: "request_active_sessions" } as any);
     }
 
+    /**
+     * Notify the signal server that this device has joined a session.
+     * Shape mirrors TUI's `JoinDKG` command in command.rs:903 —
+     * minimal payload: `{ session_id, participant_joined }`. Server
+     * appends `participant_joined` to the stored session's
+     * `participants` array and broadcasts a fresh `session_available`
+     * to every participant so the creator's UI roster flips to show
+     * the new joiner.
+     *
+     * NOTE: this is the *join intent* signal only — it doesn't
+     * transport any FROST round data. Round 1/2/3 packages travel
+     * over WebRTC data channels once the mesh is established.
+     */
+    public sendSessionStatusUpdate(sessionId: string, deviceId: string): void {
+        this.sendMessage({
+            type: "session_status_update",
+            session_info: {
+                session_id: sessionId,
+                participant_joined: deviceId,
+            },
+        } as any);
+    }
+
     private sendMessage(message: WebSocketClientMsg): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error("WebSocket is not connected. Cannot send message:", message);

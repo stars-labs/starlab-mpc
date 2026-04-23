@@ -255,6 +255,12 @@ export const MESSAGE_TYPES = {
     // total, threshold, curve); background generates the session_id
     // and device_id.
     CREATE_DKG_WALLET: "createDkgWallet",
+    // Ext-1e: popup → background message for "I want to join this
+    // discovered DKG session". The session_id is the sole payload;
+    // background looks it up in appState.invites, sets local
+    // sessionInfo, and emits `session_status_update` so the creator
+    // and server learn we've joined.
+    JOIN_DKG_SESSION: "joinDkgSession",
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",
