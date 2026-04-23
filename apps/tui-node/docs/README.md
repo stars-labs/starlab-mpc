@@ -54,95 +54,123 @@ cargo run --release -- --device-id Device-001
 
 ### Command Line Options
 
-```bash
-mpc-wallet-tui [OPTIONS]
+See § Configuration → CLI Flags below for the real flag list
+(`--device-id` / `--offline` / `--signal-server` / `--log-location` /
+`--log-level`). Earlier drafts of this section duplicated the list
+with fabricated flags (`--config <PATH>`, `--keystore <PATH>`, a
+`[required]` marker on `--device-id`, explicit `--help`). None of
+those are real:
 
-OPTIONS:
-    --device-id <ID>         Unique device identifier [required]
-    --config <PATH>          Path to configuration file
-    --keystore <PATH>        Path to keystore directory
-    --signal-server <URL>    WebSocket signal server URL
-    --offline               Run in offline mode
-    --log-level <LEVEL>     Logging level (debug, info, warn, error)
-    --help                  Show help information
-```
+- `--config` / `--keystore` — do not exist; the TUI has no config
+  file and the keystore path is hardcoded to `~/.frost_keystore`.
+- `--device-id` is **optional**, not required — defaults to the
+  machine hostname via `gethostname::gethostname()`.
+- `--help` works because `clap::Parser` generates it automatically;
+  it isn't an explicit flag in the `Args` struct.
+
+Verified against `apps/tui-node/src/bin/mpc-wallet-tui.rs:13-39`.
 
 ## User Interface
 
 ### Main Screen Layout
 
-```
-┌──────────────────────────────────────────────────┐
-│  MPC Wallet TUI v0.1.0 - Device: Device-001     │
-├─────────────┬────────────────────────────────────┤
-│   Menu      │        Main Content                │
-│             │                                    │
-│ [1] Wallet  │  Current Wallet: my_wallet        │
-│ [2] DKG     │  Address: 0x742d35Cc6634C053...  │
-│ [3] Sign    │  Balance: 1.234 ETH               │
-│ [4] Session │                                    │
-│ [5] Network │  Peers: 2/3 connected             │
-│ [6] Settings│  Session: Active                  │
-│             │                                    │
-│ [Q] Quit    │  Press ? for help                 │
-└─────────────┴────────────────────────────────────┘
-│ Status: Connected | Ready for operations         │
-└──────────────────────────────────────────────────┘
-```
+Launch the binary and you see the main menu defined in
+`src/elm/components/main_menu.rs:55-114`. Items vary with wallet
+state:
+
+- **Always shown**: `Create New Wallet`, `Join Session`,
+  `Settings`, `Exit`
+- **Added when `wallet_count > 0`**: `Manage Wallets`; DKG-progress
+  and signing surfaces live inside sub-screens rather than the
+  top-level menu.
+
+Earlier drafts of this section printed a `[1] Wallet / [2] DKG /
+[3] Sign / [4] Session / [5] Network / [6] Settings / [Q] Quit`
+numbered layout with a right-hand pane showing `Current Wallet` /
+`Address` / `Balance: 1.234 ETH`. None of that is real — the menu
+uses arrow-key navigation over an emoji-icon list with no number
+hotkeys, there is no wallet-summary side pane, and the TUI does
+NOT query on-chain balances (so the `1.234 ETH` figure was
+fabricated).
 
 ### Navigation
 
+Keys actually handled by `src/elm/update.rs` + per-component
+`on(KeyEvent)` impls:
+
 | Key | Action |
 |-----|--------|
-| ↑/↓/←/→ | Navigate menu items |
-| Enter | Select option |
-| Esc | Go back / Cancel |
-| Tab | Switch panels |
-| Space | Toggle selection |
-| ? | Show context help |
-| Q | Quit application |
+| ↑ / ↓ | Move selection within a menu or list |
+| Enter | Select the highlighted item |
+| Esc | Go back one screen / cancel the current operation |
+| Tab | Move focus between fields inside a form |
+| q | Quit from the main menu |
+
+Earlier drafts listed `Space` / `?` bindings — neither is wired up,
+and no context-help modal ships. See
+[`KEYBOARD_NAVIGATION_GUIDE.md`](./KEYBOARD_NAVIGATION_GUIDE.md)
+for the authoritative reference.
 
 ## Core Workflows
 
 ### Creating a Wallet
 
-1. Select **[1] Wallet** from main menu
-2. Choose **Create New Wallet**
-3. Enter wallet details:
-   - Name
-   - Threshold (e.g., 2)
-   - Participants (e.g., 3)
-   - Blockchain (Ethereum/Solana)
-4. Share session ID with other participants
-5. Wait for all participants to join
-6. DKG process starts automatically
-7. Wallet created and saved to keystore
+1. From the main menu (arrow keys, not number hotkeys), select
+   **Create New Wallet**.
+2. Fill the form: Name, Threshold, Total participants, Blockchain
+   (Ethereum and/or Solana — unified DKG produces both address
+   types from a single ceremony via
+   `frost-core::unified_dkg`).
+3. The creator's node mints a session id and broadcasts
+   `AnnounceSession`; co-signers discover it via
+   `SessionAvailable`.
+4. Co-signers pick the session from **Join Session** and enter
+   the session id.
+5. When participants == total, DKG runs automatically
+   (Round 1 → Round 2 → Finalization).
+6. The wallet is persisted to
+   `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.{json,dat}`.
+
+Earlier drafts said "Select [1] Wallet from main menu" — no such
+item exists; the top-level label is "Create New Wallet".
 
 ### Distributed Key Generation (DKG)
 
 ```
 Online DKG:
 Device A ──┐
-           ├──► Signal Server ──► DKG Protocol ──► Key Shares
+           ├──► Signal Server ──► WebRTC Mesh ──► FROST DKG ──► Key Shares
 Device B ──┘
 
-Offline DKG:
-Device A ──► Export ──► USB ──► Device B
-                         ↓
-                    Process Offline
-                         ↓
-Device B ──► Export ──► USB ──► Device A
+Offline DKG (SD-card air-gap):
+Device A ──► Export (.json) ──► USB ──► Device B
+                                          ↓
+                                   Process Offline
+                                          ↓
+Device B ──► Export (.json) ──► USB ──► Device A
 ```
 
 ### Transaction Signing
 
-1. Select **[3] Sign** from menu
-2. Choose wallet to use
-3. Enter transaction details or load from file
-4. Initiate signing session
-5. Wait for threshold participants
-6. Review and confirm transaction
-7. Signature generated and displayed
+Live today the TUI supports **message signing**, not full
+transaction construction-and-signing — see the "Phase C scope"
+note in `src/elm/components/sign_transaction.rs`. The flow:
+
+1. From the main menu select **Manage Wallets** and pick a wallet.
+2. Choose **Sign Message** (EIP-191 `personal_sign` shape, so the
+   resulting secp256k1 signature is `ecrecover`-compatible for
+   Ethereum; ed25519 wallets produce raw signatures for Solana).
+3. Broadcast a signing session; co-signers discover it via
+   **Join Session** (same transport as DKG).
+4. Each participant approves the message. Once threshold
+   commitments + threshold shares arrive the aggregator emits
+   the final signature.
+
+Earlier drafts said "Select [3] Sign / load transaction from
+file / 7-step flow". The numeric hotkey doesn't exist, and
+transaction-from-file loading is not a shipped code path — signing
+input is a hex-encoded message supplied in the SignTransaction
+component.
 
 ## Configuration
 

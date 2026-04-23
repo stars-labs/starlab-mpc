@@ -119,7 +119,8 @@ next migration has a cheat-sheet:
 │        tui-node::core (shared with TUI binary)           │
 │                                                           │
 │  WalletManager, SessionManager, DkgManager,              │
-│  OfflineManager, ConnectionManager, CoreState            │
+│  SigningManager, OfflineManager, ConnectionManager,      │
+│  CoreState                                               │
 │                                                           │
 │  All real FROST / WebRTC / keystore logic lives here.    │
 └──────────────────────────────────────────────────────────┘
