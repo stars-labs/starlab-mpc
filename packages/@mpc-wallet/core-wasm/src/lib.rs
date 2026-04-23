@@ -108,6 +108,12 @@ pub struct FrostDkgEd25519 {
     participant_index: u16,
 }
 
+impl Default for FrostDkgEd25519 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl FrostDkgEd25519 {
     #[wasm_bindgen(constructor)]
@@ -409,6 +415,12 @@ pub struct FrostDkgSecp256k1 {
     threshold: u16,
     total: u16,
     participant_index: u16,
+}
+
+impl Default for FrostDkgSecp256k1 {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -714,6 +726,12 @@ pub fn start() {
 #[wasm_bindgen]
 pub struct FrostDkgUnified {
     dkg: UnifiedDkg,
+}
+
+impl Default for FrostDkgUnified {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]

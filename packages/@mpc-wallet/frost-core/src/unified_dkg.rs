@@ -61,6 +61,12 @@ pub struct UnifiedDkg {
     participant_indices: Vec<u16>,
 }
 
+impl Default for UnifiedDkg {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UnifiedDkg {
     /// Create a new unified DKG instance with a fresh root secret.
     pub fn new() -> Self {

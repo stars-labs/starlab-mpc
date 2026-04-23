@@ -52,6 +52,12 @@ pub struct HybridCoordinator {
     current_round: u8,
 }
 
+impl Default for HybridCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HybridCoordinator {
     /// Creates a new hybrid coordinator
     pub fn new() -> Self {

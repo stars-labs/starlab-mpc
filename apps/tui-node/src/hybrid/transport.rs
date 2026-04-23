@@ -89,6 +89,12 @@ pub struct OfflineTransport {
     sd_card_holder: Arc<Mutex<Option<u16>>>,
 }
 
+impl Default for OfflineTransport {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OfflineTransport {
     /// Creates a new offline transport
     pub fn new() -> Self {

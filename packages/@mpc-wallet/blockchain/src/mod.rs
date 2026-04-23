@@ -77,6 +77,12 @@ pub struct BlockchainRegistry {
     handlers: std::collections::HashMap<String, Box<dyn BlockchainHandler>>,
 }
 
+impl Default for BlockchainRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockchainRegistry {
     /// Create a new registry with default handlers
     pub fn new() -> Self {

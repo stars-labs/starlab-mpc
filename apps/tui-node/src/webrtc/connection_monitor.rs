@@ -88,6 +88,12 @@ pub struct ConnectionMonitor {
     pub pending_heartbeats: Arc<Mutex<HashMap<(PeerId, u64), Instant>>>,
 }
 
+impl Default for ConnectionMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionMonitor {
     /// Creates a new connection monitor
     pub fn new() -> Self {

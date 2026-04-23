@@ -19,6 +19,12 @@ pub struct PerformanceMonitor {
     enabled: bool,
 }
 
+impl Default for PerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PerformanceMonitor {
     /// Create a new performance monitor
     pub fn new() -> Self {

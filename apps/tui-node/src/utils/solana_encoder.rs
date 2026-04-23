@@ -44,6 +44,12 @@ pub struct SolanaTransactionBuilder {
     recent_blockhash: Option<Hash>,
 }
 
+impl Default for SolanaTransactionBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SolanaTransactionBuilder {
     /// Creates a new transaction builder
     pub fn new() -> Self {
