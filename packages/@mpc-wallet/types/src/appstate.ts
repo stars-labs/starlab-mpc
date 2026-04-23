@@ -38,6 +38,65 @@ export interface AppState {
    * New code should prefer `blockchain`.
    */
   chain?: "ethereum" | "solana";
+
+  // --- Popup UI state (persisted in appState so a popup reopen
+  // sees the same form / toggle values) ---
+  /** Session-proposal form: total participants input. */
+  totalParticipants?: number;
+  /** Session-proposal form: signing threshold input. */
+  threshold?: number;
+  /** Session-proposal form: user-typed session id (can be blank
+   *  → server generates). */
+  proposedSessionIdInput?: string;
+  /** Settings panel open/closed toggle. */
+  showSettings?: boolean;
+
+  // --- DKG completion context (Ext-1d) — stashed by stateManager
+  // when offscreen emits `dkgComplete`, consumed by the save-wallet
+  // popup flow. Intentionally in-memory only (SW restart clears
+  // these; user has to redo DKG). ---
+  /** Derived on-chain address from the DKG result. */
+  dkgAddress?: string;
+  /** FROST group public key hex. */
+  dkgGroupPublicKey?: string;
+  /** Full DKG result snapshot for the save-wallet form. */
+  dkgLastResult?: {
+    groupPublicKey: string;
+    address: string | null;
+    blockchain: "ethereum" | "solana";
+    sessionId: string | null;
+    threshold: number;
+    total: number;
+    participants: string[];
+    participantIndex: number | null;
+    completedAt: number;
+  };
+  /** Raw JSON keystore emitted by WASM `export_keystore`. The
+   *  save-wallet handler reads this, decrypts with user password,
+   *  builds a KeyShareData, and persists via KeystoreManager. */
+  pendingKeystoreJson?: string | null;
+  /** Flag the popup watches to know whether to render the save form. */
+  pendingKeystoreReady?: boolean;
+
+  // --- Signing ceremony state (Ext-2) ---
+  /** Live per-peer roster during an active signing ceremony. */
+  signingProgress?: {
+    signingId: string;
+    state: string;
+    selectedSigners: string[];
+    commitmentsReceived: string[];
+    sharesReceived: string[];
+  } | null;
+  /** Last aggregated signature produced — drives the
+   *  SignatureComplete banner in the popup. */
+  lastSignature?: {
+    signingId: string;
+    signature: string;
+    messageHex: string;
+    blockchain: "ethereum" | "solana";
+    sessionId: string;
+    completedAt: number;
+  };
 }
 
 export const INITIAL_APP_STATE: AppState = {
