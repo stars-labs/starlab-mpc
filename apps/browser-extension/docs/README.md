@@ -214,13 +214,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 ## Resources
 
 - [Main Project Documentation](../../../docs/README.md)
+- [**ARCHITECTURE.md**](ARCHITECTURE.md) — 700-line deep technical
+  reference: 4-context runtime architecture (popup / background SW /
+  offscreen / content), message system + flow patterns, WebSocket
+  + WebRTC implementation details, API reference, error recovery.
 - [UI Documentation](ui/)
 - [Chrome Extension Docs](https://developer.chrome.com/docs/extensions/mv3/)
 - [WXT Framework](https://wxt.dev/)
 
-For extension architecture and the FROST-over-WebRTC message flow,
-see the top-of-repo `CLAUDE.md` (§ "Browser extension: threshold
-signing architecture"), which is the single source of truth.
+For the FROST-over-WebRTC wire protocol specifically, the top-of-repo
+`CLAUDE.md` (§ "Browser extension: threshold signing architecture")
+has a condensed version covering the critical sequence.
 
 ## Support
 
