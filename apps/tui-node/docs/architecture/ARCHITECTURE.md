@@ -261,11 +261,29 @@ don't exist. The real flow:
 
 ### WebRTC Mesh
 
-`src/webrtc/mesh_manager.rs` holds the real full-mesh manager. Peer
-connections live on `AppState<C>.device_connections` (see the state
-section) — an `Arc<Mutex<HashMap<String, Arc<RTCPeerConnection>>>>`
-— alongside `data_channels`, `device_statuses`, and `pending_ice_candidates`
+The runtime mesh lives across `src/network/webrtc.rs` (low-level
+helpers) + `src/elm/webrtc_signaling.rs` (Elm-loop WebRTC driver).
+Real peer connections are created at these two sites; they each
+call `RTCConfiguration { ice_servers: vec![], .. }` today (see the
+STUN gap noted under § Security Architecture and the follow-up
+work in the root README Roadmap).
+
+Peer connections live on `AppState<C>.device_connections` (see the
+State Management section) — an
+`Arc<Mutex<HashMap<String, Arc<RTCPeerConnection>>>>` — alongside
+`data_channels`, `device_statuses`, and `pending_ice_candidates`
 tables.
+
+Earlier drafts of this section cited `src/webrtc/mesh_manager.rs`
+as the main production mesh manager. That module + its sibling
+`connection_monitor.rs` / `rejoin_coordinator.rs` /
+`mesh_simulator.rs` are **not wired into the Elm runtime** — they
+exist as a standalone test-harness library consumed by
+`apps/tui-node/examples/webrtc_mesh_e2e_test.rs` (the integration
+example that exercises full-mesh form / disconnect / rejoin
+scenarios in-process). The production runtime doesn't import
+`WebRTCMeshManager` — it builds RTCPeerConnection objects
+directly from the webrtc crate in the two files above.
 
 **Mesh formation**:
 1. Signal server relays session announcements + discovery
@@ -547,9 +565,11 @@ Note the plain `String` wallet IDs — no `WalletId` or `SessionId`
 newtype exists in source; both are plain strings in
 `src/elm/model.rs`. Exception: `PeerId` IS a real type, but it's
 a `u16` alias (`pub type PeerId = u16;` in
-`src/webrtc/mesh_manager.rs:9`) used inside the mesh layer for
-compact peer addressing — distinct from the String `device_id`
-the Elm layer uses for cross-context identity.
+`src/webrtc/mesh_manager.rs:9`) used inside the mesh **test-harness**
+library for compact peer addressing — distinct from the String
+`device_id` the Elm layer uses for cross-context identity. The
+production runtime uses Strings throughout; the u16 PeerId is a
+test-harness concept.
 
 ## Development Guidelines
 
@@ -566,7 +586,10 @@ tree that predated the Elm-architecture migration). In short:
 - `src/core/` — long-lived managers reused by native-node
 - `src/protocal/` — wire types + DKG/signing state machines
   (note: intentional misspelling)
-- `src/webrtc/mesh_manager.rs` — full-mesh peer manager
+- `src/webrtc/` — standalone mesh **test harness** (not wired
+  into the Elm runtime; used by `examples/webrtc_mesh_e2e_test.rs`).
+  Real production RTCPeerConnection creation happens in
+  `src/network/webrtc.rs` + `src/elm/webrtc_signaling.rs`.
 - `src/network/` — WebSocket client helpers
 - `src/keystore/` — encrypted share I/O
 - `src/offline/` and `src/hybrid/` — air-gap + mixed-mode

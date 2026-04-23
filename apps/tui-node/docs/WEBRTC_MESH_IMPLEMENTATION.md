@@ -8,6 +8,16 @@ Successfully implemented a comprehensive WebRTC mesh network system with disconn
 
 ### 1. Core WebRTC Infrastructure
 
+> **Scope note**: this doc describes the `src/webrtc/` test-harness
+> library (`WebRTCMeshManager` + `ConnectionMonitor` +
+> `RejoinCoordinator` + `MeshSimulator`), which is consumed by
+> `examples/webrtc_mesh_e2e_test.rs`. These types are NOT wired
+> into the production Elm runtime — the live WebRTC paths are
+> `src/network/webrtc.rs` + `src/elm/webrtc_signaling.rs`, which
+> build RTCPeerConnection objects directly from the webrtc crate.
+> The classes below are a separate simulator-first architecture
+> that models the network behaviour in-process for test scenarios.
+
 #### **WebRTC Mesh Manager** (`src/webrtc/mesh_manager.rs`)
 - Full mesh topology establishment for P2P connections
 - Dynamic connection management with state tracking

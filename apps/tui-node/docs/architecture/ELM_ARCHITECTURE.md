@@ -66,11 +66,12 @@ pub struct WalletState {
 pub struct NetworkState {
     pub connected: bool,
     pub peers: Vec<String>,                // Device IDs at Elm layer
-                                           // are plain strings. Note
-                                           // the separate mesh-layer
+                                           // are plain strings. The
                                            // `PeerId = u16` alias in
                                            // src/webrtc/mesh_manager.rs
-                                           // for compact peer addressing
+                                           // belongs to the mesh
+                                           // TEST-HARNESS library, not
+                                           // the production runtime.
     pub websocket_url: String,
     pub connection_status: ConnectionStatus,
 }
