@@ -1,4 +1,18 @@
-//! WebRTC mesh network simulator for testing various scenarios
+//! WebRTC mesh network simulator for testing various scenarios.
+//!
+//! Uses `std::sync::Mutex` guards across `.await` points in several
+//! handlers (handle_peer_join / leave / crash / rejoin). Clippy's
+//! `await_holding_lock` lint flags this as a potential deadlock
+//! source — and it would be, in a multi-threaded runtime with
+//! concurrent awaiters. This simulator runs scenarios sequentially
+//! on one task; there's no second thread to deadlock against.
+//!
+//! The correct long-term fix is migrating `managers` and
+//! `rejoin_coordinator` from `std::sync::Mutex` to
+//! `tokio::sync::Mutex`. Keeping the std version for now so the
+//! simulator stays a pure-stdlib, no-tokio-runtime-needed harness
+//! for the examples under apps/tui-node/examples/.
+#![allow(clippy::await_holding_lock)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
