@@ -21,43 +21,45 @@ Curve: secp256k1
 
 **Steps:**
 1. Perform complete DKG ceremony
-2. Encrypt key shares with password
-3. Save to keystore files:
-   - `keystore_p1.json` - P1's encrypted share
-   - `keystore_p2.json` - P2's encrypted share  
-   - `keystore_p3.json` - P3's encrypted share
-4. Verify files are created and encrypted
+2. Encrypt key shares with password (AES-256-GCM + PBKDF2 100k iterations)
+3. Save to keystore on each participant:
+   - `~/.frost_keystore/<device_id>/secp256k1/<wallet_id>.json` — metadata (non-secret)
+   - `~/.frost_keystore/<device_id>/secp256k1/<wallet_id>.dat` — encrypted FROST key share
+4. Verify both files exist and `.dat` is opaque ciphertext
 
-#### 1.2 Keystore Format
+#### 1.2 Keystore file layout
+
+Real layout is split across two files per wallet (see
+`apps/tui-node/src/keystore/storage.rs`). The metadata `.json`
+sidecar is plaintext; the key-material `.dat` blob is the
+password-encrypted share.
+
+`<wallet_id>.json` — metadata (serialized `WalletFile`):
+
 ```json
 {
-  "version": "1.0",
-  "id": "uuid-v4",
-  "address": "0x...",
-  "crypto": {
-    "cipher": "aes-256-gcm",
-    "cipherparams": {
-      "iv": "hex",
-      "tag": "hex"
-    },
-    "ciphertext": "hex-encrypted-key-package",
-    "kdf": "pbkdf2",
-    "kdfparams": {
-      "c": 262144,
-      "dklen": 32,
-      "prf": "hmac-sha256",
-      "salt": "hex"
-    }
-  },
-  "frost": {
-    "threshold": 2,
-    "total_participants": 3,
-    "participant_id": 1,
-    "group_public_key": "hex",
-    "curve": "secp256k1"
-  }
+  "version": "2.0",
+  "wallet_id": "...",
+  "name": "...",
+  "curve_type": "secp256k1",
+  "group_public_key": "hex",
+  "threshold": 2,
+  "total_participants": 3,
+  "participant_id": 1,
+  "addresses": [ { "blockchain": "ethereum", "address": "0x…" } ],
+  "created_at": "ISO-8601"
 }
 ```
+
+`<wallet_id>.dat` — raw AES-256-GCM output:
+
+```
+[ salt (16 B) ][ nonce (12 B) ][ ciphertext ][ GCM auth tag (16 B) ]
+```
+
+KDF: PBKDF2-HMAC-SHA256, `PBKDF2_ITERATIONS = 100_000`
+(`src/keystore/encryption.rs:25`). No Ethereum-keystore-V3-style
+single-file JSON here — the sidecar + `.dat` split is the real format.
 
 ### 🔑 Phase 2: Wallet Loading
 
@@ -158,16 +160,19 @@ graph TD
 
 ## Implementation Files
 
-### Core Components
-1. `keystore_manager.rs` - Encryption/decryption logic
-2. `erc20_encoder.rs` - ERC20 transaction encoding
-3. `keystore_e2e_test.rs` - Complete E2E test
-4. `signature_verifier.rs` - Multi-method verification
+What actually ships under `apps/tui-node/src/`:
+
+| Claimed | Real |
+|---|---|
+| `keystore_manager.rs` | `src/keystore/storage.rs` (Keystore struct) + `src/keystore/encryption.rs` (AES-256-GCM + PBKDF2) |
+| `erc20_encoder.rs` | `src/utils/erc20_encoder.rs` ✓ |
+| `keystore_e2e_test.rs` | Not present as a single-file E2E — coverage is split across `tests/` + component unit tests |
+| `signature_verifier.rs` | Not a separate module; verification goes through `frost-core`'s `VerifyingKey::verify` (already run inside `aggregate`) plus `src/utils/eth_helper.rs` for the Ethereum ecrecover conversion path (EIP-191 signing lands as part of Phase D.1 — 31 eip/ecrecover hits across 5 files confirm this surface exists) |
 
 ### Test Data
-- Standard ERC20 ABI for encoding
-- Test passwords for encryption
-- Known test vectors for verification
+- Standard ERC20 transfer payloads (see `src/utils/erc20_encoder.rs` tests)
+- Throwaway passwords for encryption tests
+- Known-answer test vectors for the verification paths
 
 ## Success Criteria
 
