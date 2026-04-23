@@ -429,9 +429,9 @@ describe('KeystoreService', () => {
                     name: `Security Wallet ${i}`,
                     blockchain: 'ethereum',
                     address: '0x123',
-                    sessionId: 'session-1',
+                    session_id: 'session-1',
                     isActive: true,
-                    hasBackup: false
+                    hasBackup: false,
                 });
             }
             

@@ -598,32 +598,35 @@ export class DkgManager {
                 });
             }
             
-            // Prepare key share data with CLI-compatible multi-chain format
+            // Prepare key share data with CLI-compatible multi-chain format.
+            // KeyShareData uses snake_case to match the Rust/CLI on-disk
+            // shape — don't switch to camelCase here or cross-client
+            // interop breaks.
             const keyShareData: import("@mpc-wallet/types/keystore").KeyShareData = {
                 // Core FROST key material
-                keyPackage: finalData.key_package || '', // Serialized from WASM
-                groupPublicKey: finalData.group_public_key,
-                
+                key_package: finalData.key_package || '',
+                group_public_key: finalData.group_public_key,
+
                 // Session information
-                sessionId: this.sessionInfo.session_id,
-                deviceId: this.localPeerId,
-                participantIndex: this.participant_index!,
-                
+                session_id: this.sessionInfo.session_id,
+                device_id: this.localPeerId,
+                participant_index: this.participant_index!,
+
                 // Threshold configuration
                 threshold: this.sessionInfo.threshold,
-                totalParticipants: this.sessionInfo.total,
+                total_participants: this.sessionInfo.total,
                 participants: [...this.sessionInfo.participants],
-                
+
                 // Blockchain specific (multi-chain support)
                 curve: this.currentBlockchain === 'ethereum' ? 'secp256k1' : 'ed25519',
                 blockchains,
-                
+
                 // Legacy support for backward compatibility
-                ethereumAddress: this.ethereumAddress,
-                solanaAddress: this.solanaAddress,
-                
+                ethereum_address: this.ethereumAddress ?? undefined,
+                solana_address: this.solanaAddress ?? undefined,
+
                 // Metadata
-                createdAt: Date.now()
+                created_at: Date.now(),
             };
             
             // Send to background for storage

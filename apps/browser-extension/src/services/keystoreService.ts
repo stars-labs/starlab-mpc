@@ -66,7 +66,7 @@ export class KeystoreService {
             this.keystoreIndex = {
                 version: "1.0.0",
                 wallets: [],
-                deviceId,
+                device_id: deviceId,
                 isEncrypted: true,
                 encryptionMethod: 'password',
                 lastModified: Date.now()
