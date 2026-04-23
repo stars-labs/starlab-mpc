@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '../../../pkg/mpc_wallet.js';
+import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@mpc-wallet/core-wasm';
 import fs from 'fs';
 import path from 'path';
 

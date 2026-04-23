@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import wasmInit from '../../../pkg/mpc_wallet.js';
+import wasmInit from '@mpc-wallet/core-wasm';
 import { beforeAll } from 'bun:test';
 
 // Export helper functions for use in other test files

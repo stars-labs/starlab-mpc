@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from "bun:test";
-import init, { FrostDkgSecp256k1, FrostDkgEd25519 } from "../pkg/mpc_wallet.js";
+import init, { FrostDkgSecp256k1, FrostDkgEd25519 } from "@mpc-wallet/core-wasm";
 
 /**
  * Test WASM keystore import functionality with CLI-compatible data

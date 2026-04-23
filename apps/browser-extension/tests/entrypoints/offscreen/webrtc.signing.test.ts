@@ -8,7 +8,7 @@ import {
     createTestDkgInstances,
     cleanupDkgInstances
 } from './test-utils';
-import { FrostDkgEd25519 } from '../../../pkg/mpc_wallet.js';
+import { FrostDkgEd25519 } from '@mpc-wallet/core-wasm';
 
 let originalConsoleLog: any;
 let originalConsoleError: any;

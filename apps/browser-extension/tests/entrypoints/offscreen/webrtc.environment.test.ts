@@ -1,6 +1,6 @@
 // Environment difference test for FROST DKG in production vs test
 import { DkgState, WebRTCManager } from '../../../src/entrypoints/offscreen/webrtc';
-import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '../../../pkg/mpc_wallet.js';
+import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@mpc-wallet/core-wasm';
 let originalConsoleLog: any;
 let originalConsoleError: any;
 let originalConsoleWarn: any;
