@@ -32,7 +32,7 @@
                     const query = searchQuery.toLowerCase();
                     return (
                         chain.name.toLowerCase().includes(query) ||
-                        chain.nativeCurrency.symbol.toLowerCase().includes(query) ||
+                        (chain.nativeCurrency?.symbol.toLowerCase().includes(query) ?? false) ||
                         chain.network.toLowerCase().includes(query)
                     );
                 }
@@ -186,7 +186,7 @@
                                 <div class="chain-info">
                                     <span class="chain-name">{formatChainName(chain)}</span>
                                     <span class="chain-details">
-                                        Chain ID: {chain.id} • {chain.nativeCurrency.symbol}
+                                        Chain ID: {chain.id} • {chain.nativeCurrency?.symbol ?? "?"}
                                     </span>
                                 </div>
                                 {#if currentChain?.id === chain.id}
