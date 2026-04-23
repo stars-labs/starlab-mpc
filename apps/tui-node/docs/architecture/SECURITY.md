@@ -395,141 +395,80 @@ recommendation.
 
 ## Incident Response
 
-### Incident Classification
+This is an open-source project with no paid on-call response team
+and no defined SLA. Earlier drafts of this section listed an
+"Incident Classification" severity matrix with response-time
+commitments (< 15 min for P1, < 1 hr for P2, etc.), an
+8-step DETECT → ASSESS → CONTAIN … workflow, and an Emergency
+Contacts table with fabricated phone numbers (`+1-555-0100`) and
+email prefixes (`security@frost`, `tech@frost`). None of that
+scaffolding exists. The real reporting path is:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Security Incident Severity Levels                       │
-├─────────────────────────────────────────────────────────┤
-│ CRITICAL (P1) - Immediate Response Required             │
-│ • Unauthorized transaction detected                     │
-│ • Multiple key shares compromised                      │
-│ • Active attack in progress                            │
-│ Response Time: < 15 minutes                            │
-│                                                         │
-│ HIGH (P2) - Urgent Response                             │
-│ • Single key share potentially compromised             │
-│ • Suspicious participant behavior                      │
-│ • Failed signature verification                        │
-│ Response Time: < 1 hour                                │
-│                                                         │
-│ MEDIUM (P3) - Timely Response                           │
-│ • Unusual network activity                             │
-│ • Failed login attempts                                │
-│ • Configuration tampering                              │
-│ Response Time: < 4 hours                               │
-│                                                         │
-│ LOW (P4) - Scheduled Response                           │
-│ • Policy violations                                     │
-│ • Non-critical vulnerabilities                         │
-│ • Documentation issues                                 │
-│ Response Time: < 24 hours                              │
-└─────────────────────────────────────────────────────────┘
-```
+- **Security vulnerabilities**: [GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new)
+- **Operational bugs**: [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues)
 
-### Incident Response Procedure
+Each report is handled by whoever is maintaining the project;
+best-effort response, not a contractual SLA.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Incident Response Workflow                              │
-├─────────────────────────────────────────────────────────┤
-│ 1. DETECT                                               │
-│    ↓                                                    │
-│ 2. ASSESS → Determine severity                         │
-│    ↓                                                    │
-│ 3. CONTAIN → Isolate affected systems                  │
-│    ↓                                                    │
-│ 4. INVESTIGATE → Gather evidence                        │
-│    ↓                                                    │
-│ 5. REMEDIATE → Fix vulnerabilities                     │
-│    ↓                                                    │
-│ 6. RECOVER → Restore normal operations                 │
-│    ↓                                                    │
-│ 7. DOCUMENT → Create incident report                   │
-│    ↓                                                    │
-│ 8. IMPROVE → Update procedures                         │
-└─────────────────────────────────────────────────────────┘
-```
-
-### Emergency Contacts
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ Emergency Response Team                                 │
-├─────────────────────────────────────────────────────────┤
-│ Role                  │ Contact           │ Backup      │
-├───────────────────────┼───────────────────┼─────────────┤
-│ Security Lead         │ security@frost    │ +1-555-0100 │
-│ Technical Lead        │ tech@frost        │ +1-555-0101 │
-│ Legal Counsel         │ legal@frost       │ +1-555-0102 │
-│ PR/Communications     │ pr@frost          │ +1-555-0103 │
-│ Executive Sponsor     │ exec@frost        │ +1-555-0104 │
-└─────────────────────────────────────────────────────────┘
-```
+For self-hosted operators, standard incident-response practice
+applies to your deployment: detect via your own monitoring,
+contain by stopping the affected signal-server / removing
+suspect devices from the mesh, investigate through application
+logs + `chrome://webrtc-internals`, remediate in your own
+deployment, and document internally. The application itself
+doesn't generate incident-response artefacts.
 
 ## Compliance and Auditing
 
-### Audit Log Format
+### Audit logs
 
-```json
-{
-  "timestamp": "2024-01-20T10:30:00Z",
-  "event_type": "signature_created",
-  "severity": "info",
-  "actor": "alice",
-  "action": "sign_transaction",
-  "resource": "treasury-wallet",
-  "details": {
-    "transaction_hash": "0xabcd...",
-    "participants": ["alice", "bob"],
-    "threshold_met": true
-  },
-  "ip_address": "192.168.1.100",
-  "user_agent": "mpc-wallet-tui/<CARGO_PKG_VERSION>",
-  "session_id": "sess_123456",
-  "correlation_id": "corr_789012"
-}
-```
+The application does not emit structured audit log events.
+Earlier drafts of this section showed a JSON format with
+`actor`, `action`, `resource`, `ip_address`, `session_id`,
+`correlation_id` fields — no such output is produced. All
+runtime information surfaces via `tracing` / `RUST_LOG`
+diagnostic logs, which operators can ship through their own
+pipeline but which are NOT structured as a tamper-evident audit
+trail.
+
+If an audit-log schema is needed for a regulated deployment,
+adding one is open work — the natural hook points are in the
+`Command::execute` path (side-effect emissions) and the
+signal-server message loop.
 
 ### Compliance Framework
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Regulatory Compliance Matrix                            │
-├─────────────────────────────────────────────────────────┤
-│ Standard      │ Requirement        │ Implementation     │
-├───────────────┼────────────────────┼────────────────────┤
-│ SOC 2 Type II │ Access Controls    │ RBAC, MFA         │
-│               │ Encryption         │ AES-256-GCM       │
-│               │ Audit Trails       │ Immutable logs    │
-├───────────────┼────────────────────┼────────────────────┤
-│ ISO 27001     │ Risk Assessment    │ Annual review     │
-│               │ Incident Response  │ 24/7 team         │
-│               │ Business Continuity│ DR procedures     │
-├───────────────┼────────────────────┼────────────────────┤
-│ GDPR          │ Data Protection    │ Encryption at rest│
-│               │ Right to Erasure   │ Key deletion      │
-│               │ Data Portability   │ Export functions  │
-└─────────────────────────────────────────────────────────┘
-```
+This codebase is NOT certified against SOC 2 Type II, ISO 27001,
+GDPR, or any other regulatory standard. Earlier drafts of this
+section listed a three-row compliance matrix with "Implementation"
+columns citing features ("RBAC, MFA", "Immutable logs", "24/7
+team", "Annual review", "DR procedures") that don't exist.
+
+What this codebase actually does:
+
+- **Encryption at rest**: AES-256-GCM + PBKDF2 keystore (real,
+  documented above)
+- **No RBAC**: there are no roles or permission scopes; a
+  participant either has a key share or doesn't
+- **No MFA**: access is gated by password for the keystore unlock
+- **No immutable logs, no 24/7 response, no audited risk
+  assessment, no DR runbook** — these are deliberately not
+  claimed
+
+Operators deploying this for a regulated use case are
+responsible for their own compliance layer (key-management
+policies, audit wrappers, incident response, etc.).
 
 ### Security Metrics
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ Security KPIs Dashboard                                 │
-├─────────────────────────────────────────────────────────┤
-│ Metric                    │ Target │ Current │ Status  │
-├───────────────────────────┼────────┼─────────┼─────────┤
-│ Failed Login Rate         │ <1%    │ 0.3%    │ ✅      │
-│ Patch Compliance          │ 100%   │ 98%     │ ⚠️      │
-│ Incident Response Time    │ <1hr   │ 45min   │ ✅      │
-│ Security Training         │ 100%   │ 100%    │ ✅      │
-│ Vulnerability Scan        │ 0 High │ 0       │ ✅      │
-│ Backup Success Rate       │ 99.9%  │ 99.95%  │ ✅      │
-│ Uptime                    │ 99.9%  │ 99.97%  │ ✅      │
-└─────────────────────────────────────────────────────────┘
-```
+No operational metrics are currently collected by this codebase
+(no `/metrics` endpoint, no Prometheus integration, no KPI
+dashboard — see the tech doc's Monitoring section, 41d5ca0).
+Earlier drafts of this section listed a "KPI Dashboard" table
+with specific percentages (`Failed Login Rate 0.3%`,
+`Patch Compliance 98%`, `Incident Response Time 45min`,
+`Uptime 99.97%`). Those numbers had no source and have been
+removed.
 
 ## Security Hardening Guide
 
