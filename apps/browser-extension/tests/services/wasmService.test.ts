@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import type { InitWasmReturn } from '../../src/lib/wasm-loader';
 
 // Mock WASM module
-const mockWasmModule = {
+// Typed as any so tests can attach extra methods (validate_keystore,
+// cleanup, etc.) at runtime — the real WASM module has an open-ended
+// export surface that tests stub incrementally as needed.
+const mockWasmModule: any = {
     // DKG functions
     dkg_round1: mock(() => 'round1_result'),
     dkg_round2: mock(() => 'round2_result'),
