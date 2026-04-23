@@ -447,20 +447,20 @@ When changing code:
 
 ### Documentation Style
 
-```markdown
-# Clear Headings
-
-## Structured Content
-
-### Code Examples
-```rust
-// Always include working examples
-let wallet = create_wallet("example", 2, 3)?;
-```
-
-### Diagrams
-Use ASCII art or Mermaid diagrams for complex concepts
-```
+- Clear headings (`# / ## / ###`)
+- Structured content with bullet lists + tables when the
+  content fits a grid
+- Code examples must compile against the current source —
+  include function signatures as they appear in the code, not
+  a hypothetical API. If the signature matters, link to
+  `src/<path>.rs:<line>` so future readers can check the doc
+  against the source at a glance.
+- ASCII art or Mermaid diagrams for complex flows
+- Be honest about what ships vs what's proposed. Recent history
+  (see `git log` for the April 2026 doc-accuracy pass) found
+  extensive drift between earlier doc claims and actual source;
+  callouts like "NOT implemented" / "aspirational" / "earlier
+  drafts claimed X" keep future readers oriented.
 
 ## Security
 
@@ -508,7 +508,11 @@ Beyond code:
 
 Contributors are recognized in:
 - GitHub contributors page
-- Release notes
+- Commit history (commits use `Co-Authored-By:` trailers when
+  collaborative)
+- Release notes, once tagged releases start happening (no tags
+  exist yet — `git tag -l` is empty; see `docs/CHANGELOG.md` for
+  the current "no-release-yet" framing)
 
 ## License
 
