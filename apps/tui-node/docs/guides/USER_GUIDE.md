@@ -417,61 +417,39 @@ View and join available sessions:
 └─────────────────────────────────────────────────────┘
 ```
 
-### Multi-Wallet Signing Queue
+### Pending signing requests
 
-Manage multiple signing requests:
-
-```
-┌─────────────────────────────────────────────────────┐
-│ Pending Signatures (3)                      🔔      │
-├─────────────────────────────────────────────────────┤
-│ Priority | Wallet           | Details      | Time   │
-├─────────────────────────────────────────────────────┤
-│ HIGH     │ company-treasury | 50 ETH       | 2 min  │
-│          │ To: 0xABC...123  | Payroll      |        │
-│          │ [Sign] [Details] [Skip]         |        │
-├─────────────────────────────────────────────────────┤
-│ MEDIUM   │ defi-operations  | Compound     | 15 min │
-│          │ Supply 1000 USDC | Lending      |        │
-│          │ [Sign] [Details] [Skip]         |        │
-├─────────────────────────────────────────────────────┤
-│ LOW      │ test-wallet      | 0.1 ETH      | 1 hour │
-│          │ To: 0xDEF...456  | Test TX      |        │
-│          │ [Sign] [Details] [Skip]         |        │
-├─────────────────────────────────────────────────────┤
-│ [Sign All Compatible] [Settings] [Close]           │
-└─────────────────────────────────────────────────────┘
-```
+Pending signing sessions appear in the main menu under "Signing
+Requests". One-at-a-time review / approve / decline — no
+prioritized queue, no "HIGH/MEDIUM/LOW" labels, no batch-sign
+action. Earlier drafts of this guide showed a Priority/Wallet/
+Details multi-row table with a `[Sign All Compatible]` button;
+that UI is not implemented.
 
 ### Backup and Recovery
 
-Comprehensive backup interface:
+The TUI has two import/export surfaces:
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Backup & Recovery Center                            │
-├─────────────────────────────────────────────────────┤
-│ Backup Options:                                     │
-│                                                     │
-│ > Full Backup (Recommended)                         │
-│   Includes all wallets and settings                │
-│   Size: ~2.3 MB                                     │
-│                                                     │
-│   Individual Wallet Backup                          │
-│   Select specific wallets to backup                 │
-│                                                     │
-│   Export for Hardware Security Module               │
-│   Compatible with Ledger, Trezor (Beta)            │
-│                                                     │
-│ Recovery Options:                                   │
-│                                                     │
-│   Restore from Backup File                         │
-│   Import from another device                       │
-│   Recover from mnemonic (Limited)                  │
-│                                                     │
-│ [Select Option] [Help] [Cancel]                    │
-└─────────────────────────────────────────────────────┘
-```
+- **Export wallet**: from the wallet-detail screen, write a
+  `.json`+`.dat` pair to a chosen path using the keystore's
+  encrypted format (also the extension-compatible format — the
+  browser extension can import the same file).
+- **Import wallet**: reverse of the above; read a `.json`+`.dat`
+  pair plus the password to unlock it.
+
+There is **no** "Backup & Recovery Center" screen with Full Backup /
+HSM / Mnemonic options. Earlier drafts promised:
+
+- "Export for Hardware Security Module — Compatible with Ledger,
+  Trezor (Beta)" — no HSM integration exists.
+- "Recover from mnemonic (Limited)" — FROST-generated keys don't
+  have a mnemonic. The key is distributed; each participant holds
+  a share, not a BIP-39 seed.
+
+For offline backups, the working path is: export each wallet
+(`.json`+`.dat` pair), encrypt/store it elsewhere (ideally
+geographically distributed), and keep the password safe. Losing
+the password renders a `.dat` file useless.
 
 ## Troubleshooting
 
@@ -526,34 +504,15 @@ Comprehensive backup interface:
 
 ### Getting Help
 
-Press `?` at any time for context-sensitive help:
+There is no context-sensitive `?` help screen (verified: zero
+keybinding hits for `?` in source). Earlier drafts of this
+section showed a Help overlay with per-context shortcuts; not
+implemented.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Help - Current Context: Wallet List                 │
-├─────────────────────────────────────────────────────┤
-│ Available Actions:                                  │
-│                                                     │
-│ Navigation:                                         │
-│ • ↑/↓ - Move between wallets                       │
-│ • Enter - View wallet details                      │
-│ • → - Quick actions menu                           │
-│                                                     │
-│ Shortcuts:                                          │
-│ • S - Start signing session                        │
-│ • C - Create new wallet                            │
-│ • E - Export selected wallet                       │
-│ • D - Delete wallet (requires confirmation)        │
-│ • R - Refresh wallet balances                      │
-│                                                     │
-│ Global:                                             │
-│ • ? - This help screen                             │
-│ • Esc - Return to main menu                       │
-│ • q - Quit application                             │
-│                                                     │
-│ [Close]                                            │
-└─────────────────────────────────────────────────────┘
-```
+For keybinding reference, see the Keyboard Shortcuts appendix
+below — but note that's a reference list, not a feature of the
+running TUI. The [`KEYBOARD_NAVIGATION_GUIDE.md`](../KEYBOARD_NAVIGATION_GUIDE.md)
+sibling doc has the more detailed per-screen walkthrough.
 
 ## Best Practices
 
@@ -595,22 +554,23 @@ Press `?` at any time for context-sensitive help:
 
 ### Keyboard Shortcuts Reference
 
-| Shortcut | Context | Action |
-|----------|---------|--------|
-| ? | Global | Show help |
-| q | Global | Quit application |
-| Esc | Global | Go back/Cancel |
-| Tab | Global | Next element |
-| Shift+Tab | Global | Previous element |
-| Enter | Global | Select/Confirm |
-| ↑↓←→ | Global | Navigate |
-| / | Main Menu | Quick search |
-| n | Wallet List | New wallet |
-| s | Wallet View | Start signing |
-| e | Any List | Export selected |
-| r | Any List | Refresh |
-| o | Notifications | Open/Accept |
-| Space | Checkboxes | Toggle selection |
+Per-screen keybindings are handled by the individual tui-realm
+`Component` impls in `src/elm/components/`. The authoritative list
+is [`KEYBOARD_NAVIGATION_GUIDE.md`](../KEYBOARD_NAVIGATION_GUIDE.md);
+below is just the core keys that work globally.
+
+| Shortcut   | Context | Action              |
+|------------|---------|---------------------|
+| `↑` / `↓`  | Global  | Navigate menu items |
+| `Enter`    | Global  | Select / confirm    |
+| `Esc`      | Global  | Go back / cancel    |
+| `Tab`      | Global  | Move focus          |
+| `q`        | Global  | Quit application    |
+
+Earlier drafts of this table listed additional shortcuts (`?`
+global help, `/` quick search, `r` refresh balances, `e` export,
+`o` accept notification) — none of those are wired up in the
+current code.
 
 ### Status Indicators
 
