@@ -230,23 +230,43 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 
 ## Roadmap
 
-### Q1 2025
-- [x] Browser extension MVP
-- [x] Terminal UI application
-- [x] Desktop application
-- [ ] Mobile application (in progress)
+### Shipped (through early 2025)
+- [x] Browser extension (Chrome / Firefox) — FROST DKG + threshold
+  signing + EIP-1193 / EIP-6963 dApp integration
+- [x] Terminal UI (`apps/tui-node/`) — keyboard-driven FROST
+  frontend with online (WebRTC mesh) + offline (SD-card) modes
+- [x] Desktop application (`apps/native-node/`) — Slint GUI reusing
+  `tui-node::core::*Manager` types; feature-parity with TUI except
+  for the `SigningManager::approve` stub (see
+  [`apps/native-node/README.md`](apps/native-node/README.md) for
+  the precise ⚠-marked matrix)
+- [x] Cloudflare Worker signal server (Rust-over-WASM) and
+  standalone `cargo`-built signal server
 
-### Q2 2025
-- [ ] Hardware wallet integration
-- [ ] Additional blockchain support
-- [ ] Advanced recovery mechanisms
-- [ ] Enterprise features
+### Open work (no committed timelines)
 
-### Q3 2025
-- [ ] Formal verification
-- [ ] Performance optimizations
-- [ ] Enhanced UI/UX
-- [ ] Regulatory compliance features
+Items below are listed in rough priority order. None has a
+scheduled delivery date; contributions welcome via PR. See
+[`CLAUDE.md`](CLAUDE.md) for deeper context where noted.
+
+- [ ] Extract `SigningManager::approve` onto a ciphersuite-generic
+  backend so native-node shares the real signing path with the TUI
+  (last remaining feature-parity gap — see the native-node README
+  + `CLAUDE.md § Native desktop node`).
+- [ ] `criterion` benches for DKG / signing / keystore so future
+  perf-optimization claims have reproducible numbers.
+- [ ] FROST share refresh (proactive share rotation preserving the
+  same group key). FROST supports it in principle; this crate
+  doesn't wire it up yet.
+- [ ] Third-party security audit of the full stack. The upstream
+  ZCash Foundation `frost-*` crates are audited; this workspace's
+  integration layer + extension + TUI + native frontends are not.
+- [ ] Hardware-wallet co-signer integration (Ledger / Trezor).
+- [ ] Additional blockchains beyond Ethereum (secp256k1) + Solana
+  (ed25519) — each new chain needs per-curve address derivation
+  + encoding work (see `packages/@mpc-wallet/blockchain/`).
+- [ ] Structured audit-log emission (the absent feature flagged
+  across the security docs).
 
 ## License
 
