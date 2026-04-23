@@ -2280,7 +2280,7 @@ mod tests {
             rand_core::OsRng,
             Identifier, Secp256K1Sha256,
         };
-        let mut rng = OsRng;
+        let rng = OsRng;
         let (secret_shares, pubkey_package): (
             std::collections::BTreeMap<Identifier, _>,
             PKP,
