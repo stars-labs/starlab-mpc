@@ -16,8 +16,11 @@ cargo run --bin mpc-wallet-tui -p tui-node                # Run TUI app
 cargo check                              # Fast type check without codegen
 
 # Browser extension (Bun + WASM)
-bun install                              # Install JS dependencies
-bun run build:wasm                       # Build WASM bindings (required first)
+bun install                              # Install JS dependencies (from repo root)
+bun run build:wasm                       # Build WASM bindings — RUN FROM REPO ROOT
+                                         #   (script only exists in root package.json;
+                                         #    cd apps/browser-extension && bun run build:wasm fails)
+cd apps/browser-extension
 bun run dev                              # Dev server with hot reload
 bun run build                            # Production build
 bun test                                 # Run JS/TS tests
