@@ -50,6 +50,49 @@ describe("StateManager: dkgComplete propagation", () => {
         expect(state.dkgLastResult.participants).toEqual(["a", "b", "c"]);
     });
 
+    it("stashes pendingKeystoreJson + pendingKeystoreReady when WASM provided one", () => {
+        mgr.handleOffscreenStateUpdate({
+            type: "dkgComplete",
+            address: "0xabc",
+            groupPublicKey: "02cafebabe",
+            blockchain: "ethereum",
+            sessionId: "dkg_x",
+            threshold: 2,
+            total: 3,
+            participants: ["a", "b", "c"],
+            participantIndex: 1,
+            keystoreJson:
+                '{"key_package":"base64blob","public_key_package":"pkblob","min_signers":2,"max_signers":3,"participant_index":1}',
+        } as any);
+        const state = mgr.getState() as any;
+        expect(typeof state.pendingKeystoreJson).toBe("string");
+        expect(state.pendingKeystoreJson).toContain("key_package");
+        expect(state.pendingKeystoreReady).toBe(true);
+    });
+
+    it("sets pendingKeystoreReady=false when WASM export was null", () => {
+        // If WASM's export_keystore threw / returned null, the event
+        // still propagates so the user sees "DKG Complete" — but the
+        // save form must NOT appear (nothing to save). Architectural
+        // guard so the popup doesn't prompt for a password it can't
+        // actually use.
+        mgr.handleOffscreenStateUpdate({
+            type: "dkgComplete",
+            address: "0xabc",
+            groupPublicKey: "02ab",
+            blockchain: "ethereum",
+            sessionId: "dkg_y",
+            threshold: 2,
+            total: 3,
+            participants: [],
+            participantIndex: 1,
+            keystoreJson: null,
+        } as any);
+        const state = mgr.getState() as any;
+        expect(state.pendingKeystoreJson).toBeNull();
+        expect(state.pendingKeystoreReady).toBe(false);
+    });
+
     it("is idempotent-friendly — repeated dkgComplete updates just overwrite", () => {
         // If the offscreen fires dkgComplete twice (e.g. late retry
         // path), the state should end up reflecting the LATEST

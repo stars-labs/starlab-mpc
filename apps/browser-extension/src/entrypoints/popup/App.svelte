@@ -19,6 +19,17 @@
     // the CreateWalletForm overlay until they submit or cancel.
     let showCreateWallet = false;
 
+    // Ext-1d: post-DKG save-wallet form state. These live on the
+    // popup component (ephemeral) not appState because they contain
+    // the user's password, which must NEVER cross the port boundary
+    // cached in background — only on the explicit SAVE_DKG_WALLET
+    // message.
+    let saveWalletName = "";
+    let savePassword = "";
+    let saveConfirm = "";
+    let saveError = "";
+    let saving = false;
+
     // Application state (consolidated from background) - the single source of truth
     let appState: AppState = { ...INITIAL_APP_STATE };
 
@@ -1273,9 +1284,93 @@
                             {appState.dkgGroupPublicKey}
                         </p>
                     {/if}
-                    <p class="text-xs text-green-700 mt-1 italic">
-                        Next: enter a password to encrypt + save this keyshare.
-                    </p>
+
+                    <!-- Ext-1d save flow: only show when the WASM
+                         actually exported a keystore (pendingKeystoreReady).
+                         On SW restart the flag is force-reset by arch
+                         reminder #1's cleanup, so a stale popup reload
+                         won't offer to "save" empty data. -->
+                    {#if appState.pendingKeystoreReady}
+                        <form
+                            class="mt-3 space-y-2 rounded border border-green-300 bg-white p-2"
+                            on:submit|preventDefault={async () => {
+                                saveError = "";
+                                if (!savePassword || savePassword.length < 8) {
+                                    saveError = "Password must be at least 8 characters";
+                                    return;
+                                }
+                                if (savePassword !== saveConfirm) {
+                                    saveError = "Passwords don't match";
+                                    return;
+                                }
+                                saving = true;
+                                try {
+                                    const response = await chrome.runtime.sendMessage({
+                                        type: MESSAGE_TYPES.SAVE_DKG_WALLET,
+                                        password: savePassword,
+                                        walletName: saveWalletName.trim() || undefined,
+                                    });
+                                    if (response?.success) {
+                                        console.log(
+                                            "[UI] Wallet saved:",
+                                            response.walletId,
+                                        );
+                                        savePassword = "";
+                                        saveConfirm = "";
+                                        saveWalletName = "";
+                                    } else {
+                                        saveError =
+                                            response?.error ?? "Save failed (no error returned)";
+                                    }
+                                } catch (e) {
+                                    saveError = (e as Error).message ?? String(e);
+                                } finally {
+                                    saving = false;
+                                }
+                            }}
+                        >
+                            <p class="text-xs font-semibold text-green-900">
+                                Save this wallet
+                            </p>
+                            <input
+                                type="text"
+                                placeholder="Wallet name (optional)"
+                                bind:value={saveWalletName}
+                                class="w-full rounded border px-2 py-1 text-xs"
+                                disabled={saving}
+                            />
+                            <input
+                                type="password"
+                                placeholder="Password (≥8 chars)"
+                                bind:value={savePassword}
+                                class="w-full rounded border px-2 py-1 text-xs"
+                                disabled={saving}
+                                autocomplete="new-password"
+                            />
+                            <input
+                                type="password"
+                                placeholder="Confirm password"
+                                bind:value={saveConfirm}
+                                class="w-full rounded border px-2 py-1 text-xs"
+                                disabled={saving}
+                                autocomplete="new-password"
+                            />
+                            {#if saveError}
+                                <p class="text-xs text-red-600">{saveError}</p>
+                            {/if}
+                            <button
+                                type="submit"
+                                class="w-full rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:bg-green-300"
+                                disabled={saving}
+                            >
+                                {saving ? "Encrypting + saving…" : "Encrypt & Save Wallet"}
+                            </button>
+                        </form>
+                    {:else}
+                        <p class="text-xs text-green-700 mt-1 italic">
+                            Next: enter a password to encrypt + save this keyshare.
+                        </p>
+                    {/if}
                 </div>
             {:else if appState.sessionInfo && appState.dkgState === DkgState.KeystoreImported}
                 <div class="p-2 bg-orange-50 border border-orange-200 rounded">

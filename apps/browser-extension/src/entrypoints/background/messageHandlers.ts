@@ -175,6 +175,11 @@ export class PopupMessageHandler {
                     await this.handleJoinDkgSessionRequest(message, sendResponse);
                     break;
 
+                case MESSAGE_TYPES.SAVE_DKG_WALLET:
+                    console.log("🔐 [PopupMessageHandler] SAVE_DKG_WALLET: Persisting post-DKG keyshare");
+                    await this.handleSaveDkgWalletRequest(message, sendResponse);
+                    break;
+
                 case MESSAGE_TYPES.ACCEPT_SESSION:
                     console.log("🔐 [PopupMessageHandler] ACCEPT_SESSION: Accepting MPC session invite");
                     await this.handleAcceptSessionRequest(message, sendResponse);
@@ -592,6 +597,176 @@ export class PopupMessageHandler {
         }
         const result = await this.sessionManager.joinDkgSession(sessionId);
         sendResponse(result);
+    }
+
+    /**
+     * Ext-1d save flow: called from the popup after DKG finished
+     * and the user entered a password. Walks through:
+     *
+     *   1. Validate: we actually have a pendingKeystoreJson in
+     *      appState (i.e. DKG did complete recently in this SW
+     *      lifetime — session data is intentionally ephemeral so a
+     *      SW restart forces the user to redo DKG).
+     *   2. Parse the WASM-exported keystore JSON to extract the
+     *      key_package (base64), public_key_package, and FROST
+     *      indices.
+     *   3. If the keystore isn't initialized yet, bootstrap it with
+     *      this password (first-ever wallet on this device). If
+     *      locked, unlock. If already unlocked, skip.
+     *   4. Build a KeyShareData + ExtensionWalletMetadata and call
+     *      KeystoreManager.addWallet — that layer does the
+     *      PBKDF2+AES-GCM persistence via keystoreService.
+     *   5. Clear pendingKeystoreJson + broadcast walletSaved so the
+     *      popup can pivot to the wallet-list view.
+     */
+    private async handleSaveDkgWalletRequest(
+        message: any,
+        sendResponse: (response: any) => void,
+    ): Promise<void> {
+        try {
+            const password = message.password;
+            if (typeof password !== "string" || password.length < 1) {
+                sendResponse({ success: false, error: "Password required" });
+                return;
+            }
+            const walletName =
+                typeof message.walletName === "string" && message.walletName.length > 0
+                    ? message.walletName
+                    : undefined;
+
+            const state = this.stateManager.getState() as any;
+            const pendingJson: string | null = state.pendingKeystoreJson ?? null;
+            const lastResult = state.dkgLastResult;
+            if (!pendingJson || !lastResult) {
+                sendResponse({
+                    success: false,
+                    error:
+                        "No pending DKG keystore to save. Did the ceremony complete in this session?",
+                });
+                return;
+            }
+
+            let parsed: any;
+            try {
+                parsed = JSON.parse(pendingJson);
+            } catch (parseErr) {
+                sendResponse({
+                    success: false,
+                    error: `Corrupt keystore JSON from WASM: ${(parseErr as Error).message}`,
+                });
+                return;
+            }
+
+            const curve: "secp256k1" | "ed25519" =
+                lastResult.blockchain === "ethereum" ? "secp256k1" : "ed25519";
+            const deviceId = state.deviceId || "mpc-2";
+
+            const keyShareData: any = {
+                // Core FROST material — `parsed` shape is
+                // `KeystoreData` from frost-core/keystore.rs.
+                key_package: parsed.key_package ?? "",
+                group_public_key:
+                    lastResult.groupPublicKey ?? parsed.public_key_package ?? "",
+                // Session context
+                session_id: lastResult.sessionId ?? "",
+                device_id: deviceId,
+                participant_index:
+                    parsed.participant_index ?? lastResult.participantIndex ?? 1,
+                threshold: parsed.min_signers ?? lastResult.threshold ?? 0,
+                total_participants:
+                    parsed.max_signers ?? lastResult.total ?? 0,
+                participants: lastResult.participants ?? [],
+                // Curve + chain
+                curve,
+                blockchains: [],
+                ethereum_address:
+                    lastResult.blockchain === "ethereum"
+                        ? lastResult.address ?? undefined
+                        : undefined,
+                solana_address:
+                    lastResult.blockchain === "solana"
+                        ? lastResult.address ?? undefined
+                        : undefined,
+                created_at: Date.now(),
+            };
+
+            // Make a unique-ish wallet id from session_id; if the
+            // session_id collides with an existing wallet, suffix a
+            // short timestamp to avoid overwriting.
+            const walletId = `wallet-${keyShareData.session_id || `dkg-${Date.now()}`}`;
+            const metadata: any = {
+                id: walletId,
+                name:
+                    walletName ??
+                    `${lastResult.threshold}-of-${lastResult.total} ${curve}`,
+                blockchain: lastResult.blockchain,
+                address: lastResult.address ?? "",
+                session_id: keyShareData.session_id,
+                isActive: true,
+                hasBackup: false,
+            };
+
+            // Ensure the keystore is ready. Create on first wallet,
+            // unlock on subsequent saves. The SAME password is used
+            // for both the keystore master password AND per-wallet
+            // encryption — matches the existing UX where there's
+            // only one user-visible password.
+            const { KeystoreManager } = await import(
+                "../../services/keystoreManager"
+            );
+            const km = KeystoreManager.getInstance();
+            const isInit = await km.isInitialized();
+            if (!isInit) {
+                console.log(
+                    "[PopupMessageHandler] First wallet on this device — bootstrapping keystore",
+                );
+                await km.createKeystore(password, deviceId);
+            } else if (km.isLocked()) {
+                console.log(
+                    "[PopupMessageHandler] Keystore locked — unlocking with supplied password",
+                );
+                const unlocked = await km.unlock(password);
+                if (!unlocked) {
+                    sendResponse({
+                        success: false,
+                        error: "Wrong password for existing keystore",
+                    });
+                    return;
+                }
+            }
+
+            const added = await km.addWallet(walletId, keyShareData, metadata);
+            if (!added) {
+                sendResponse({
+                    success: false,
+                    error: "addWallet returned false — keystore may be locked or write failed",
+                });
+                return;
+            }
+
+            // Save succeeded. Drop the in-memory key material + flip
+            // UI state so popup moves to a "wallet ready" view.
+            this.stateManager.updateState({
+                // @ts-ignore — off-type fields, same pattern as elsewhere
+                pendingKeystoreJson: null,
+                pendingKeystoreReady: false,
+            } as any);
+
+            console.log(
+                `[PopupMessageHandler] ✅ Wallet saved: ${walletId} (${metadata.name})`,
+            );
+            sendResponse({
+                success: true,
+                walletId,
+                walletName: metadata.name,
+            });
+        } catch (err) {
+            console.error("[PopupMessageHandler] SAVE_DKG_WALLET failed:", err);
+            sendResponse({
+                success: false,
+                error: (err as Error).message ?? String(err),
+            });
+        }
     }
 
     private async handleAcceptSessionRequest(message: any, sendResponse: (response: any) => void): Promise<void> {

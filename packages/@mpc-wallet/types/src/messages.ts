@@ -261,6 +261,13 @@ export const MESSAGE_TYPES = {
     // sessionInfo, and emits `session_status_update` so the creator
     // and server learn we've joined.
     JOIN_DKG_SESSION: "joinDkgSession",
+    // Ext-1d: popup → background "DKG finished, here's the password
+    // to encrypt + save the keyshare". Background reads
+    // appState.pendingKeystoreJson + dkgLastResult to build a
+    // KeyShareData and calls KeystoreManager.addWallet. If no
+    // keystore exists yet, create one with this password. Payload
+    // is {password, walletName?}.
+    SAVE_DKG_WALLET: "saveDkgWallet",
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",

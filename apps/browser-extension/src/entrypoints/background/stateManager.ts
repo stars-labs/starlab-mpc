@@ -94,6 +94,12 @@ export class StateManager {
                 // Untyped cast so defensive cleanup compiles.
                 (this.appState as any).dkgAddress = "";
                 (this.appState as any).dkgError = "";
+                // Ext-1d: pending keystore JSON holds the decrypted
+                // key package in memory only. On a SW restart we
+                // can't recover it — force-reset so a "dangling
+                // pendingKeystoreReady" flag doesn't lie to the UI.
+                (this.appState as any).pendingKeystoreJson = null;
+                (this.appState as any).pendingKeystoreReady = false;
                 console.log("[StateManager] State restored from persistence");
             } else {
                 console.log("[StateManager] No persisted state found, using initial state");
@@ -512,12 +518,20 @@ export class StateManager {
                 break;
 
             case "dkgComplete":
-                // Ext-1d: the offscreen has run FROST finalize and
-                // the group public key + derived address are now
-                // known. Stash on appState so the popup can render
-                // a WalletComplete-style banner. Full encrypt+save
-                // flow is a follow-up commit; this is event
-                // propagation only.
+                // Ext-1d: the offscreen has run FROST finalize. Stash
+                // the completion snapshot PLUS the raw keystore JSON
+                // the WASM emitted — this is what the save-wallet
+                // handler later consumes to build the KeyShareData
+                // and call KeystoreManager.addWallet.
+                //
+                // Security note: pendingKeystoreJson holds the
+                // decrypted key package material (base64 inside
+                // JSON). It lives ONLY in in-memory appState; never
+                // written to chrome.storage.local. A SW restart
+                // zeroes it — which is correct: the user would need
+                // to redo DKG. Architectural reminder #1's reset
+                // block explicitly re-includes this in the ephemeral
+                // set.
                 {
                     const info: any = payload;
                     (this.appState as any).dkgAddress = info.address ?? "";
@@ -534,9 +548,15 @@ export class StateManager {
                         participantIndex: info.participantIndex,
                         completedAt: Date.now(),
                     };
+                    (this.appState as any).pendingKeystoreJson =
+                        info.keystoreJson ?? null;
+                    (this.appState as any).pendingKeystoreReady =
+                        typeof info.keystoreJson === "string" &&
+                        info.keystoreJson.length > 0;
                     console.log(
                         "[StateManager] DKG complete received:",
                         (this.appState as any).dkgLastResult,
+                        `(keystore JSON ${info.keystoreJson ? "PRESENT" : "MISSING"})`,
                     );
                     this.broadcastToPopupPorts({
                         type: "dkgCompleted",

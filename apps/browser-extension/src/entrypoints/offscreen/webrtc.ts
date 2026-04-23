@@ -89,6 +89,13 @@ export class WebRTCManager {
     total: number;
     participants: string[];
     participantIndex: number | null;
+    /** WASM-exported keystore JSON — carries the key package bytes,
+     *  FROST identifiers, and public key commitments for each
+     *  participant. The background's KeystoreManager consumes this
+     *  (via addWallet) to encrypt + persist the keyshare once the
+     *  user picks a password. `null` when export failed (logged but
+     *  non-fatal). */
+    keystoreJson: string | null;
   }) => void = () => { };
   public onSigningStateUpdate: (state: SigningState, info: SigningInfo | null) => void = () => { };
   public onWebRTCConnectionUpdate: (peerId: string, connected: boolean) => void = () => { };
@@ -1566,6 +1573,21 @@ export class WebRTCManager {
           this.currentBlockchain === "ethereum"
             ? this.ethereumAddress
             : this.solanaAddress;
+        // Extract the WASM keystore JSON so background can encrypt +
+        // persist without needing a return trip. Failure here is
+        // non-fatal: the ceremony succeeded, we just can't save yet.
+        // The popup will show the address + group key but cannot
+        // offer "Save" — user would need to retry.
+        let keystoreJson: string | null = null;
+        try {
+          if (this.frostDkg && typeof (this.frostDkg as any).export_keystore === "function") {
+            keystoreJson = (this.frostDkg as any).export_keystore();
+          }
+        } catch (exportErr) {
+          this._log(
+            `export_keystore failed (non-fatal): ${this._getErrorMessage(exportErr)}`,
+          );
+        }
         this.onDkgComplete({
           groupPublicKey: this.groupPublicKey ?? "",
           address: address ?? null,
@@ -1575,6 +1597,7 @@ export class WebRTCManager {
           total: this.sessionInfo?.total ?? 0,
           participants: this.sessionInfo?.participants ?? [],
           participantIndex: this.participantIndex,
+          keystoreJson,
         });
       } catch (cbErr) {
         // A broken onDkgComplete subscriber must not surface as a
