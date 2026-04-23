@@ -113,15 +113,24 @@ There is no `DATA_DIR` env var — the keystore location is fixed at
 
 ## Health checks and monitoring
 
-```bash
-# Manual health check (reaches out to signal server, inspects node
-# process state + log files)
-./scripts/health-check.sh --verbose
+Real helper scripts in `scripts/` are signal-server-focused:
 
-# Continuous monitor (polls health at MONITOR_INTERVAL seconds,
-# default 60)
-MONITOR_INTERVAL=30 ./scripts/monitor-cluster.sh
+```bash
+# Continuous signal-server health monitor (polls the WS upgrade
+# endpoint on a loop — see scripts/signal-server-monitor.sh)
+./scripts/signal-server-monitor.sh
+
+# Debug runner that starts the signal server with verbose logging
+./scripts/signal-server-debug.sh
 ```
+
+Earlier drafts of this section referenced `./scripts/health-check.sh
+--verbose` and `MONITOR_INTERVAL=30 ./scripts/monitor-cluster.sh`.
+Neither file exists — `ls scripts/` shows only
+`build-all.sh / clean-all.sh / README.md / signal-server-debug.sh /
+signal-server-monitor.sh / smoke-dkg.sh / test-all.sh`. Node-level
+health monitoring (per-node process state + log tailing) is not
+automated today and would need custom tooling.
 
 There is no `/health` HTTP endpoint on the signal server (earlier
 drafts of this guide showed `curl -v http://localhost:9000/health`
@@ -140,13 +149,18 @@ wscat -c ws://localhost:9000/
 cargo run -p tui-node --bin mpc-wallet-tui -- \
   --signal-server ws://localhost:9000 --device-id test-node
 
-# Full 3-node cluster
-./scripts/launch-3node-cluster.sh
-
-# Smoke DKG test — runs the whole workspace test suite
-cd ../..            # back to repo root
+# Smoke DKG test (runs the whole workspace test suite)
 ./scripts/smoke-dkg.sh
 ```
+
+Earlier drafts of this section referenced
+`./scripts/launch-3node-cluster.sh` for a "Full 3-node cluster"
+launch. That script does not exist. Multi-node local testing is
+done by running three `mpc-wallet-tui` processes manually (in
+separate terminals) with distinct `--device-id` values against one
+signal server. The `examples/webrtc_mesh_e2e_test.rs` binary
+exercises 3-peer mesh behaviour in-process for smoke coverage
+without needing three real TUI instances.
 
 ## Resource requirements
 
