@@ -90,11 +90,17 @@
 
 ### Manual Testing Steps
 
-1. **Test Deterministic Addresses**:
-   ```bash
-   # Run the test script
-   ./test_deterministic_address.sh
-   ```
+1. **Test Deterministic Addresses** (manual — the standalone script
+   that used to live at apps/tui-node/test_deterministic_address.sh
+   was removed; it relied on a \`--headless\` CLI flag the TUI never
+   had and ncat'd into a \`localhost:8080\` port that the TUI doesn't
+   listen on):
+
+   Start two TUI instances with different --device-id values, each
+   creating a wallet with the same name, and diff the
+   "Deriving group key - Session ID" / "Generated ethereum address"
+   lines from their logs. Identical session IDs and addresses
+   confirm deterministic derivation.
 
 2. **Test Key Responsiveness**:
    ```bash
