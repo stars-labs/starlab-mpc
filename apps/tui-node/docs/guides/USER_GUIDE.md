@@ -37,7 +37,7 @@ You'll see the main interface:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ FROST MPC Wallet v2.0.0 - Device: alice            │
+│ MPC Wallet TUI v0.1.0 - Device: alice              │
 ├─────────────────────────────────────────────────────┤
 │ Main Menu:                                          │
 │ > Create New Wallet                                 │

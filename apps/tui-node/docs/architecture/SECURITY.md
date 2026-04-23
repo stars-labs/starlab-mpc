@@ -523,7 +523,7 @@ recommendation.
     "threshold_met": true
   },
   "ip_address": "192.168.1.100",
-  "user_agent": "FROST-MPC-TUI/2.0.0",
+  "user_agent": "mpc-wallet-tui/<CARGO_PKG_VERSION>",
   "session_id": "sess_123456",
   "correlation_id": "corr_789012"
 }
