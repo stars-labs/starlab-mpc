@@ -6,48 +6,35 @@ This directory contains all tests for the MPC Wallet browser extension.
 
 ```
 tests/
-├── components/        # UI component tests
+├── __mocks__/        # Module-level mocks (WXT #imports, etc.)
+├── components/       # UI component tests
 ├── config/           # Configuration tests
 ├── entrypoints/      # Extension entrypoint tests
 │   ├── background/   # Background service worker tests
 │   └── offscreen/    # Offscreen document tests (WebRTC, FROST)
 ├── integration/      # Integration tests
 ├── services/         # Service layer tests
-└── setup-bun.ts     # Test setup and utilities for Bun
+├── utils/            # Utility tests
+├── setup-bun.ts      # Preload: Chrome + crypto mocks, exports
+│                     # REAL_WEBCRYPTO for roundtrip tests
+└── wxt-imports-mock.ts
 ```
 
 ## Running Tests
 
-All tests now use Bun for consistent WebAssembly (WASM) support:
-
 ```bash
-# Run all tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Run specific test suites
-npm run test:unit        # Components, config, services
-npm run test:integration # Integration tests
-npm run test:webrtc     # WebRTC tests
-
-# Run with coverage
-npm run test:coverage
+bun test                    # all tests
+bun test --watch            # watch mode
+bun test:unit               # services + components + config only
+bun test:integration        # integration tests
+bun test:webrtc             # offscreen webrtc.*.test.ts
+bun test:coverage           # with coverage
 ```
 
 ## Test Runner
 
 - **Bun**: Used for all tests with native WebAssembly support
 - Tests are preloaded with `setup-bun.ts` which provides Chrome API mocks and crypto mocks
-
-## Migration from Vitest
-
-All tests have been migrated from Vitest to Bun to ensure proper WebAssembly support throughout the test suite. Key changes:
-
-1. Import from `'bun:test'` instead of `'vitest'`
-2. Use `jest.fn()` for mocking (Bun uses Jest-compatible APIs)
-3. WASM modules work natively without special configuration
 
 ## Writing Tests
 

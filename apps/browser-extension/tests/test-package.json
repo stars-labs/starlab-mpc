@@ -1,6 +1,0 @@
-{
-  "name": "mpc-wallet-tests",
-  "imports": {
-    "#imports": "./tests/__mocks__/imports.ts"
-  }
-}
