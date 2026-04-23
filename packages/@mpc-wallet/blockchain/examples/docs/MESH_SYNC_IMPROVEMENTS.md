@@ -1,5 +1,15 @@
 # Mesh Cluster Synchronization Improvements
 
+> **Note**: As of 2026-04, the reference examples `eth_dkg.rs` and
+> `solana_dkg.rs` have been renamed to `.rs.disabled` because they
+> don't compile against current `bincode` (workspace dropped the
+> dep), `rlp`/`ethers-core` (U256 / H160 `Encodable` trait bounds
+> changed), and `solana-sdk` (Transaction no longer implements
+> `SerializableTransaction`) API versions. The code is preserved
+> in-tree as a reference for the multi-party signing flow this
+> document describes; rename back to `.rs` + refresh the three
+> problematic imports if you want to actually run it.
+
 ## Problem Solved
 Both the Solana DKG (`solana_dkg.rs`) and Ethereum DKG (`eth_dkg.rs`) examples required all nodes to be started **simultaneously**, which was impractical for real-world usage. Nodes would fail with "Connection refused" errors if other nodes weren't already running.
 
