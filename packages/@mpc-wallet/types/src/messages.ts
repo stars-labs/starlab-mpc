@@ -114,7 +114,47 @@ export type OffscreenToBackgroundMessage = BaseMessage & (
     | { type: 'relayViaWs'; to: string; data: any }
     | { type: 'webrtcMessage'; fromdeviceId: string; message: any }
     | { type: 'log'; payload: { message: string; source: string } }
-    | { type: 'signingComplete'; signingId: string; signature: string }
+    // Ext-1d: DKG ceremony finalized. Offscreen emits after FROST
+    // finalize succeeds; stateManager stashes pendingKeystoreJson
+    // for the save-wallet flow.
+    | {
+        type: 'dkgComplete';
+        groupPublicKey: string;
+        address: string | null;
+        blockchain: 'ethereum' | 'solana';
+        sessionId: string | null;
+        threshold: number;
+        total: number;
+        participants: string[];
+        participantIndex: number | null;
+        keystoreJson: string | null;
+      }
+    // Ext-2d-progress: per-peer roster snapshot fired on every
+    // signing-round milestone (commit sent/received, share
+    // sent/received). Wire form of the WebRTCManager signingCommitments
+    // and signingShares Maps keyed by peer-id.
+    | {
+        type: 'signingProgress';
+        signingId: string;
+        state: string;
+        selectedSigners: string[];
+        commitmentsReceived: string[];
+        sharesReceived: string[];
+      }
+    // Ext-2d-offscreen-rounds: final aggregated signature. New shape
+    // supersedes the legacy dApp-bridge single-party `signingComplete`
+    // (which only had {signingId, signature}) by adding the full
+    // ceremony context. The extra fields are optional so the type
+    // covers both emitters — legacy path omits them, new FROST path
+    // fills them.
+    | {
+        type: 'signingComplete';
+        signingId: string;
+        signature: string;
+        messageHex?: string;
+        blockchain?: 'ethereum' | 'solana';
+        sessionId?: string;
+      }
     | { type: 'signingError'; signingId: string; error: string }
     | { type: 'messageSignatureComplete'; signingId: string; signature: string }
     | { type: 'messageSignatureError'; signingId: string; error: string }
