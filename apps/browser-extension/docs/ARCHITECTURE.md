@@ -532,34 +532,42 @@ enum MeshStatusType {
 ## Installation
 
 ### Prerequisites
-- Node.js 18+ and npm/yarn
-- Chrome/Chromium browser for testing
-- Rust toolchain for WASM compilation
+- Bun runtime (`curl -fsSL https://bun.sh/install | bash`)
+- Rust toolchain with `wasm32-unknown-unknown` target (for
+  `core-wasm` build)
+- Chromium-based browser (Chrome / Brave / Edge) or Firefox for
+  testing
 
 ### Development Setup
 ```bash
-# Clone the repository
-git clone <repository-url>
+git clone https://github.com/hecoinfo/mpc-wallet.git
 cd mpc-wallet
 
-# Install dependencies
-npm install
+# Install JS deps (root-level Bun workspace)
+bun install
 
-# Build WASM modules
-npm run build:wasm
+# Build WASM bindings (run from repo root — the build:wasm
+# script lives only in root package.json)
+bun run build:wasm
 
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
+# Start extension dev server with hot reload
+cd apps/browser-extension
+bun run dev
 ```
 
-### Extension Installation
-1. Build the extension: `npm run build`
-2. Open Chrome and navigate to `chrome://extensions/`
-3. Enable "Developer mode"
-4. Click "Load unpacked" and select the `dist` folder
+### Extension Installation (Chrome / Chromium)
+
+```bash
+# From apps/browser-extension/
+bun run build          # default target: Chrome MV3 -> .output/chrome-mv3/
+bun run build:firefox  # .output/firefox-mv2/
+bun run build:edge     # .output/edge-mv3/
+```
+
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select
+   `apps/browser-extension/.output/chrome-mv3/`
 
 ## Development
 
@@ -567,11 +575,19 @@ npm run build
 
 When developing new features, follow these patterns:
 
-1. **Define Message Types**: Add to `/src/types/messages.ts`
-2. **Popup Actions**: Send messages via `chrome.runtime.sendMessage()`
-3. **Background Processing**: Handle in `chrome.runtime.onMessage.addListener()`
-4. **Offscreen Operations**: Forward via `safelySendOffscreenMessage()`
-5. **State Updates**: Broadcast to all components via `broadcastToPopupPorts()`
+1. **Define Message Types**: Add to
+   `packages/@mpc-wallet/types/src/messages.ts` (shared workspace
+   package — see the Message System section above).
+2. **Popup Actions**: Send messages via
+   `chrome.runtime.sendMessage()`.
+3. **Background Processing**: Handle in
+   `chrome.runtime.onMessage.addListener()` (see
+   `src/entrypoints/background/messageHandlers.ts` — one big
+   `case MESSAGE_TYPES.<Name>:` switch).
+4. **Offscreen Operations**: Forward via the offscreen manager
+   in `src/entrypoints/background/offscreenManager.ts`.
+5. **State Updates**: Broadcast to all popup ports via
+   `StateManager.broadcastToPopupPorts()`.
 
 ### Debugging Message Flow
 
@@ -582,35 +598,58 @@ When developing new features, follow these patterns:
 
 ### Project Structure
 ```
-src/
-├── entrypoints/
-│   ├── background/     # Service worker
-│   ├── content/        # Content scripts
-│   ├── offscreen/      # Offscreen document
-│   └── popup/          # Extension popup UI
-├── types/              # TypeScript type definitions
-├── services/           # Business logic services
-└── components/         # Svelte UI components
+apps/browser-extension/
+├── src/
+│   ├── entrypoints/
+│   │   ├── background/     # Service worker + managers
+│   │   ├── content/        # Content script (EIP-1193 injection)
+│   │   ├── offscreen/      # Offscreen doc (WebRTC + WASM FROST)
+│   │   └── popup/          # Svelte 5 popup UI
+│   ├── services/           # Per-domain services
+│   ├── components/         # Svelte components
+│   ├── utils/
+│   └── config/             # signal-server.ts + other config
+├── tests/                  # Bun test suite
+├── public/                 # Static assets (WASM, icons, etc.)
+└── wxt.config.ts           # WXT framework config
+
+packages/@mpc-wallet/types/src/
+├── messages.ts             # All cross-context message types
+├── appstate.ts             # AppState + chain / curve types
+├── session.ts              # SessionInfo types
+└── ...
 ```
 
 ### Key Files
-- `src/types/messages.ts`: Message type definitions
-- `src/types/appstate.ts`: Application state types
-- `src/entrypoints/background/index.ts`: Main background script
-- `src/entrypoints/offscreen/webrtc.ts`: WebRTC management
-- `src/entrypoints/popup/App.svelte`: Main UI component
+- `packages/@mpc-wallet/types/src/messages.ts` — all message
+  type definitions (shared workspace package — types aren't
+  under the extension's own `src/`)
+- `packages/@mpc-wallet/types/src/appstate.ts` — application
+  state types + SupportedChain
+- `src/entrypoints/background/index.ts` — SW entry + router
+- `src/entrypoints/background/messageHandlers.ts` — MESSAGE_TYPES
+  dispatch table (the authoritative handler switch)
+- `src/entrypoints/offscreen/webrtc.ts` — WebRTC + FROST/WASM host
+- `src/entrypoints/popup/App.svelte` — main UI
 
 ### Testing
+
+From inside `apps/browser-extension/` (all via Bun's built-in
+test runner — see `docs/testing/TESTING.md`):
+
 ```bash
-# Run type checking
-npm run type-check
-
-# Run linting
-npm run lint
-
-# Run tests
-npm run test
+bun run check            # svelte-check type-check pass
+bun test                 # full test suite
+bun run test:watch       # watch mode
+bun run test:coverage    # coverage report
+bun run test:unit        # tests/services + tests/config only
+bun run test:integration # tests/integration only
+bun run test:webrtc      # tests/entrypoints/offscreen/webrtc.*
 ```
+
+There is no `npm run lint` — lint is handled by `tsc --noEmit`
+(via `bun run check`) and the svelte compiler; no dedicated
+ESLint setup ships.
 
 ## Usage
 
