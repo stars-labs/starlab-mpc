@@ -18,11 +18,19 @@ workspace member.
 
 ### Subdirectories
 
-- [`deployment/`](deployment/) — production deployment guide
-  (Docker, K8s, systemd, signal-server deployment).
-  Currently a single-file `README.md` with inline recipes + the
-  [`CLOUDFLARE_DEPLOYMENT.md`](deployment/CLOUDFLARE_DEPLOYMENT.md)
-  guide for the Worker variant.
+- [`deployment/`](deployment/) — production deployment guide.
+  Covers the four real targets this repo ships: Cloudflare
+  Worker signal server (canonical production path), self-hosted
+  Rust signal server behind a TLS terminator, browser extension
+  builds for web-store distribution, and single-binary cargo
+  builds for TUI / native-node end-user distribution.
+  Worker-specific details in
+  [`CLOUDFLARE_DEPLOYMENT.md`](deployment/CLOUDFLARE_DEPLOYMENT.md).
+
+  Docker / K8s / Helm charts / Prometheus scaffolding are NOT
+  shipped — earlier drafts of this doc tree claimed otherwise;
+  the rewritten deployment guide (see `deployment/README.md`)
+  explicitly documents what's absent.
 - [`implementation/`](implementation/) — deep-dives on specific
   cross-cutting implementation choices. Notable:
   [`EIP-6963-IMPLEMENTATION.md`](implementation/EIP-6963-IMPLEMENTATION.md)
@@ -39,7 +47,12 @@ Each app and package has its own docs subtree:
 
 - [`apps/tui-node/docs/`](../apps/tui-node/docs/) — largest
   subtree; architecture, protocol, keyboard handling, keystore
-  internals, many historical phase-summary docs.
+  internals. The many historical phase-summary / dev-journal
+  docs have been moved under
+  [`apps/tui-node/docs/archive/dev-journal/`](../apps/tui-node/docs/archive/dev-journal/)
+  with a per-doc index explaining what each artefact documents
+  (mostly retrospectives of fixes that have long since
+  landed).
 - [`apps/browser-extension/docs/`](../apps/browser-extension/docs/)
 - [`apps/native-node/docs/`](../apps/native-node/docs/) — deferrs
   most content to the parent [`apps/native-node/README.md`](../apps/native-node/README.md).
