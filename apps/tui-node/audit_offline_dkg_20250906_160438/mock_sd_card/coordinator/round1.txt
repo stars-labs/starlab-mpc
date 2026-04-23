@@ -1,4 +1,0 @@
-Round 1: Coordinator creates session
-Session ID: audit_session_20250906_160438
-Threshold: 2-of-3
-Participants: P1 (Coordinator), P2, P3

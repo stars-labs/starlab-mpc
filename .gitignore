@@ -64,6 +64,12 @@ lerna-debug.log*
 # Test artifacts
 test-results/
 *.test.js.map
+# Offline DKG audit-tooling runs. Each invocation emits a dated dir
+# under `apps/tui-node/` containing mock-SD-card contents, test key
+# packages, and an auto-generated report. These are run-local dev
+# artefacts, not third-party audits — keep them out of git so nobody
+# mistakes them for production audit evidence.
+apps/tui-node/audit_offline_dkg_*/
 
 # Temporary files
 *.tmp

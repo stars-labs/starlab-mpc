@@ -1,8 +1,0 @@
-{
-    "participant_index": 3,
-    "key_share": "512ec670248642617de3eb3385f9d288831cf5e314972aed4bccbd9876bef01e",
-    "group_public_key": "ca9422000178ecb9922d1d39bb02e2f282252ad4c6b3adeb8de8e433d42261f3",
-    "threshold": 2,
-    "total": 3,
-    "session_id": "audit_session_20250906_160438"
-}
