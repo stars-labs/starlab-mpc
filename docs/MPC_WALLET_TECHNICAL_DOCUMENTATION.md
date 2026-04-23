@@ -292,25 +292,32 @@ A feature-rich terminal interface for advanced users and automated operations.
 
 #### UI Architecture
 
-```
-┌──────────────────────────────────────────────────────┐
-│  MPC Wallet TUI v0.1.0 - Device: Node-001           │
-├──────────────────────────────────────────────────────┤
-│ ┌─────────────┐ ┌──────────────────────────────────┐│
-│ │   Menu      │ │        Main Content              ││
-│ ├─────────────┤ │                                  ││
-│ │[1] Wallet   │ │  Current Wallet: mpc_wallet_01   ││
-│ │[2] DKG      │ │  Address: 0x742d35Cc6634C053... ││
-│ │[3] Sign     │ │  Balance: 1.234 ETH              ││
-│ │[4] Session  │ │                                  ││
-│ │[5] Network  │ │  Connected Peers: 2/3            ││
-│ │[6] Settings │ │  Session Status: Active          ││
-│ │[Q] Quit     │ │                                  ││
-│ └─────────────┘ └──────────────────────────────────┘│
-├──────────────────────────────────────────────────────┤
-│ Status: Ready | Network: Connected | Mode: Online    │
-└──────────────────────────────────────────────────────┘
-```
+Real main menu comes from `src/elm/components/main_menu.rs:55-114`
+and is rendered as a Ratatui `List` of emoji-prefixed entries. Items
+vary with `wallet_count`:
+
+- **Always**: `🆕 Create New Wallet`, `🔗 Join Session`, `⚙️ Settings`,
+  `🚪 Exit`
+- **Added once `wallet_count > 0`**: `💼 Manage Wallets` (plus DKG-
+  progress and signing flows which live inside sub-screens, not as
+  top-level menu items).
+
+Earlier drafts printed a numbered-hotkey layout
+(`[1] Wallet / [2] DKG / [3] Sign / [4] Session / [5] Network /
+[6] Settings / [Q] Quit`) with a right-hand pane showing
+`Current Wallet: mpc_wallet_01 / Address: 0x742d35Cc6634C053... /
+Balance: 1.234 ETH / Connected Peers: 2/3 / Session Status: Active`.
+None of that is real:
+
+- Menu navigation is arrow-key-driven; there are no number hotkeys.
+- No wallet-summary side pane exists. Wallet details live inside
+  the `WalletDetail` component (`src/elm/components/wallet_detail.rs`),
+  reachable through Manage Wallets → pick wallet.
+- The TUI does NOT query on-chain balances — the displayed
+  `1.234 ETH` figure was fabricated, not a live or placeholder
+  feed.
+- There is no dedicated `Connected Peers` header bar; per-session
+  peer status surfaces inside the DKG-progress / signing screens.
 
 #### Component Structure
 
