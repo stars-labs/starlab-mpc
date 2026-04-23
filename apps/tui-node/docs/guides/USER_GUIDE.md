@@ -537,12 +537,18 @@ below is just the core keys that work globally.
 | `Enter`    | Global  | Select / confirm    |
 | `Esc`      | Global  | Go back / cancel    |
 | `Tab`      | Global  | Move focus          |
-| `q`        | Global  | Quit application    |
+| `Ctrl+Q`   | Global  | Quit application    |
+| `Ctrl+C`   | Global  | Quit application    |
+| `Ctrl+R`   | Global  | Refresh             |
+| `Ctrl+H`   | Global  | Navigate to home    |
 
 Earlier drafts of this table listed additional shortcuts (`?`
 global help, `/` quick search, `r` refresh balances, `e` export,
-`o` accept notification) — none of those are wired up in the
-current code.
+`o` accept notification, plain `q` quit) — none of those are
+wired up in the current code. Quit requires the Ctrl modifier
+(see `src/elm/app.rs:851`): plain lowercase `q` is NOT a quit
+key. The four Ctrl-modified globals all live in `app.rs:851-866`
+before per-component dispatch.
 
 ### Status Indicators
 
