@@ -278,7 +278,7 @@ impl Participant {
         let mut all_commitments = Vec::new();
         for participant in ["P1", "P2", "P3"] {
             let filename = format!("signing_commitment_{}.json", participant);
-            if let Some(data) = self.sd_card.import(&filename) {
+            if let Some(_data) = self.sd_card.import(&filename) {
                 all_commitments.push(participant.to_string());
             }
         }
@@ -304,7 +304,7 @@ impl Participant {
         }
         
         // Generate signature share using key share and commitments
-        let key_share = &self.key_holder.as_ref().unwrap().key_share;
+        let _key_share = &self.key_holder.as_ref().unwrap().key_share;
         // Safely handle hash truncation
         let hash_suffix = if message_hash.len() >= 8 {
             &message_hash[0..8]
@@ -443,8 +443,8 @@ fn run_complete_offline_flow() {
     // DKG Phase 4: Finalization
     println!("\n━━━━━━━━━━ DKG PHASE 4: FINALIZATION ━━━━━━━━━━");
     let key1 = p1.finalize_dkg();
-    let key2 = p2.finalize_dkg();
-    let key3 = p3.finalize_dkg();
+    let _key2 = p2.finalize_dkg();
+    let _key3 = p3.finalize_dkg();
     
     println!("\n✅ DKG COMPLETE - Wallet Ready!");
     println!("  • Address: {}", key1.wallet_address);

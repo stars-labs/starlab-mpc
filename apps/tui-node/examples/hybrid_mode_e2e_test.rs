@@ -5,30 +5,22 @@ use frost_secp256k1::{
     Identifier as Secp256k1Identifier,
     keys::dkg as secp256k1_dkg,
     keys::{KeyPackage as Secp256k1KeyPackage, PublicKeyPackage as Secp256k1PublicKeyPackage},
-    round1::{SigningCommitments as Secp256k1Commitments, SigningNonces as Secp256k1Nonces},
-    round2::SignatureShare as Secp256k1Share,
-    SigningPackage as Secp256k1SigningPackage,
 };
 
 use frost_ed25519::{
     Identifier as Ed25519Identifier,
     keys::dkg as ed25519_dkg,
     keys::{KeyPackage as Ed25519KeyPackage, PublicKeyPackage as Ed25519PublicKeyPackage},
-    round1::{SigningCommitments as Ed25519Commitments, SigningNonces as Ed25519Nonces},
-    round2::SignatureShare as Ed25519Share,
-    SigningPackage as Ed25519SigningPackage,
 };
 
 use frost_ed25519::rand_core::OsRng;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use tui_node::hybrid::{HybridCoordinator, ParticipantMode};
 use tui_node::hybrid::coordinator::HybridMessage;
-use tui_node::utils::erc20_encoder::ERC20Helper;
-use tui_node::utils::solana_encoder::{SolanaHelper, SolanaTransactionBuilder};
+use tui_node::utils::solana_encoder::SolanaHelper;
 
 /// Hybrid participant supporting both curves
 struct HybridParticipant {
@@ -91,7 +83,7 @@ fn perform_hybrid_dkg_secp256k1(
             p.secp256k1_identifier,
             total,
             threshold,
-            &mut rng,
+            rng,
         ).expect("DKG part1 failed");
         
         round1_secrets.push(secret);
@@ -107,7 +99,7 @@ fn perform_hybrid_dkg_secp256k1(
     }
     
     // Simulate SD card exchange for offline participant
-    if coordinator.get_offline_participants().len() > 0 {
+    if !coordinator.get_offline_participants().is_empty() {
         coordinator.perform_sd_card_exchange();
     }
     
@@ -123,7 +115,7 @@ fn perform_hybrid_dkg_secp256k1(
     
     for (i, p) in participants.iter().enumerate() {
         // Receive messages
-        let messages = coordinator.receive_messages(p.id).unwrap();
+        let _messages = coordinator.receive_messages(p.id).unwrap();
         
         let mut others_r1 = round1_packages.clone();
         others_r1.remove(&p.secp256k1_identifier);
@@ -153,7 +145,7 @@ fn perform_hybrid_dkg_secp256k1(
     }
     
     // SD card exchange for offline participant
-    if coordinator.get_offline_participants().len() > 0 {
+    if !coordinator.get_offline_participants().is_empty() {
         coordinator.perform_sd_card_exchange();
     }
     
@@ -167,15 +159,14 @@ fn perform_hybrid_dkg_secp256k1(
     
     for (i, p) in participants.iter_mut().enumerate() {
         // Collect round2 packages
-        let messages = coordinator.receive_messages(p.id).unwrap();
+        let _messages = coordinator.receive_messages(p.id).unwrap();
         
         let mut r2_for_me = BTreeMap::new();
         for (j, packages) in round2_packages.iter().enumerate() {
-            if i != j {
-                if let Some(pkg) = packages.get(&p.secp256k1_identifier) {
+            if i != j
+                && let Some(pkg) = packages.get(&p.secp256k1_identifier) {
                     r2_for_me.insert(all_identifiers[j], pkg.clone());
                 }
-            }
         }
         
         let mut others_r1 = round1_packages.clone();
@@ -221,7 +212,7 @@ fn perform_hybrid_dkg_ed25519(
             p.ed25519_identifier,
             total,
             threshold,
-            &mut rng,
+            rng,
         ).expect("DKG part1 failed");
         
         round1_secrets.push(secret);
@@ -235,7 +226,7 @@ fn perform_hybrid_dkg_ed25519(
         println!("  ✅ {} ({:?}) generated and sent commitments", p.name, p.mode);
     }
     
-    if coordinator.get_offline_participants().len() > 0 {
+    if !coordinator.get_offline_participants().is_empty() {
         coordinator.perform_sd_card_exchange();
     }
     
@@ -263,7 +254,7 @@ fn sign_ethereum_transaction_hybrid(
     println!("  Value: 2.5 ETH");
     
     // Create transaction hash
-    let tx_hash = vec![1, 2, 3, 4, 5]; // Simplified for example
+    let _tx_hash = [1, 2, 3, 4, 5]; // Simplified for example
     
     println!("\n📝 Signing participants:");
     for &i in signer_indices {
@@ -309,7 +300,7 @@ fn sign_solana_transaction_hybrid(
     let from = "2fG3hR8SxZDkMEmL3KhcQfUvPLfgTapZLJcVPsYPMRcK";
     let to = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
     
-    let tx_builder = SolanaHelper::sol_transfer(
+    let _tx_builder = SolanaHelper::sol_transfer(
         from,
         to,
         100.0,
@@ -343,7 +334,7 @@ fn sign_solana_transaction_hybrid(
 fn sign_spl_token_transaction_hybrid(
     participants: &[HybridParticipant],
     signer_indices: &[usize],
-    coordinator: &mut HybridCoordinator,
+    _coordinator: &mut HybridCoordinator,
 ) {
     println!("\n╔════════════════════════════════════════╗");
     println!("║     HYBRID SPL TOKEN TRANSFER          ║");
@@ -358,7 +349,7 @@ fn sign_spl_token_transaction_hybrid(
     let from = "2fG3hR8SxZDkMEmL3KhcQfUvPLfgTapZLJcVPsYPMRcK";
     let to = "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM";
     
-    let tx_builder = SolanaHelper::usdc_transfer(
+    let _tx_builder = SolanaHelper::usdc_transfer(
         from,
         to,
         500.0,
@@ -382,7 +373,7 @@ fn sign_spl_token_transaction_hybrid(
 
 /// Tests network failure and recovery
 fn test_network_failure(
-    participants: &[HybridParticipant],
+    _participants: &[HybridParticipant],
     coordinator: &mut HybridCoordinator,
 ) {
     println!("\n╔════════════════════════════════════════╗");

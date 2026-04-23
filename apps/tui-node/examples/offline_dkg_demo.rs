@@ -61,12 +61,12 @@ impl Participant {
         
         if self.is_coordinator {
             // Create and export session parameters
-            let params = format!(r#"{{
+            let params = r#"{
                 "session_id": "DKG-DEMO-001",
                 "threshold": 2,
                 "participants": 3,
                 "curve": "secp256k1"
-            }}"#);
+            }"#.to_string();
             
             self.sd_card.export("session_params.json", params.into_bytes());
             println!("  ✅ Created session parameters");

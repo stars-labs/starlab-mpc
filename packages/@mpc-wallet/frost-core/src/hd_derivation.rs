@@ -186,15 +186,14 @@ fn scalar_from_seed<C: Ciphersuite>(
     seed: &[u8; 32],
 ) -> Result<<<C::Group as frost_core::Group>::Field as frost_core::Field>::Scalar> {
     // Try direct deserialization
-    if let Ok(serialization) = seed.to_vec().try_into() {
-        if let Ok(scalar) =
+    if let Ok(serialization) = seed.to_vec().try_into()
+        && let Ok(scalar) =
             <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                 &serialization,
             )
         {
             return Ok(scalar);
         }
-    }
 
     // Retry with SHA-256(seed || counter) for values that exceed curve order
     for counter in 1u8..=255 {
@@ -203,15 +202,14 @@ fn scalar_from_seed<C: Ciphersuite>(
         hasher.update([counter]);
         let hash = hasher.finalize();
 
-        if let Ok(serialization) = hash.to_vec().try_into() {
-            if let Ok(scalar) =
+        if let Ok(serialization) = hash.to_vec().try_into()
+            && let Ok(scalar) =
                 <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                     &serialization,
                 )
             {
                 return Ok(scalar);
             }
-        }
     }
 
     Err(FrostError::DerivationError(

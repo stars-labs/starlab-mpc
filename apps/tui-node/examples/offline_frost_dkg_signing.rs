@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use std::fs;
 use tempfile::TempDir;
 use serde::{Serialize, Deserialize};
-use hex;
 
 /// Simulated SD card for offline data exchange
 #[derive(Clone)]
@@ -138,7 +137,7 @@ impl FrostParticipant {
             self.identifier,
             total_participants,
             threshold,
-            &mut rng,
+            rng,
         ).expect("Failed to generate DKG round 1");
         
         // Store secret for later rounds
@@ -260,7 +259,7 @@ impl FrostParticipant {
         
         // Run FROST part3 to complete DKG
         let (key_package, pubkey_package) = dkg::part3(
-            &self.round2_secret.as_ref().expect("Missing round2 secret"),
+            self.round2_secret.as_ref().expect("Missing round2 secret"),
             &others_round1,
             &round2_packages,
         ).expect("Failed to complete DKG part3");
@@ -402,7 +401,7 @@ impl FrostParticipant {
         let group_signature = frost_secp256k1::aggregate(
             &signing_package,
             &signature_shares,
-            &self.pubkey_package.as_ref().expect("Missing pubkey package"),
+            self.pubkey_package.as_ref().expect("Missing pubkey package"),
         ).expect("Failed to aggregate signature");
         
         let signature_bytes = group_signature.serialize().expect("Failed to serialize signature");

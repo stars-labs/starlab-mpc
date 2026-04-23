@@ -1,5 +1,4 @@
 use tokio::sync::mpsc;
-use tracing::info;
 
 #[tokio::main]
 async fn main() {

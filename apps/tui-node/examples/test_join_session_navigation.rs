@@ -2,8 +2,6 @@
 // This test verifies that the SessionsLoaded message is properly received
 
 use std::io;
-use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {

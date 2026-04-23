@@ -7,8 +7,8 @@ use std::time::Duration;
 use tokio::runtime::Runtime;
 
 use tui_node::webrtc::{
-    MeshSimulator, SimulationEvent, SimulationScenario, NetworkCondition,
-    WebRTCMeshManager, ConnectionMonitor, RejoinCoordinator,
+    MeshSimulator, SimulationScenario,
+    WebRTCMeshManager, ConnectionMonitor,
 };
 
 use frost_secp256k1::{
@@ -77,11 +77,10 @@ async fn run_dkg_with_disconnections(
     // Round 1: Generate commitments
     println!("\n📝 Round 1: Generating commitments");
     
-    if let Some((idx, round)) = disconnect_during_round {
-        if round == 1 {
+    if let Some((idx, round)) = disconnect_during_round
+        && round == 1 {
             participants[idx].go_offline();
         }
-    }
     
     let mut round1_secrets = Vec::new();
     let mut round1_packages = std::collections::BTreeMap::new();
@@ -92,7 +91,7 @@ async fn run_dkg_with_disconnections(
                 p.identifier,
                 total,
                 threshold,
-                &mut rng,
+                rng,
             ).expect("DKG part1 failed");
             
             round1_secrets.push(Some(secret));
@@ -123,11 +122,10 @@ async fn run_dkg_with_disconnections(
     // Round 2: Generate shares
     println!("\n📝 Round 2: Generating shares");
     
-    if let Some((idx, round)) = disconnect_during_round {
-        if round == 2 {
+    if let Some((idx, round)) = disconnect_during_round
+        && round == 2 {
             participants[idx].go_offline();
         }
-    }
     
     let mut round2_secrets = Vec::new();
     let mut round2_packages = Vec::new();
@@ -165,16 +163,15 @@ async fn run_dkg_with_disconnections(
         .collect();
     
     for (i, p) in participants.iter_mut().enumerate() {
-        if *p.is_online.lock().unwrap() {
-            if let (Some(r2_secret), Some(_r1_secret)) = (&round2_secrets[i], &round1_secrets[i]) {
+        if *p.is_online.lock().unwrap()
+            && let (Some(r2_secret), Some(_r1_secret)) = (&round2_secrets[i], &round1_secrets[i]) {
                 // Collect packages for this participant
                 let mut r2_for_me = std::collections::BTreeMap::new();
                 for (j, packages) in round2_packages.iter().enumerate() {
-                    if i != j {
-                        if let Some(pkg) = packages.get(&p.identifier) {
+                    if i != j
+                        && let Some(pkg) = packages.get(&p.identifier) {
                             r2_for_me.insert(all_identifiers[j], pkg.clone());
                         }
-                    }
                 }
                 
                 let mut others_r1 = round1_packages.clone();
@@ -191,7 +188,6 @@ async fn run_dkg_with_disconnections(
                 
                 println!("  ✅ {} finalized keys", p.name);
             }
-        }
     }
     
     println!("\n✅ DKG Complete (with possible disconnections)");
@@ -266,8 +262,8 @@ async fn run_signing_with_rejoin(
     
     for &idx in &signers {
         let p = &participants[idx];
-        if *p.is_online.lock().unwrap() {
-            if let Some(nonces) = nonces_map.get(&p.identifier) {
+        if *p.is_online.lock().unwrap()
+            && let Some(nonces) = nonces_map.get(&p.identifier) {
                 let share = round2::sign(
                     &signing_package,
                     nonces,
@@ -277,7 +273,6 @@ async fn run_signing_with_rejoin(
                 signature_shares.insert(p.identifier, share);
                 println!("  ✅ {} generated signature share", p.name);
             }
-        }
     }
     
     // Aggregate signature

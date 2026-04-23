@@ -1,4 +1,4 @@
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::event::{self, Event, KeyCode};
 use std::io;
 use std::time::Duration;
 
@@ -8,8 +8,8 @@ fn main() -> io::Result<()> {
     crossterm::terminal::enable_raw_mode()?;
     
     loop {
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
+        if event::poll(Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()? {
                 println!("Key pressed: {:?}", key);
                 
                 match key.code {
@@ -30,7 +30,6 @@ fn main() -> io::Result<()> {
                     _ => {}
                 }
             }
-        }
     }
     
     crossterm::terminal::disable_raw_mode()?;
