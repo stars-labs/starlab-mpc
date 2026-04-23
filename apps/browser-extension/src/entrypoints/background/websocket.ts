@@ -97,6 +97,35 @@ export class WebSocketClient {
         });
     }
 
+    /**
+     * Announce a session (DKG or Signing) to the signal server. The
+     * server stores it in its Durable Object and broadcasts a
+     * `session_available` frame to every OTHER connected device — the
+     * same channel TUI uses (see `apps/tui-node/src/elm/command.rs`
+     * near line 555 + signal-server's cloudflare-worker lib.rs:218).
+     *
+     * `sessionInfo` must already be in the TUI-compatible wire shape
+     * (use `buildWireSessionInfo()` from utils/session-parse.ts).
+     * This function does no shape validation — garbage in, garbage
+     * broadcast.
+     */
+    public announceSession(sessionInfo: Record<string, unknown>): void {
+        this.sendMessage({
+            type: "announce_session",
+            session_info: sessionInfo,
+        } as any);
+    }
+
+    /**
+     * Ask the server for every session currently stored that might be
+     * relevant to this device. Reply arrives as `sessions_for_device`
+     * with an array of `session_info` objects. Useful on reconnect so
+     * we don't miss sessions announced while we were offline.
+     */
+    public requestActiveSessions(): void {
+        this.sendMessage({ type: "request_active_sessions" } as any);
+    }
+
     private sendMessage(message: WebSocketClientMsg): void {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
             console.error("WebSocket is not connected. Cannot send message:", message);

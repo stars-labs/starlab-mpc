@@ -14,6 +14,7 @@ import { WebSocketClient } from "./websocket";
 import { AppState } from "@mpc-wallet/types/appstate";
 import { SessionManager } from "./sessionManager";
 import { getSignalServerUrl } from "../../config/signal-server";
+import { parseSessionInfoFromWire } from "../../utils/session-parse";
 import type {
     BackgroundToPopupMessage,
     InitialStateMessage,
@@ -260,9 +261,96 @@ export class WebSocketManager {
                 this.handleErrorMessage(serverMessage as ServerMsg & { type: "error" });
                 break;
 
+            // Session-discovery channel shared with TUI (Ext-1a). The
+            // server broadcasts these whenever any client (extension or
+            // TUI) emits `announce_session`, so this is the ONLY
+            // incoming path that picks up TUI-originated DKG/signing
+            // invites. Previously the extension silently dropped these
+            // frames in the `default` arm.
+            case "session_available":
+                this.handleSessionAvailable(serverMessage);
+                break;
+
+            case "session_removed":
+                this.handleSessionRemoved(serverMessage);
+                break;
+
+            case "sessions_for_device":
+                // Bulk reply to `request_active_sessions` — same merge
+                // semantics as session_available, per session in the
+                // list. Tolerant to empty/malformed entries.
+                if (Array.isArray((serverMessage as any).sessions)) {
+                    for (const raw of (serverMessage as any).sessions) {
+                        this.handleSessionAvailable({ type: "session_available", session_info: raw } as any);
+                    }
+                }
+                break;
+
             default:
                 console.log("[WebSocketManager] Unhandled WebSocket message type:", (serverMessage as any).type);
                 break;
+        }
+    }
+
+    /**
+     * A peer (TUI or extension) announced a session. Server broadcast
+     * delivered it to us as `session_available`. Parse tolerantly —
+     * TUI's wire format omits `accepted_devices`; the parser
+     * synthesises `[]` so downstream code can always index it.
+     */
+    private handleSessionAvailable(
+        msg: ServerMsg & { type: "session_available" },
+    ): void {
+        const parsed = parseSessionInfoFromWire((msg as any).session_info);
+        if (!parsed) {
+            console.warn(
+                "[WebSocketManager] Dropped malformed session_available payload:",
+                msg,
+            );
+            return;
+        }
+        console.log(
+            `[WebSocketManager] session_available: ${parsed.session_id} (${parsed.session_type ?? "dkg"}, ${parsed.threshold}/${parsed.total}, proposer=${parsed.proposer_id})`,
+        );
+
+        // Merge-update into invites: replace if we already have this
+        // session_id (e.g. status_update), else append.
+        const invites = this.appState.invites ?? [];
+        const idx = invites.findIndex((s) => s.session_id === parsed.session_id);
+        if (idx >= 0) {
+            invites[idx] = parsed;
+        } else {
+            invites.push(parsed);
+        }
+        this.appState.invites = invites;
+
+        // Notify popup so the Join Session tab refreshes.
+        this.broadcastToPopup({ type: "sessionAvailable", session: parsed } as any);
+        if (this.stateManager?.updateInvites) {
+            this.stateManager.updateInvites(invites);
+        }
+    }
+
+    /**
+     * A previously announced session was withdrawn (creator cancelled
+     * or server garbage-collected it). Drop it from the invite list
+     * so stale rows don't stay on screen.
+     */
+    private handleSessionRemoved(
+        msg: ServerMsg & { type: "session_removed" },
+    ): void {
+        const sessionId = (msg as any).session_id as string | undefined;
+        if (!sessionId) return;
+        const before = this.appState.invites?.length ?? 0;
+        this.appState.invites = (this.appState.invites ?? []).filter(
+            (s) => s.session_id !== sessionId,
+        );
+        if ((this.appState.invites?.length ?? 0) !== before) {
+            console.log(`[WebSocketManager] session_removed: ${sessionId}`);
+            this.broadcastToPopup({ type: "sessionRemoved", sessionId } as any);
+            if (this.stateManager?.updateInvites) {
+                this.stateManager.updateInvites(this.appState.invites);
+            }
         }
     }
 
