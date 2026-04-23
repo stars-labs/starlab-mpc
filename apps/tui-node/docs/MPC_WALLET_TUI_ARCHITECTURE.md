@@ -231,15 +231,19 @@ sequenceDiagram
 
 ### 2. Message Type Hierarchy
 
+Verified against `apps/tui-node/src/protocal/signal.rs`:
+
 ```
-ServerMsg (WebSocket layer)
+ServerMsg (WebSocket layer, signal.rs → from signal-server crate)
 ├── Devices: Online device list
 ├── Relay: P2P message relay
-│   └── WebSocketMessage (Application layer)
+│   └── WebSocketMessage (Application layer, signal.rs:88)
 │       ├── SessionProposal
 │       ├── SessionResponse
 │       ├── SessionUpdate
 │       ├── SessionJoinRequest
+│       ├── SessionOffer         (message-validator compat)
+│       ├── SessionAccepted      (message-validator compat)
 │       └── WebRTCSignal
 │           ├── Offer
 │           ├── Answer
@@ -248,14 +252,25 @@ ServerMsg (WebSocket layer)
 ├── SessionsForDevice: Active sessions query
 └── SessionRemoved: Session termination
 
-WebRTCMessage (Data channel layer)
+WebRTCMessage<C: Ciphersuite> (Data channel layer, signal.rs:204)
+├── SimpleMessage: free-form text (debugging / smoke tests)
 ├── ChannelOpen: Connection established
 ├── MeshReady: Participant ready signal
 ├── DkgRound1Package: Commitment exchange
 ├── DkgRound2Package: Share exchange
-├── SigningRequest: Transaction signing
+├── SigningRequest: Transaction signing (carries signing_id +
+│                   transaction_data hex + blockchain + chain_id)
+├── SigningAcceptance: co-signer approves/rejects a request
+├── SignerSelection: coordinator publishes the selected signer set
 ├── SigningCommitment: FROST Round 1
-└── SignatureShare: FROST Round 2
+├── SignatureShare: FROST Round 2
+└── AggregatedSignature: final signature broadcast back to all peers
+
+Earlier drafts of this section omitted `SessionOffer` /
+`SessionAccepted` from WebSocketMessage, and skipped
+`SimpleMessage` / `SigningAcceptance` / `SignerSelection` /
+`AggregatedSignature` from WebRTCMessage. All seven are real
+variants in signal.rs today.
 ```
 
 ### 3. Command Dispatch Pattern
