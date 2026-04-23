@@ -43,27 +43,30 @@ Before contributing, ensure you have:
 
 1. **Development Environment**
    ```bash
-   # Rust toolchain
+   # Rust toolchain — 1.85+ required (edition 2024)
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    rustup target add wasm32-unknown-unknown
-   
-   # Bun runtime
+
+   # Bun runtime — this is a Bun workspace, not npm/yarn/Node
    curl -fsSL https://bun.sh/install | bash
-   
-   # Additional tools
-   cargo install wasm-pack
-   cargo install cargo-watch
    ```
+
+   `wasm-pack` is a devDependency of
+   `packages/@mpc-wallet/core-wasm/package.json`, so `bun install`
+   pulls it in — no separate `cargo install wasm-pack` needed.
+   `cargo-watch` isn't used by anything in this repo; earlier
+   drafts of this doc suggested installing it, but nothing in the
+   workspace exercises it.
 
 2. **Fork and Clone**
    ```bash
-   # Fork the repository on GitHub
-   # Then clone your fork
+   # Fork the repository on GitHub (https://github.com/hecoinfo/mpc-wallet)
+   # Then clone your fork:
    git clone https://github.com/YOUR_USERNAME/mpc-wallet.git
    cd mpc-wallet
-   
-   # Add upstream remote
-   git remote add upstream https://github.com/original-org/mpc-wallet.git
+
+   # Add upstream remote pointing at the canonical repo
+   git remote add upstream https://github.com/hecoinfo/mpc-wallet.git
    ```
 
 3. **Install Dependencies**
@@ -128,12 +131,12 @@ Before contributing, ensure you have:
 
 4. **Test Your Changes**
    ```bash
-   # Run all tests
+   # Run all workspace tests (Rust + Bun) from repo root
    ./scripts/test-all.sh
-   
-   # Run specific tests
+
+   # Or narrow to a specific crate / extension
    cargo test -p tui-node
-   bun test browser-extension
+   cd apps/browser-extension && bun test
    ```
 
 5. **Commit Your Changes**
@@ -158,9 +161,12 @@ Before contributing, ensure you have:
 main
  ├── feature/new-feature
  ├── fix/bug-description
- ├── docs/documentation-update
- └── release/v2.1.0
+ └── docs/documentation-update
 ```
+
+No release branches — the repo has no tagged releases yet
+(`git tag -l` is empty; all crates are at 0.1.x). Work lands
+on `main`.
 
 ### Commit Message Format
 
@@ -221,21 +227,40 @@ Brief description of changes
 
 ### Code Review Process
 
-1. **Automated Checks**
-   - CI/CD pipeline must pass
-   - Code coverage maintained
-   - Linting checks pass
+There is currently no CI/CD pipeline configured in this repo
+(no `.github/workflows/` directory). Reviewers will run the test
+suite locally before merging:
+
+```bash
+./scripts/test-all.sh       # full workspace (Rust + Bun)
+cargo clippy --workspace    # lint
+bun run check               # svelte-check (from apps/browser-extension/)
+```
+
+#### What reviewers check
+
+1. **Test pass locally**
+   - `cargo test --workspace` clean
+   - `bun test` clean under `apps/browser-extension/`
+   - No new `cargo clippy` warnings
 
 2. **Manual Review**
    - Code quality and design
-   - Security considerations
+   - Security considerations (anything keystore / FROST /
+     signing-related gets extra attention)
    - Performance impact
-   - Documentation completeness
+   - Documentation keeps up with code (don't claim features that
+     aren't there — this doc tree has been bitten repeatedly by
+     drift, see `git log` for the April 2026 doc-accuracy pass)
 
 3. **Approval Requirements**
    - At least 1 approving review
    - All conversations resolved
    - Up to date with main branch
+
+Adding a GitHub Actions workflow that runs `./scripts/test-all.sh`
++ `cargo clippy --all-targets -D warnings` on every PR is open
+work worth picking up.
 
 ## Coding Standards
 
