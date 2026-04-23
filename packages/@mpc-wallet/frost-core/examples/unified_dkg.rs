@@ -140,7 +140,7 @@ fn main() {
         let key_pkg = participants[idx].ed25519_key_package().expect("no ed25519 key package");
         let (nonces, commitments) = frost_ed25519::round1::commit(
             key_pkg.signing_share(),
-            &mut rand::rngs::OsRng,
+            &mut rand_core::OsRng,
         );
         let id = *key_pkg.identifier();
         ed_nonces.insert(id, nonces);
@@ -190,7 +190,7 @@ fn main() {
         let key_pkg = participants[idx].secp256k1_key_package().expect("no secp256k1 key package");
         let (nonces, commitments) = frost_secp256k1::round1::commit(
             key_pkg.signing_share(),
-            &mut rand::rngs::OsRng,
+            &mut rand_core::OsRng,
         );
         let id = *key_pkg.identifier();
         secp_nonces.insert(id, nonces);
@@ -329,7 +329,7 @@ fn main() {
         let kp = &child_ed_keys[i].key_package;
         let (nonces, commitments) = frost_ed25519::round1::commit(
             kp.signing_share(),
-            &mut rand::rngs::OsRng,
+            &mut rand_core::OsRng,
         );
         let id = *kp.identifier();
         child_ed_nonces.insert(id, nonces);
@@ -370,7 +370,7 @@ fn main() {
         let kp = &child_secp_keys[i].key_package;
         let (nonces, commitments) = frost_secp256k1::round1::commit(
             kp.signing_share(),
-            &mut rand::rngs::OsRng,
+            &mut rand_core::OsRng,
         );
         let id = *kp.identifier();
         child_secp_nonces.insert(id, nonces);
