@@ -568,7 +568,7 @@ export class DkgManager {
             }
             
             // Create blockchain info array matching CLI format
-            const blockchains: import("../../types/keystore").BlockchainInfo[] = [];
+            const blockchains: import("@mpc-wallet/types/keystore").BlockchainInfo[] = [];
             
             // Add Ethereum support for secp256k1
             if (this.ethereumAddress && (this.currentBlockchain === 'ethereum' || finalData.ethereum_address)) {
@@ -599,7 +599,7 @@ export class DkgManager {
             }
             
             // Prepare key share data with CLI-compatible multi-chain format
-            const keyShareData: import("../../types/keystore").KeyShareData = {
+            const keyShareData: import("@mpc-wallet/types/keystore").KeyShareData = {
                 // Core FROST key material
                 keyPackage: finalData.key_package || '', // Serialized from WASM
                 groupPublicKey: finalData.group_public_key,

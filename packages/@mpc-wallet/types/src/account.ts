@@ -65,6 +65,12 @@ export interface Account {
         source: 'generated' | 'imported' | 'dkg';
         /** Custom tags or labels */
         tags?: string[];
+        /** For 'dkg' source: the DKG session id that produced this account. */
+        sessionId?: string;
+        /** For 'dkg' source: signing threshold (t in t-of-n). */
+        threshold?: number;
+        /** For 'dkg' source: total participants (n in t-of-n). */
+        totalParticipants?: number;
     };
 }
 
