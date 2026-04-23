@@ -11,16 +11,16 @@ A general WebRTC signal server for device-to-device communication, written in Ru
 
 ## Usage
 
-Add to your workspace or build as a standalone binary:
+From the mpc-wallet monorepo root:
 
 ```sh
-cargo build --release
+cargo build -p webrtc-signal-server --release
 ```
 
 Run the server (default port: 9000):
 
 ```sh
-cargo run --release
+cargo run -p webrtc-signal-server --release
 ```
 
 The server listens for WebSocket connections on `0.0.0.0:9000`.
@@ -32,7 +32,7 @@ Clients communicate with the server using JSON messages:
 ### Register
 
 ```json
-{ "type": "register", "device_id": "your-unique-id" }a
+{ "type": "register", "device_id": "your-unique-id" }
 ```
 
 ### List Devices
@@ -68,4 +68,4 @@ MIT OR Apache-2.0
 
 ## Repository
 
-[https://github.com/stars-labs/cypto-rust-tools](https://github.com/stars-labs/cypto-rust-tools)
+[https://github.com/stars-labs/crypto-rust-tools](https://github.com/stars-labs/crypto-rust-tools)
