@@ -19,11 +19,12 @@ echo "📱 Cleaning apps..."
 rm -rf apps/*/node_modules
 rm -rf apps/*/dist
 rm -rf apps/*/.wxt
+# Catches apps/{tui-node,native-node,browser-extension}/target
+# when those crates were built in isolation. The workspace
+# shares a top-level `target/` already wiped above.
 rm -rf apps/*/target
-
-# Clean Rust target directories
-echo "🦀 Cleaning Rust targets..."
-rm -rf apps/cli-node/target
+# signal-server is a nested workspace (server/ + cloudflare-worker/)
+# so needs one extra level.
 rm -rf apps/signal-server/*/target
 
 echo "✅ Clean complete!"
