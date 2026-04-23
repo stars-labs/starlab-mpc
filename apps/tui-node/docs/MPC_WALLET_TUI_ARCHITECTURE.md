@@ -689,10 +689,21 @@ apps/tui-node/src/
 │   ├── signing.rs               # Signing protocol state machine
 │   ├── signal.rs                # Signal-server message types
 │   └── session_types.rs
-├── webrtc/
-│   └── mesh_manager.rs          # Full-mesh peer connection manager
+├── webrtc/                      # Mesh TEST HARNESS — not wired
+│   │                            # into the Elm runtime; consumed by
+│   │                            # examples/webrtc_mesh_e2e_test.rs
+│   ├── mesh_manager.rs          # Simulated full-mesh manager
+│   ├── connection_monitor.rs
+│   ├── rejoin_coordinator.rs
+│   └── mesh_simulator.rs
 ├── network/
-│   └── webrtc.rs                # Low-level WebRTC helpers
+│   ├── webrtc.rs                # Low-level WebRTC helpers — one of
+│   │                            # the two REAL production
+│   │                            # RTCPeerConnection construction sites
+│   └── mod.rs
+├── elm/webrtc_signaling.rs      # The other production RTCPeerConnection
+│                                # site — the Elm-loop driver that
+│                                # handles offer/answer/ICE exchange
 ├── keystore/
 │   ├── storage.rs               # Keystore struct + `.json`/`.dat` I/O
 │   ├── encryption.rs            # AES-256-GCM + PBKDF2 100k

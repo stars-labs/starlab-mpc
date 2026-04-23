@@ -132,12 +132,19 @@ mpc-wallet/
 │   │
 │   ├── tui-node/                   # Ratatui Elm-architecture TUI
 │   │   ├── src/bin/                # mpc-wallet-tui binary entry
-│   │   ├── src/elm/                # Model / Update / View + per-screen components
+│   │   ├── src/elm/                # Model / Update / View / Command,
+│   │   │                           # per-screen components, and the
+│   │   │                           # real runtime WebRTC driver at
+│   │   │                           # src/elm/webrtc_signaling.rs
 │   │   ├── src/core/               # *Manager types (reused by native-node)
 │   │   ├── src/protocal/           # Wire types (signal.rs / dkg.rs / signing.rs)
 │   │   ├── src/keystore/           # Encrypted share persistence
-│   │   ├── src/webrtc/             # Mesh manager
-│   │   ├── src/network/            # WebSocket client
+│   │   ├── src/webrtc/             # Mesh TEST HARNESS — not wired
+│   │   │                           # into the Elm runtime; consumed
+│   │   │                           # by examples/webrtc_mesh_e2e_test.rs
+│   │   ├── src/network/            # Low-level WebSocket + webrtc helpers
+│   │   │                           # (src/network/webrtc.rs is the other
+│   │   │                           # production RTCPeerConnection site)
 │   │   ├── src/offline/            # SD-card air-gap mode
 │   │   ├── src/hybrid/             # Online+offline mixed-participant mode
 │   │   └── src/utils/
