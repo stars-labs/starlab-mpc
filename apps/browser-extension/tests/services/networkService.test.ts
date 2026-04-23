@@ -136,10 +136,14 @@ describe('NetworkService', () => {
         });
 
         it('should reject duplicate network IDs', async () => {
+            // Cast to any — viem's `mainnet` has a different shape
+            // than our Chain (viem omits the `network` field which
+            // our Chain type requires). The test just needs the
+            // same `.id`, not full interface conformance.
             const duplicateMainnet: Chain = {
                 ...mainnet,
-                name: 'Fake Mainnet'
-            };
+                name: 'Fake Mainnet',
+            } as any;
 
             await expect(networkService.addCustomNetwork('ethereum', duplicateMainnet))
                 .rejects.toThrow('Network with this ID already exists');
@@ -514,14 +518,16 @@ describe('NetworkService', () => {
         });
 
         it('should handle network switching across different chains', async () => {
-            // Add polygon network (Ethereum-compatible)
+            // Add polygon network (Ethereum-compatible). Cast —
+            // viem's polygon lacks the `network` field our Chain
+            // type requires.
             const polygonNetwork: Chain = {
                 ...polygon,
                 rpcUrls: {
                     default: { http: ['https://polygon-rpc.com'] },
                     public: { http: ['https://polygon-rpc.com'] }
                 }
-            };
+            } as any;
 
             await networkService.addCustomNetwork('ethereum', polygonNetwork);
             await networkService.setCurrentNetwork('ethereum', polygonNetwork);
