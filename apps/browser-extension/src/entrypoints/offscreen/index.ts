@@ -511,27 +511,93 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
             );
             if (webRTCManager && payload.sessionInfo) {
                 const blockchain = payload.blockchain || "ethereum";
+                const signingMessageHex =
+                    payload.sessionInfo.signing_message_hex;
                 console.log(
-                    `🔗 Offscreen: Signing ceremony blockchain: ${blockchain}, session: ${payload.sessionInfo.session_id}, participants: [${payload.sessionInfo.participants.join(", ")}], threshold: ${payload.sessionInfo.threshold}`,
+                    `🔗 Offscreen: Signing ceremony blockchain=${blockchain}, session=${payload.sessionInfo.session_id}, participants=[${payload.sessionInfo.participants.join(", ")}], threshold=${payload.sessionInfo.threshold}, messageHex=${signingMessageHex ?? "(none)"}`,
                 );
 
                 webRTCManager.setBlockchain(blockchain);
                 webRTCManager.updateSessionInfo(payload.sessionInfo);
 
-                // TODO(Ext-2d-offscreen-round1): once WebRTC mesh
-                // is ready, call frostDkg.signing_commit() on the
-                // already-loaded keystore (see globalThis
-                // __importedDkgInstance at line ~354) and broadcast
-                // the commitment to co-signers via WebRTC data
-                // channels. Gate this on same mesh-ready condition
-                // that checkAndTriggerDkg uses for DKG round 1.
-                console.log(
-                    "✅ Offscreen: signing session registered with WebRTCManager. Round 1 initiation is pending follow-up commit.",
-                );
+                if (!signingMessageHex) {
+                    console.warn(
+                        "❌ Offscreen: session has no signing_message_hex — can't start signing ceremony",
+                    );
+                    sendResponse({
+                        success: false,
+                        error: "Session missing signing_message_hex",
+                    });
+                    break;
+                }
+
+                // Ext-2d-offscreen-round1: kick off FROST round 1.
+                // Fire-and-forget the heavy work; respond success
+                // once keystore lookup + signing_commit are done
+                // OR synchronously if we're still waiting on
+                // keystore/mesh. The caller (background) doesn't
+                // block on this — ceremony progress flows back via
+                // signingStateUpdate + signingComplete events.
+                (async () => {
+                    // If the FROST instance isn't loaded yet, fetch
+                    // the active keystore from background and load
+                    // it. Uses an IIFE so the sendResponse below
+                    // returns eagerly — load can take hundreds of
+                    // ms on first call.
+                    const status = webRTCManager!.getDkgStatus?.();
+                    const alreadyLoaded = !!status?.frostDkgInitialized;
+                    if (!alreadyLoaded) {
+                        console.log(
+                            "[sessionReadyForSigning] FROST not loaded — requesting active keystore",
+                        );
+                        const loaded = await new Promise<boolean>((resolve) => {
+                            chrome.runtime.sendMessage(
+                                { type: "getActiveKeystore" },
+                                async (resp: any) => {
+                                    if (
+                                        !resp ||
+                                        !resp.success ||
+                                        !resp.keyShare
+                                    ) {
+                                        console.warn(
+                                            "[sessionReadyForSigning] getActiveKeystore failed or empty",
+                                            chrome.runtime.lastError?.message,
+                                            resp?.error,
+                                        );
+                                        resolve(false);
+                                        return;
+                                    }
+                                    try {
+                                        await webRTCManager!.loadKeystoreForSigning(
+                                            resp.keyShare,
+                                            blockchain,
+                                        );
+                                        resolve(true);
+                                    } catch (e) {
+                                        console.error(
+                                            "[sessionReadyForSigning] loadKeystoreForSigning failed:",
+                                            e,
+                                        );
+                                        resolve(false);
+                                    }
+                                },
+                            );
+                        });
+                        if (!loaded) return;
+                    }
+                    const ok = await webRTCManager!.initiateSigningCeremony(
+                        payload.sessionInfo,
+                        signingMessageHex,
+                    );
+                    console.log(
+                        `[sessionReadyForSigning] initiateSigningCeremony → ${ok}`,
+                    );
+                })();
+
                 sendResponse({
                     success: true,
                     message:
-                        "Signing session registered. Round 1 initiation pending.",
+                        "Signing session registered. Round 1 kickoff in progress.",
                 });
             } else {
                 console.warn(

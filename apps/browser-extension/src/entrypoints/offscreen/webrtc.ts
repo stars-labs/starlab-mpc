@@ -1662,6 +1662,195 @@ export class WebRTCManager {
     return await this.initializeDkg(blockchain as "ethereum" | "solana");
   }
 
+  /**
+   * Ext-2d-offscreen: load an existing wallet's key share into a
+   * fresh FROST instance so it can be used for signing. Populates
+   * `this.frostDkg` the same way `initializeDkg` would after finishing
+   * a DKG ceremony. Called when a signing session is about to start
+   * and we haven't already loaded a keystore (or we need a different
+   * one than what's currently loaded).
+   *
+   * The keystore data shape must match what frost-core's import_keystore
+   * expects — the background's `getActiveKeystore` response already
+   * provides this, modulo field-name normalization (snake_case).
+   *
+   * Returns true on successful load. Throws on keystore parse failure
+   * or WASM init failure; callers should treat those as fatal for
+   * the ceremony and bail.
+   */
+  public async loadKeystoreForSigning(
+    keyShareData: {
+      key_package: string;
+      group_public_key: string;
+      session_id: string;
+      device_id: string;
+      participant_index: number;
+      threshold: number;
+      total_participants: number;
+      curve?: "secp256k1" | "ed25519";
+    },
+    blockchain: "ethereum" | "solana",
+  ): Promise<boolean> {
+    this.currentBlockchain = blockchain;
+    this.participantIndex = keyShareData.participant_index;
+    this._log(
+      `Loading keystore for signing: ${blockchain} / participant ${keyShareData.participant_index} / session ${keyShareData.session_id}`,
+    );
+
+    const { FrostDkgSecp256k1, FrostDkgEd25519 } = await import(
+      "@mpc-wallet/core-wasm"
+    );
+    const instance =
+      blockchain === "ethereum"
+        ? new FrostDkgSecp256k1()
+        : new FrostDkgEd25519();
+    instance.import_keystore(
+      JSON.stringify({
+        key_package: keyShareData.key_package,
+        group_public_key: keyShareData.group_public_key,
+        session_id: keyShareData.session_id,
+        device_id: keyShareData.device_id,
+        participant_index: keyShareData.participant_index,
+        threshold: keyShareData.threshold,
+        total_participants: keyShareData.total_participants,
+      }),
+    );
+
+    this.frostDkg = instance;
+    this.groupPublicKey = keyShareData.group_public_key;
+    if (blockchain === "ethereum") {
+      try {
+        this.ethereumAddress = (instance as any).get_eth_address?.() ?? null;
+        this.walletAddress = this.ethereumAddress;
+      } catch (e) {
+        this._log(`Failed to derive ethereum address: ${e}`);
+      }
+    } else {
+      try {
+        this.solanaAddress = (instance as any).get_address?.() ?? null;
+        this.walletAddress = this.solanaAddress;
+      } catch (e) {
+        this._log(`Failed to derive solana address: ${e}`);
+      }
+    }
+
+    this._log(
+      `Keystore loaded into WASM: address=${this.walletAddress ?? "(unknown)"}`,
+    );
+    return true;
+  }
+
+  /**
+   * Ext-2d-offscreen: kick off a signing ceremony announced via the
+   * session-discovery protocol (sessionReadyForSigning). This is the
+   * real-FROST version; the older `_handleSigningRequest` + mock-
+   * commitment path is a separate legacy flow that we're leaving
+   * in place for now.
+   *
+   * Flow:
+   *   1. Ensure `this.frostDkg` is loaded (caller must run
+   *      loadKeystoreForSigning first).
+   *   2. Set up signingInfo with selected_signers = the first
+   *      `threshold` participants from session_info.participants
+   *      (stable-sorted so every peer picks the same subset — a
+   *      disagreement here would corrupt the ceremony).
+   *   3. Call frostDkg.signing_commit() to generate our commitment
+   *      for THIS round.
+   *   4. Broadcast the commitment as a SigningCommitment WebRTC
+   *      app message to every peer in selected_signers (excluding
+   *      self).
+   *   5. Record our own commitment locally so we can match on it
+   *      when aggregating later.
+   *
+   * Rounds 2 (signature share) + aggregation land in follow-up
+   * commits — `_handleSigningCommitment` still uses mocks.
+   */
+  public async initiateSigningCeremony(
+    sessionInfo: SessionInfo,
+    messageHex: string,
+  ): Promise<boolean> {
+    if (!this.frostDkg) {
+      this._log(
+        `Cannot start signing ceremony: no FROST instance. Call loadKeystoreForSigning first.`,
+      );
+      return false;
+    }
+    if (this.signingState !== SigningState.Idle) {
+      this._log(
+        `Cannot start signing ceremony: already in state ${this.signingState}`,
+      );
+      return false;
+    }
+
+    // Select the first `threshold` participants deterministically.
+    // All peers must pick the same subset — using session_info's
+    // array order (which is the canonical order from the server's
+    // broadcast) ensures convergence without a separate selection
+    // round-trip.
+    const threshold = sessionInfo.threshold;
+    const selectedSigners = sessionInfo.participants.slice(0, threshold);
+
+    if (!selectedSigners.includes(this.localPeerId)) {
+      this._log(
+        `Not a selected signer for this ceremony (we're not in the first ${threshold} of ${sessionInfo.participants.length}) — idle until re-invited`,
+      );
+      return false;
+    }
+
+    const signingId = `sign_${sessionInfo.session_id}`;
+    this.signingInfo = {
+      signing_id: signingId,
+      transaction_data: messageHex,
+      threshold,
+      participants: sessionInfo.participants.slice(),
+      acceptances: new Map(),
+      accepted_participants: selectedSigners.slice(),
+      selected_signers: selectedSigners,
+      step: "commitment_phase",
+      initiator: sessionInfo.proposer_id,
+    };
+
+    this._log(
+      `Initiating signing ceremony ${signingId}: ${threshold} of ${sessionInfo.participants.length}, signers=[${selectedSigners.join(", ")}]`,
+    );
+
+    // Generate our round-1 commitment. Returns hex string.
+    let commitmentHex: string;
+    try {
+      commitmentHex = this.frostDkg.signing_commit();
+    } catch (e) {
+      this._log(`signing_commit() failed: ${e}`);
+      this.signingState = SigningState.Failed;
+      this.onSigningStateUpdate(this.signingState, this.signingInfo);
+      return false;
+    }
+
+    // Record our own commitment so when it's time to aggregate,
+    // we're counted alongside the peers'. Keyed by peer-id to match
+    // how _handleSigningCommitment records incoming ones.
+    this.signingCommitments.set(this.localPeerId, commitmentHex);
+
+    // Broadcast to all other selected signers.
+    const broadcast: WebRTCAppMessage = {
+      webrtc_msg_type: "SigningCommitment" as const,
+      signing_id: signingId,
+      sender_identifier: this.localPeerId,
+      commitment: commitmentHex,
+    };
+    for (const peerId of selectedSigners) {
+      if (peerId !== this.localPeerId) {
+        this.sendWebRTCAppMessage(peerId, broadcast);
+      }
+    }
+
+    this.signingState = SigningState.CommitmentPhase;
+    this.onSigningStateUpdate(this.signingState, this.signingInfo);
+    this._log(
+      `Round 1: broadcast our commitment to ${selectedSigners.length - 1} co-signers`,
+    );
+    return true;
+  }
+
   private async _getOrCreatePeerConnection(peerId: string): Promise<RTCPeerConnection | null> {
     let pc = this.peerConnections.get(peerId);
     if (!pc) {
