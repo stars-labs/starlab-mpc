@@ -483,7 +483,11 @@ the broader keystore-layout retraction.
 - **Encryption + Authentication**: AES-256-GCM. GCM provides
   confidentiality and authenticity in one pass — there is no separate
   HMAC layer; the GCM auth tag is the MAC.
-- **Storage**: Local filesystem at `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.dat`.
+- **Storage**: Local filesystem at
+  `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` — a single
+  JSON file per wallet (WalletFile wrapper). Earlier drafts showed
+  this path ending in `.dat`; no `.dat` file is ever produced.
+  See the Keystore Format subsection above for the real shape.
 
 ---
 
@@ -556,10 +560,24 @@ service worker via `chrome.runtime.sendMessage`.
 pub trait UIProvider: Send + Sync { /* methods */ }
 ```
 
-TUI and native-node implement this interface differently —
-TUI drives it through tui-realm; native-node implements
-`NativeUICallback` (`apps/native-node/src/ui_callback.rs`) to bridge
-onto the Slint event loop.
+Two distinct trait surfaces — not the same thing:
+
+  - **`UIProvider`** (`apps/tui-node/src/elm/provider.rs:24`):
+    abstracts the TUI Elm-loop's view of a UI backend. The TUI's
+    ratatui rendering path implements it; test-only
+    `NoOpUIProvider` also implements it for headless test runs.
+  - **`UICallback`** (`apps/tui-node/src/core/mod.rs:244`): the
+    event-push surface used by the non-Elm managers in
+    `tui-node::core`. Native-node implements THIS trait via
+    `NativeUICallback` (`apps/native-node/src/ui_callback.rs:25`)
+    to bridge onto the Slint event loop. Browser-extension and
+    TUI don't need a separate UICallback impl because the Elm
+    loop consumes manager output directly.
+
+Earlier drafts of this paragraph conflated the two, implying
+native-node implemented `UIProvider`. It implements `UICallback`.
+See CLAUDE.md § Key Patterns for the distinction in one
+sentence.
 
 ### Native Desktop
 
