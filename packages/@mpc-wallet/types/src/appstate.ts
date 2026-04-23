@@ -149,10 +149,12 @@ export function getCompatibleChains(curveType: string): SupportedChain[] {
   return CURVE_COMPATIBLE_CHAINS[curveType] || [];
 }
 
-export function getRequiredCurve(chain: SupportedChain): string {
+export function getRequiredCurve(chain: SupportedChain): 'secp256k1' | 'ed25519' {
   for (const [curve, chains] of Object.entries(CURVE_COMPATIBLE_CHAINS)) {
     if (chains.includes(chain)) {
-      return curve;
+      // CURVE_COMPATIBLE_CHAINS keys are hardcoded 'secp256k1' / 'ed25519';
+      // Object.entries widens to `string`, hence the cast.
+      return curve as 'secp256k1' | 'ed25519';
     }
   }
   return 'secp256k1';
