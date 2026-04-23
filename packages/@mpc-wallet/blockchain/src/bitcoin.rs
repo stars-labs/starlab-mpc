@@ -111,23 +111,17 @@ impl BlockchainHandler for BitcoinHandler {
         let r = &signature_bytes[..32];
         let s = &signature_bytes[32..64];
         
-        // Create DER encoding (simplified - use bitcoin crate in production)
-        let mut der = Vec::new();
-        der.push(0x30); // SEQUENCE
-        der.push(0x44); // Total length (68 bytes typical)
-        
-        // r component
-        der.push(0x02); // INTEGER
-        der.push(0x20); // Length (32 bytes)
+        // Create DER encoding (simplified - use bitcoin crate in production).
+        // Layout: SEQUENCE(0x30) len(0x44) INTEGER(0x02) len(0x20) r(32)
+        //         INTEGER(0x02) len(0x20) s(32) SIGHASH_ALL(0x01)
+        let mut der = vec![
+            0x30, 0x44,           // SEQUENCE, total length
+            0x02, 0x20,           // INTEGER, r-length
+        ];
         der.extend_from_slice(r);
-        
-        // s component
-        der.push(0x02); // INTEGER
-        der.push(0x20); // Length (32 bytes)
+        der.extend_from_slice(&[0x02, 0x20]); // INTEGER, s-length
         der.extend_from_slice(s);
-        
-        // Add SIGHASH_ALL
-        der.push(0x01);
+        der.push(0x01);                        // SIGHASH_ALL
         
         Ok(SignatureData {
             signature: hex::encode(&der),

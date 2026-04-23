@@ -174,21 +174,17 @@ pub async fn profile_dkg_operation(phase: &str, duration: Duration) {
 
 /// Performance optimization recommendations
 pub fn analyze_performance(_monitor: &PerformanceMonitor) -> Vec<String> {
-    let mut recommendations = Vec::new();
-    
-    // Check render performance
-    recommendations.push("Enable render throttling to prevent excessive redraws".to_string());
-    recommendations.push("Use cached values for addresses to prevent regeneration".to_string());
-    recommendations.push("Batch UI updates to reduce render calls".to_string());
-    
-    // Check key handling
-    recommendations.push("Debounce rapid key events to prevent UI lag".to_string());
-    recommendations.push("Process key events asynchronously where possible".to_string());
-    
-    // Check DKG performance
-    recommendations.push("Use deterministic session IDs for consistent address generation".to_string());
-    recommendations.push("Cache group public keys to prevent recalculation".to_string());
-    
-    recommendations
+    vec![
+        // Render performance
+        "Enable render throttling to prevent excessive redraws".to_string(),
+        "Use cached values for addresses to prevent regeneration".to_string(),
+        "Batch UI updates to reduce render calls".to_string(),
+        // Key handling
+        "Debounce rapid key events to prevent UI lag".to_string(),
+        "Process key events asynchronously where possible".to_string(),
+        // DKG performance
+        "Use deterministic session IDs for consistent address generation".to_string(),
+        "Cache group public keys to prevent recalculation".to_string(),
+    ]
 }
 
