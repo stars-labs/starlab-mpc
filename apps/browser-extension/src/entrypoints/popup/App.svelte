@@ -153,7 +153,17 @@
     
     // Password prompt state
     let showPasswordPrompt = false;
-    let passwordPromptConfig = {
+    // Explicit typing — inference would read `onSubmit: null` as
+    // type `null` exclusively, then later assignments of actual
+    // handler functions fail with "Type '(event) => Promise<void>'
+    // is not assignable to type 'null'". Same story for strings.
+    let passwordPromptConfig: {
+        title: string;
+        message: string;
+        confirmMode: boolean;
+        onSubmit: ((event: CustomEvent) => void | Promise<void>) | null;
+        onCancel: (() => void) | null;
+    } = {
         title: "Unlock Keystore",
         message: "Enter your password to unlock the wallet",
         confirmMode: false,
