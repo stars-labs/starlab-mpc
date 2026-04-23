@@ -180,6 +180,16 @@ export class PopupMessageHandler {
                     await this.handleSaveDkgWalletRequest(message, sendResponse);
                     break;
 
+                case MESSAGE_TYPES.DECLINE_SIGNING_SESSION:
+                    console.log(
+                        "🚫 [PopupMessageHandler] DECLINE_SIGNING_SESSION: Relaying decline to proposer",
+                    );
+                    await this.handleDeclineSigningSessionRequest(
+                        message,
+                        sendResponse,
+                    );
+                    break;
+
                 case MESSAGE_TYPES.CREATE_SIGNING_SESSION:
                     console.log("🖊️ [PopupMessageHandler] CREATE_SIGNING_SESSION: Initiating signing ceremony");
                     await this.handleCreateSigningSessionRequest(message, sendResponse);
@@ -622,6 +632,90 @@ export class PopupMessageHandler {
         }
         const result = await this.sessionManager.joinDkgSession(sessionId);
         sendResponse(result);
+    }
+
+    /**
+     * Ext-3c: popup → background "I'm declining this signing
+     * invite". We relay a SigningDecline frame to the proposer
+     * via the signal server (WebRTC mesh doesn't exist yet for a
+     * co-signer who hasn't joined). Proposer's handleRelayMessage
+     * routes it into a toast + optional roster overlay.
+     *
+     * Payload: `{session_id}`. The invite for this session_id
+     * must exist in appState.invites (otherwise we don't know the
+     * proposer_id). Removing from invites locally too so the
+     * popup's list doesn't re-render it post-decline.
+     */
+    private async handleDeclineSigningSessionRequest(
+        message: any,
+        sendResponse: (response: any) => void,
+    ): Promise<void> {
+        try {
+            const sessionId = message.session_id;
+            if (typeof sessionId !== "string" || !sessionId) {
+                sendResponse({ success: false, error: "session_id required" });
+                return;
+            }
+            const appState = this.stateManager.getState();
+            const invite = (appState.invites ?? []).find(
+                (s: any) => s.session_id === sessionId,
+            );
+            if (!invite) {
+                sendResponse({
+                    success: false,
+                    error: `No known invite for ${sessionId}`,
+                });
+                return;
+            }
+            const myDeviceId = appState.deviceId;
+            if (!myDeviceId) {
+                sendResponse({ success: false, error: "Device id not set" });
+                return;
+            }
+            const proposerId = invite.proposer_id;
+            if (!proposerId || proposerId === myDeviceId) {
+                // Can't decline our own proposal, and can't send
+                // anywhere if proposer is unknown.
+                sendResponse({
+                    success: false,
+                    error: "Invalid proposer for decline",
+                });
+                return;
+            }
+
+            const ok = this.webSocketManager.relayToPeer(proposerId, {
+                websocket_msg_type: "SigningDecline",
+                signing_id: sessionId,
+                decliner_id: myDeviceId,
+            });
+
+            // Remove from invites locally so the popup's list drops it.
+            const remaining = (appState.invites ?? []).filter(
+                (s: any) => s.session_id !== sessionId,
+            );
+            this.stateManager.updateInvites?.(remaining);
+
+            if (!ok) {
+                sendResponse({
+                    success: false,
+                    error: "Signal server not connected",
+                });
+                return;
+            }
+            console.log(
+                `[PopupMessageHandler] Relayed SigningDecline to ${proposerId} for ${sessionId}`,
+            );
+            sendResponse({ success: true });
+        } catch (err) {
+            console.error(
+                "[PopupMessageHandler] DECLINE_SIGNING_SESSION failed:",
+                err,
+            );
+            sendResponse({
+                success: false,
+                error: (err as Error).message ?? String(err),
+            });
+        }
     }
 
     /**

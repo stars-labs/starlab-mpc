@@ -86,6 +86,18 @@
     let incomingSigningInvite: import("@mpc-wallet/types/session").SessionInfo | null = null;
     let dismissedSigningInvites: Set<string> = new Set();
 
+    // Ext-3c: proposer-side toast when a co-signer explicitly
+    // declines a signing invite we sent. Surfaced as a transient
+    // amber banner; auto-dismisses after 6 seconds. Kept distinct
+    // from signingProgress (which tracks commit/share rounds) —
+    // declines can happen before the ceremony has any FROST state.
+    type PeerDeclineToast = {
+        sessionId: string;
+        declinerId: string;
+        expiresAt: number;
+    };
+    let peerDeclineToasts: PeerDeclineToast[] = [];
+
     // Ext-2d-progress: live per-peer roster during an active FROST
     // signing ceremony. Updated by the `signingProgress` event from
     // background every time a commitment or share lands on
@@ -593,6 +605,26 @@
                 };
                 break;
 
+            case "signingPeerDeclined":
+                // Ext-3c: proposer-side handler. A co-signer relayed
+                // SigningDecline for our signing session. Show a
+                // 6-second amber toast + auto-dismiss. Stack multiple
+                // if many declines arrive (rare but harmless).
+                {
+                    const toast: PeerDeclineToast = {
+                        sessionId: message.sessionId,
+                        declinerId: message.declinerId,
+                        expiresAt: Date.now() + 6000,
+                    };
+                    peerDeclineToasts = [...peerDeclineToasts, toast];
+                    setTimeout(() => {
+                        peerDeclineToasts = peerDeclineToasts.filter(
+                            (t) => t.expiresAt !== toast.expiresAt,
+                        );
+                    }, 6000);
+                }
+                break;
+
             case "sessionAvailable":
                 // Ext-3b: auto-modal for incoming signing invites.
                 // Fires once per new session_available broadcast
@@ -801,6 +833,34 @@
             incomingSigningInvite.session_id,
         ]);
         incomingSigningInvite = null;
+    }
+
+    async function declineSigningInvite() {
+        if (!incomingSigningInvite) return;
+        const sessionId = incomingSigningInvite.session_id;
+        // Add to dismissed immediately so any reentrant
+        // sessionAvailable broadcast doesn't re-pop the modal
+        // before the relay completes.
+        dismissedSigningInvites = new Set([
+            ...dismissedSigningInvites,
+            sessionId,
+        ]);
+        incomingSigningInvite = null;
+        try {
+            const response = await chrome.runtime.sendMessage({
+                type: MESSAGE_TYPES.DECLINE_SIGNING_SESSION,
+                session_id: sessionId,
+            });
+            if (!response?.success) {
+                console.warn(
+                    `[UI] Decline relay failed: ${response?.error ?? "unknown"}`,
+                );
+            } else {
+                console.log("[UI] Declined signing session", sessionId);
+            }
+        } catch (e) {
+            console.error("[UI] Decline exception:", e);
+        }
     }
 
     onMount(async () => {
@@ -1787,13 +1847,43 @@
                         </button>
                         <button
                             type="button"
+                            class="rounded border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
+                            on:click={declineSigningInvite}
+                            title="Notify the proposer that you decline — they see a toast + roster ✗"
+                        >
+                            Decline
+                        </button>
+                        <button
+                            type="button"
                             class="rounded border border-gray-300 px-3 py-2 text-xs hover:bg-gray-50"
                             on:click={laterSigningInvite}
+                            title="Dismiss without notifying — you can still join later from the invites list"
                         >
                             Later
                         </button>
                     </div>
                 </div>
+            </div>
+        {/if}
+
+        <!-- Ext-3c: peer-decline toast. Proposer sees this when a
+             co-signer relays SigningDecline via the signal server.
+             Amber + transient (auto-dismisses after 6s, handled in
+             the case handler). Stacked if multiple declines arrive. -->
+        {#if peerDeclineToasts.length > 0}
+            <div class="fixed top-4 right-4 z-40 space-y-2">
+                {#each peerDeclineToasts as toast (toast.expiresAt)}
+                    <div
+                        class="rounded border border-amber-300 bg-amber-50 p-2 shadow-md"
+                    >
+                        <p class="text-xs font-semibold text-amber-900">
+                            ✗ Peer declined
+                        </p>
+                        <p class="text-[10px] text-amber-800 font-mono">
+                            {toast.declinerId}
+                        </p>
+                    </div>
+                {/each}
             </div>
         {/if}
 

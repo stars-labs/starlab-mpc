@@ -274,6 +274,11 @@ export const MESSAGE_TYPES = {
     // signing_message_hex, then announces. Payload:
     // {walletId, message, curve}.
     CREATE_SIGNING_SESSION: "createSigningSession",
+    // Ext-3c: popup → background "I'm declining this signing
+    // session invite". Background relays a SigningDecline via
+    // the signal server to the proposer so they see a toast
+    // (not a silent timeout). Payload: {session_id}.
+    DECLINE_SIGNING_SESSION: "declineSigningSession",
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",

@@ -295,6 +295,28 @@ export class WebSocketManager {
     }
 
     /**
+     * Ext-3c: send a peer-to-peer relay via the signal server.
+     * Used for SigningDecline delivery (co-signer rejecting an
+     * invite before WebRTC mesh exists, so we can't use data
+     * channels). The wire shape matches what the server's `relay`
+     * handler expects — server forwards to `to` as a `relay` frame
+     * with `from` stamped in.
+     *
+     * Returns true if we dispatched the send, false if WebSocket
+     * isn't connected.
+     */
+    public relayToPeer(toDeviceId: string, data: any): boolean {
+        if (!this.wsClient || this.wsClient.getReadyState() !== WebSocket.OPEN) {
+            console.warn(
+                "[WebSocketManager] Cannot relay to peer: WebSocket not open",
+            );
+            return false;
+        }
+        this.wsClient.relayMessage(toDeviceId, data);
+        return true;
+    }
+
+    /**
      * Handle incoming WebSocket messages
      */
     private handleWebSocketMessage(message: any): void {
@@ -602,6 +624,28 @@ export class WebSocketManager {
             case "SessionResponse":
                 console.log("[WebSocketManager] Session response received:", data);
                 this.sessionManager.handleSessionResponse(msg.from, data);
+                break;
+
+            case "SigningDecline":
+                // Ext-3c: a co-signer rejected our signing invite via
+                // relay (they hadn't joined the WebRTC mesh yet so
+                // data channels weren't available). Surface to popup
+                // as a toast; if an active ceremony is running for
+                // this session_id, the progress roster can overlay a
+                // ✗ badge on the decliner.
+                {
+                    const d = data as any;
+                    const signingId = d.signing_id;
+                    const declinerId = d.decliner_id || msg.from;
+                    console.log(
+                        `[WebSocketManager] SigningDecline from ${declinerId} for ${signingId}`,
+                    );
+                    this.broadcastToPopup({
+                        type: "signingPeerDeclined",
+                        sessionId: signingId,
+                        declinerId,
+                    } as any);
+                }
                 break;
 
             default:
