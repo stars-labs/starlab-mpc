@@ -27,6 +27,23 @@ export interface AppState {
    * field; callers should `?? {}` or nullish-guard before indexing.
    */
   sessionAcceptanceStatus?: Record<string, Record<string, boolean>>;
+  /**
+   * Popup-local UI preferences persisted in appState so a popup
+   * reopen preserves the user's settings. Shape kept loose so the
+   * popup can evolve without a type-round-trip through this file.
+   */
+  uiPreferences?: {
+    darkMode?: boolean;
+    language?: string;
+    showAdvanced?: boolean;
+    [key: string]: any;
+  };
+  /**
+   * Latest account list update — populated when background
+   * broadcasts `accountsUpdated`. Popup consumes this to refresh
+   * the account picker. Shape is per-blockchain array of Account.
+   */
+  accountsUpdated?: any;
   sessionInfo: SessionInfo | null;
   invites: SessionInfo[];
   meshStatus: MeshStatus;

@@ -378,9 +378,7 @@ export async function checkAndRestoreKeystores(): Promise<void> {
             accepted_devices: [activeWallet.id],
             threshold: 1, // Default for imported keystores
             total: 1,
-            is_proposer: true,
-            timestamp: Date.now()
-        });
+        } as any);
         
         // Store addresses based on active wallet's blockchain
         if (activeWallet.blockchain === 'ethereum' && activeWallet.address) {
