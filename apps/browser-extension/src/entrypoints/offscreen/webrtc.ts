@@ -72,6 +72,24 @@ export class WebRTCManager {
   public onMeshStatusUpdate: (status: MeshStatus) => void = () => { };
   public onWebRTCAppMessage: (fromPeerId: string, message: WebRTCAppMessage) => void = () => { };
   public onDkgStateUpdate: (state: DkgState) => void = () => { };
+  /**
+   * Fires exactly once per ceremony after the FROST DKG finalize
+   * succeeds. Payload carries everything the save-keyshare flow
+   * needs: group public key, derived address for the selected
+   * chain, session context. Kept separate from `onDkgStateUpdate`
+   * so late subscribers don't have to race on "was Complete already
+   * emitted?" — if this fires, the ceremony is terminally done.
+   */
+  public onDkgComplete: (payload: {
+    groupPublicKey: string;
+    address: string | null;
+    blockchain: "ethereum" | "solana";
+    sessionId: string | null;
+    threshold: number;
+    total: number;
+    participants: string[];
+    participantIndex: number | null;
+  }) => void = () => { };
   public onSigningStateUpdate: (state: SigningState, info: SigningInfo | null) => void = () => { };
   public onWebRTCConnectionUpdate: (peerId: string, connected: boolean) => void = () => { };
 
@@ -1535,6 +1553,37 @@ export class WebRTCManager {
 
       this._updateDkgState(DkgState.Complete);
       this._log(`DKG completed successfully. Group public key: ${this.groupPublicKey}`);
+
+      // Ext-1d event propagation: surface the derived key material to
+      // the offscreen outer layer (and on up to background + popup)
+      // so the post-ceremony flow (display address, prompt password,
+      // encrypt + save keyshare) has something to hook into. Fired
+      // exactly once per ceremony — the DkgState.Failed branch
+      // below doesn't emit this, and we don't re-fire on repeat
+      // enters of Complete (dkgState transition already dedups).
+      try {
+        const address =
+          this.currentBlockchain === "ethereum"
+            ? this.ethereumAddress
+            : this.solanaAddress;
+        this.onDkgComplete({
+          groupPublicKey: this.groupPublicKey ?? "",
+          address: address ?? null,
+          blockchain: this.currentBlockchain,
+          sessionId: this.sessionInfo?.session_id ?? null,
+          threshold: this.sessionInfo?.threshold ?? 0,
+          total: this.sessionInfo?.total ?? 0,
+          participants: this.sessionInfo?.participants ?? [],
+          participantIndex: this.participantIndex,
+        });
+      } catch (cbErr) {
+        // A broken onDkgComplete subscriber must not surface as a
+        // FROST failure — we already have the group key, the
+        // ceremony succeeded cryptographically. Log and move on.
+        this._log(
+          `onDkgComplete subscriber threw (non-fatal): ${this._getErrorMessage(cbErr)}`,
+        );
+      }
     } catch (error) {
       this._log(`Error finalizing DKG: ${this._getErrorMessage(error)}`);
       this._updateDkgState(DkgState.Failed);

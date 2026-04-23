@@ -261,6 +261,20 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
                     console.log("Offscreen: DKG state update:", state);
                     sendToBackground({ type: "fromOffscreen", payload: { type: "dkgStateUpdate", state } });
                 };
+                // Ext-1d: completion-specific event with the derived
+                // group public key + address. Separate channel from
+                // dkgStateUpdate so late popup subscribers (popup that
+                // just opened after DKG already finished) can query
+                // appState to find out without needing to replay the
+                // state-transition timeline. Propagated through
+                // StateManager → popup via `dkgCompleted` broadcast.
+                webRTCManager.onDkgComplete = (payload) => {
+                    console.log("Offscreen: DKG complete:", payload);
+                    sendToBackground({
+                        type: "fromOffscreen",
+                        payload: { type: "dkgComplete", ...payload },
+                    });
+                };
 
                 webRTCManager.onWebRTCConnectionUpdate = (deviceId: string, connected: boolean) => {
                     console.log("Offscreen: WebRTC connection update:", deviceId, connected);

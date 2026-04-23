@@ -1252,8 +1252,29 @@
 
             {#if appState.sessionInfo && appState.dkgState === DkgState.Complete}
                 <div class="p-2 bg-green-50 border border-green-200 rounded">
-                    <p class="text-sm text-green-700">
-                        ✓ DKG Complete - MPC addresses available for {appState.chain}
+                    <p class="text-sm font-medium text-green-900 mb-1">
+                        ✓ DKG Complete
+                    </p>
+                    {#if appState.dkgAddress}
+                        <p class="text-xs text-green-800">
+                            <span class="font-semibold">
+                                {appState.chain === "ethereum" ? "Ethereum" : "Solana"} address:
+                            </span>
+                        </p>
+                        <p class="text-xs font-mono break-all text-green-900 bg-white rounded px-1.5 py-0.5 border border-green-200">
+                            {appState.dkgAddress}
+                        </p>
+                    {/if}
+                    {#if appState.dkgGroupPublicKey}
+                        <p class="text-xs text-green-800 mt-1">
+                            <span class="font-semibold">Group public key:</span>
+                        </p>
+                        <p class="text-xs font-mono break-all text-green-900 bg-white rounded px-1.5 py-0.5 border border-green-200">
+                            {appState.dkgGroupPublicKey}
+                        </p>
+                    {/if}
+                    <p class="text-xs text-green-700 mt-1 italic">
+                        Next: enter a password to encrypt + save this keyshare.
                     </p>
                 </div>
             {:else if appState.sessionInfo && appState.dkgState === DkgState.KeystoreImported}

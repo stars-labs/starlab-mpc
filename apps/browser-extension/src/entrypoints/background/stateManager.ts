@@ -511,6 +511,41 @@ export class StateManager {
                 } as any);
                 break;
 
+            case "dkgComplete":
+                // Ext-1d: the offscreen has run FROST finalize and
+                // the group public key + derived address are now
+                // known. Stash on appState so the popup can render
+                // a WalletComplete-style banner. Full encrypt+save
+                // flow is a follow-up commit; this is event
+                // propagation only.
+                {
+                    const info: any = payload;
+                    (this.appState as any).dkgAddress = info.address ?? "";
+                    (this.appState as any).dkgGroupPublicKey =
+                        info.groupPublicKey ?? "";
+                    (this.appState as any).dkgLastResult = {
+                        groupPublicKey: info.groupPublicKey,
+                        address: info.address,
+                        blockchain: info.blockchain,
+                        sessionId: info.sessionId,
+                        threshold: info.threshold,
+                        total: info.total,
+                        participants: info.participants,
+                        participantIndex: info.participantIndex,
+                        completedAt: Date.now(),
+                    };
+                    console.log(
+                        "[StateManager] DKG complete received:",
+                        (this.appState as any).dkgLastResult,
+                    );
+                    this.broadcastToPopupPorts({
+                        type: "dkgCompleted",
+                        ...info,
+                    } as any);
+                    this.broadcastCurrentState();
+                }
+                break;
+
             case "sessionUpdate":
                 if ('sessionInfo' in payload && 'invites' in payload) {
 //                     console.log("[StateManager] Received session update from offscreen:", payload);
