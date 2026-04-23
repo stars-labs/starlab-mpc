@@ -15,9 +15,11 @@ The MPC Wallet Browser Extension is a Manifest V3 Chrome/Firefox extension that 
 ## Quick Start
 
 ### Prerequisites
-- Node.js 18+ or Bun runtime
+- Bun runtime (`curl -fsSL https://bun.sh/install | bash`) —
+  this is a Bun workspace, not npm/yarn/Node.js
 - Chrome/Firefox browser
-- Rust toolchain with wasm-pack
+- Rust toolchain with the `wasm32-unknown-unknown` target
+  (wasm-pack is a devDependency pulled in by `bun install`)
 
 ### Installation
 
@@ -54,21 +56,24 @@ bun run dev
 ```
 ┌──────────────────────────────────────────────────┐
 │                   Web Page                        │
-│            (dApp with window.ethereum)            │
+│    (dApp — discovers us via EIP-6963, talks to   │
+│     window.starlabEthereum, NOT window.ethereum) │
 └────────────────────┬─────────────────────────────┘
                      │
               Content Script
-         (Provider injection & RPC)
+         (injects provider, proxies RPC)
                      │
 ┌────────────────────┼─────────────────────────────┐
 │   Extension        │                             │
 ├────────────────────┼─────────────────────────────┤
 │  Popup UI     Background Worker    Offscreen     │
-│  (Svelte)    (Service Worker)      Document      │
-│                                                   │
-│  • Wallet UI  • Message Router   • WebRTC P2P    │
-│  • Settings   • State Manager    • FROST WASM    │
-│  • Accounts   • WebSocket Client • Crypto Ops    │
+│  (Svelte 5   (Service Worker —     Document      │
+│   legacy)    StateManager,       (WebRTC + WASM  │
+│              SessionManager,      FROST host)    │
+│              WebSocketManager,                   │
+│              RpcHandler,                         │
+│              OffscreenManager,                   │
+│              KeepaliveController)                │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -97,20 +102,29 @@ bun run dev
 ### Project Structure
 
 ```
-browser-extension/
+apps/browser-extension/
 ├── src/
 │   ├── entrypoints/      # Extension entry points
 │   │   ├── background/   # Service worker
-│   │   ├── content/      # Content scripts
-│   │   ├── offscreen/    # Offscreen document
-│   │   └── popup/        # Popup UI
+│   │   ├── content/      # Content script
+│   │   ├── injected/     # Page-context EIP-1193 provider
+│   │   ├── offscreen/    # Offscreen document (WebRTC + WASM)
+│   │   └── popup/        # Svelte popup UI
 │   ├── components/       # Svelte components
-│   ├── services/         # Business logic
-│   ├── types/           # TypeScript definitions
-│   └── utils/           # Utility functions
-├── public/              # Static assets
-├── wxt.config.ts        # WXT framework config
-└── package.json         # Dependencies
+│   ├── services/         # AccountService, NetworkService, etc.
+│   ├── utils/
+│   └── config/           # signal-server.ts + other config
+├── tests/                # Bun test suite
+├── public/               # Static assets
+├── wxt.config.ts         # WXT framework config
+└── package.json          # Bun workspace member
+
+# Types and shared schemas live in the workspace `@mpc-wallet/types`
+# package, NOT under the extension's own `src/`:
+packages/@mpc-wallet/types/src/
+├── messages.ts           # All cross-context message types
+├── appstate.ts           # SupportedChain + app state
+└── session.ts            # SessionInfo
 ```
 
 ### Key Technologies
@@ -123,16 +137,22 @@ browser-extension/
 
 ### Testing
 
+From `apps/browser-extension/` (all Bun test invocations — see
+[`docs/testing/TESTING.md`](../../../docs/testing/TESTING.md)):
+
 ```bash
-# Run unit tests
-bun test
-
-# Run E2E tests
-bun run test:e2e
-
-# Test specific component
-bun test AccountManager
+bun test                    # full suite
+bun run test:watch          # watch mode
+bun run test:coverage       # coverage report
+bun run test:unit           # tests/services + tests/config
+bun run test:integration    # tests/integration
+bun run test:webrtc         # tests/entrypoints/offscreen/webrtc.*
+bun test tests/services/walletClient.test.ts   # a specific file
 ```
+
+No `test:e2e` script exists in `package.json` — earlier drafts
+of this section listed it. Automated full-mesh E2E is open work
+(see `docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md`).
 
 ### Building for Production
 
@@ -151,46 +171,59 @@ bun run build:edge
 
 ### For dApp Developers
 
+dApps discover the wallet via **EIP-6963**, not by checking
+`window.ethereum` directly (see
+[`docs/implementation/EIP-6963-IMPLEMENTATION.md`](../../../docs/implementation/EIP-6963-IMPLEMENTATION.md)
+— fixed in 6ecd63a). The extension injects ONLY as
+`window.starlabEthereum`, never `window.ethereum`, to coexist with
+other wallet extensions.
+
 ```javascript
-// Check if MPC Wallet is installed
-if (window.ethereum && window.ethereum.isMPCWallet) {
-  // Request account access
-  const accounts = await window.ethereum.request({
-    method: 'eth_requestAccounts'
-  });
-  
-  // Send transaction
-  const txHash = await window.ethereum.request({
-    method: 'eth_sendTransaction',
-    params: [{
-      from: accounts[0],
-      to: '0x...',
-      value: '0x...'
-    }]
-  });
-}
+// EIP-6963 discovery (recommended)
+window.addEventListener("eip6963:announceProvider", (event) => {
+  const { info, provider } = event.detail;
+  if (info.rdns === "org.starlab.wallet") {
+    // Found us; use `provider` for RPC
+    const accounts = await provider.request({ method: "eth_requestAccounts" });
+  }
+});
+window.dispatchEvent(new Event("eip6963:requestProvider"));
+
+// Or, if you know the extension is installed:
+const provider = window.starlabEthereum;
+const accounts = await provider.request({ method: "eth_requestAccounts" });
 ```
+
+Real RPC method list backing the provider: see the injected
+provider's method switch in
+`src/entrypoints/injected/index.ts` (EIP-1193 methods including
+`eth_requestAccounts`, `eth_accounts`, `eth_chainId`,
+`personal_sign`, `eth_sendTransaction`, …).
 
 ### Extension APIs
 
-```typescript
-// Send message to background
-chrome.runtime.sendMessage({
-  type: 'CREATE_WALLET',
-  payload: {
-    name: 'My Wallet',
-    threshold: 2,
-    participants: 3
-  }
-});
+Internal `chrome.runtime.sendMessage` types are consts in
+`MESSAGE_TYPES` (see the dispatch table in
+`src/entrypoints/background/messageHandlers.ts`). Real type names
+differ from earlier drafts:
 
-// Listen for updates
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'WALLET_CREATED') {
-    console.log('Wallet created:', message.wallet);
-  }
+```typescript
+// Earlier drafts of this doc showed:
+//   type: 'CREATE_WALLET', payload: { name, threshold, participants }
+// Real type: CREATE_DKG_WALLET (see MESSAGE_TYPES enum in
+// packages/@mpc-wallet/types/src/messages.ts:303)
+
+chrome.runtime.sendMessage({
+  type: "CREATE_DKG_WALLET",  // real MESSAGE_TYPES.CREATE_DKG_WALLET
+  session_id: "my-wallet",
+  total: 3,
+  threshold: 2,
+  participants: ["alice", "bob", "charlie"],
 });
 ```
+
+For the full list of real message types see the tech doc's API
+Reference section (fixed in c9417e5).
 
 ## Troubleshooting
 
