@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { REAL_WEBCRYPTO } from '../setup-bun';
 import { KeystoreManager } from '../../src/services/keystoreManager';
 import { KeystoreService } from '../../src/services/keystoreService';
+import { resetStorageData } from '../__mocks__/imports';
 import type { KeyShareData, ExtensionWalletMetadata } from "@mpc-wallet/types/keystore";
 
 // Mock chrome.storage
@@ -48,14 +50,41 @@ const mockStorage = {
 (global as any).chrome = { storage: mockStorage };
 
 describe('Keystore Persistence Integration', () => {
+    // Shared #imports mock storage that persists across singleton
+    // resets within a single test (that's the whole point of the
+    // "close extension, reopen" simulation — data survives).
+    let sharedData: Record<string, any> = {};
+
+    // Stash the pre-test global.crypto so afterEach can restore it —
+    // without this, replacing crypto with REAL_WEBCRYPTO would persist
+    // into sibling tests (e.g. extensionCliInterop) that expect the
+    // setup-bun jest.fn() mocks on crypto.subtle.*.
+    let savedCrypto: any;
+
     beforeEach(() => {
-        // Clear storage
+        savedCrypto = (global as any).crypto;
+
+        // Re-install real WebCrypto (captured by setup-bun BEFORE
+        // it installed its own mock — see REAL_WEBCRYPTO export).
+        (global as any).crypto = REAL_WEBCRYPTO;
+
+        // Re-install file-local mockStorage so our chrome spies actually
+        // see reads/writes from the service layer.
+        (global as any).chrome = { storage: mockStorage };
+
+        // Clear storage (both file-local and the #imports shared store)
         mockStorage.local.data = {};
         mockStorage.session.data = {};
-        
+        sharedData = {};
+        resetStorageData(() => sharedData);
+
         // Reset singletons
         (KeystoreManager as any).instance = null;
         KeystoreService.resetInstance();
+    });
+
+    afterEach(() => {
+        (global as any).crypto = savedCrypto;
     });
     
     it('should persist imported keystore and restore on restart', async () => {

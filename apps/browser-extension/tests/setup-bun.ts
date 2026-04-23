@@ -74,6 +74,15 @@ const createCryptoMocks = () => ({
     }
 };
 
+// Capture the REAL WebCrypto before replacing globalThis.crypto with
+// mocks. Bun's `node:crypto` webcrypto export is a view onto
+// globalThis.crypto — once we replace it, a later
+// `import { webcrypto } from 'node:crypto'` will see our mocked subtle
+// too. Tests that need real WebCrypto (e.g. keystore encrypt→decrypt
+// roundtrips) should import REAL_WEBCRYPTO from this file and install
+// it via `global.crypto = REAL_WEBCRYPTO` in their beforeEach.
+export const REAL_WEBCRYPTO = (globalThis as any).crypto;
+
 // Mock crypto API
 (global as any).crypto = {
     subtle: createCryptoMocks(),
@@ -114,15 +123,20 @@ const createCryptoMocks = () => ({
     removeEventListener: jest.fn()
 }));
 
-// Reset mocks before each test
+// Reset mocks before each test.
+//
+// Crypto is NOT reset here. `(crypto.subtle as any) = createCryptoMocks()`
+// was a direct property assignment on whatever `crypto` currently
+// pointed to — that silently mutated webcrypto.subtle for any test
+// that replaced global.crypto with real WebCrypto for roundtrip
+// testing. jest.clearAllMocks() covers the call-history reset that
+// tests care about.
 beforeEach(() => {
     jest.clearAllMocks();
-    
-    // Reset storage
+
+    // Reset storage (some tests still rely on a fresh mockStorage
+    // object being in place before they run).
     (chrome.storage.local as any) = createMockStorage();
-    
-    // Reset crypto mocks
-    (crypto.subtle as any) = createCryptoMocks();
 });
 
 // Export mocks for use in tests

@@ -456,22 +456,22 @@ export class KeystoreService {
         if (!this.password) {
             throw new Error("No password set");
         }
-        
+
         // Decode base64
         const salt = Uint8Array.from(atob(encrypted.salt), c => c.charCodeAt(0));
         const iv = Uint8Array.from(atob(encrypted.iv), c => c.charCodeAt(0));
         const ciphertext = Uint8Array.from(atob(encrypted.ciphertext), c => c.charCodeAt(0));
-        
+
         // Derive key
         const key = await this.deriveKey(this.password, salt);
-        
+
         // Decrypt
         const decrypted = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv },
             key,
             ciphertext
         );
-        
+
         const decoder = new TextDecoder();
         const json = decoder.decode(decrypted);
         return JSON.parse(json);
