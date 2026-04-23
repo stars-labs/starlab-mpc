@@ -6,7 +6,12 @@ Successfully decoupled cryptographic curve selection from specific blockchain ch
 
 ## ✅ Completed Changes
 
-### 1. Type System Updates (`src/types/appstate.ts`)
+### 1. Type System Updates (`packages/@mpc-wallet/types/src/appstate.ts`)
+
+Note: types were hoisted out of `apps/browser-extension/src/types/` into
+the shared `@mpc-wallet/types` package as part of the monorepo
+restructure — earlier drafts of this doc referenced the old
+extension-local path.
 
 **Enhanced Chain Support:**
 ```typescript
@@ -180,13 +185,17 @@ The foundation is now in place to easily support:
 - NetworkService abstracts infrastructure complexity
 - Centralized compatibility rules in type system
 
-## ✅ Build Verification
+## Build verification
+
+From `apps/browser-extension/`:
 
 ```bash
-npm run build
-# ✔ Built extension in 5.781 s
-# ✔ All TypeScript errors resolved
-# ✔ No breaking changes to existing functionality
+bun run build        # Chrome MV3 output in .output/chrome-mv3/
+bun run check        # svelte-check over the tsconfig
+bun test             # Bun test suite (see docs/testing/TESTING.md)
 ```
 
-The multi-Layer 2 support foundation is now complete and ready for production! 🎉
+The multi-Layer-2 foundation was merged in the monorepo-migration
+milestone (see `docs/CHANGELOG.md`). This doc records what changed;
+consult the live source at `packages/@mpc-wallet/types/src/appstate.ts`
+for the current canonical list of supported chains.
