@@ -315,28 +315,35 @@ the underlying FROST math):
 
 ### Keystore Architecture
 
-Secure storage for cryptographic materials:
+Secure storage for cryptographic materials. Real types live in
+`src/keystore/`:
 
 ```rust
+// src/keystore/storage.rs
 pub struct Keystore {
-    encryption_key: DerivedKey,
-    wallets: HashMap<String, EncryptedWallet>,
-    metadata: KeystoreMetadata,
-}
-
-pub struct EncryptedWallet {
-    encrypted_share: Vec<u8>,
-    nonce: [u8; 12],
-    wallet_info: WalletInfo,
-    participant_info: ParticipantInfo,
+    base_path: PathBuf,        // ~/.frost_keystore
+    device_id: String,
+    wallet_cache: Vec<WalletMetadata>,
 }
 ```
 
-**Encryption Scheme:**
-- Key Derivation: PBKDF2-SHA256 (100,000 iterations)
-- Encryption: AES-256-GCM
-- Authentication: Built into GCM mode
-- Backup Format: Compatible with the browser extension keystore format (PBKDF2 + AES-256-GCM round-trip tested)
+Earlier drafts of this section listed a `Keystore { encryption_key,
+wallets: HashMap, metadata }` struct and a wrapper `EncryptedWallet`
+type — neither exist. The wallets themselves live as split files on
+disk (see the Storage System section below); the `Keystore` just
+maintains the metadata index and dispatches reads/writes.
+
+**Encryption scheme** (see `src/keystore/encryption.rs`):
+
+- Key derivation: PBKDF2-HMAC-SHA256, 100_000 iterations
+  (`PBKDF2_ITERATIONS` constant)
+- Encryption + authentication: AES-256-GCM (the GCM tag is the MAC —
+  no separate HMAC layer, matching the tech-doc fix in 8016f1a)
+- Wire format on disk for each `.dat` blob:
+  `salt(16 B) | nonce(12 B) | ciphertext | gcm_tag(16 B)`
+- Backup format: round-trips with the browser extension's keystore
+  (`src/keystore/extension_compat.rs` handles the import/export
+  wrapping)
 
 ## Storage System
 
@@ -365,19 +372,22 @@ to the path passed via `--log-location`.
 
 ### Data Persistence
 
-```rust
-pub trait StorageBackend {
-    fn save_wallet(&self, wallet: &EncryptedWallet) -> Result<()>;
-    fn load_wallet(&self, name: &str) -> Result<EncryptedWallet>;
-    fn list_wallets(&self) -> Result<Vec<WalletInfo>>;
-    fn delete_wallet(&self, name: &str) -> Result<()>;
-}
-```
+There is no `StorageBackend` trait or pluggable-backend abstraction —
+the `Keystore` struct talks to the filesystem directly via
+`std::fs`. Earlier drafts of this section sketched a trait with
+`FileSystemBackend / MemoryBackend / RemoteBackend` implementations;
+none exist in source (grep: zero hits).
 
-**Implementations:**
-- `FileSystemBackend`: Default local storage
-- `MemoryBackend`: For testing
-- `RemoteBackend`: Future cloud backup support
+Real persistence surface is a handful of `Keystore` methods:
+
+- `Keystore::new(base_path, device_id)` — opens (or creates)
+  the per-device directory tree
+- `Keystore::save_wallet(metadata, key_share, password)` —
+  writes the `.json` + encrypted `.dat` pair
+- `Keystore::load_wallet(wallet_id, password)` — reads both
+  and decrypts the share
+- `Keystore::list_wallets()` — scans the cached metadata
+- `Keystore::remove_wallet(wallet_id)` — deletes both files
 
 ## Security Architecture
 
@@ -391,24 +401,34 @@ pub trait StorageBackend {
 ### Security Measures
 
 #### Cryptographic Security
-- FROST protocol provides threshold security
-- No single party holds complete private key
-- Signatures require threshold participation
+- FROST protocol (via upstream `frost-core 2.2`) provides
+  `t`-of-`n` threshold security
+- No single party ever holds the complete private key
+- Signatures require threshold participation; `aggregate` verifies
+  the result against the group public key before returning
 
 #### Network Security
-- TLS for all WebSocket connections
-- DTLS for WebRTC data channels
-- Certificate pinning for known servers
+- TLS for all WebSocket connections (`wss://`)
+- DTLS for WebRTC data channels — peer-to-peer traffic is
+  end-to-end encrypted, the signal server is blind to payload
+  content once the mesh is up
+- **No** certificate pinning — earlier drafts claimed this;
+  verified absent from source. The signal-server URL is just a
+  standard `wss://` endpoint trusted via the system CA store
 
 #### Local Security
-- Keystore encryption at rest
-- Memory protection for sensitive data
-- Secure random number generation
+- Keystore encryption at rest (PBKDF2 + AES-256-GCM, 100k iterations)
+- Secure random via `rand_core::OsRng` + `rand_chacha::ChaCha20Rng`
+- **No** systematic memory zeroization — only
+  `frost-core/src/root_secret.rs` uses `zeroize::Zeroize`; key
+  shares and decrypted keystore blobs are not zeroed on drop
+  (open hardening work, matching the d854239 fix elsewhere)
 
 #### Operational Security
-- Offline mode for air-gapped signing
-- Session timeouts and expiration
-- Audit logs for all operations
+- Offline mode for air-gapped signing (`--offline` CLI flag)
+- **No** session timeouts, audit logs, or operation history —
+  earlier drafts claimed these; none exist in source. See the
+  `SECURITY.md` sibling for the full honest surface
 
 ### Security Boundaries
 
@@ -430,31 +450,27 @@ pub trait StorageBackend {
 
 ## Performance Considerations
 
-### Optimization Strategies
+### Real optimizations in source
 
-1. **Async I/O**: All network operations are non-blocking
-2. **Message Batching**: Combine multiple protocol messages
-3. **Connection Pooling**: Reuse WebRTC connections
-4. **Lazy Loading**: Load wallets on demand
-5. **Efficient Rendering**: Only redraw changed UI sections
+- **Async I/O**: All networking is tokio-based and non-blocking
+- **Adaptive event loop** (`src/elm/adaptive_event_loop.rs`):
+  poll interval ramps 5 ms → 200 ms based on UI activity to hold
+  idle CPU below 1%
+- **Bounded channels** (`src/elm/channel_config.rs`): tokio mpsc
+  channels use explicit capacity limits to prevent memory growth
+  from queue buildup
+- **Deterministic session derivation**
+  (`src/protocal/session_handler.rs`): session-id is a pure hash
+  of the wallet name, so re-creating the same wallet produces the
+  same group key without re-running DKG
 
-### Resource Management
-
-```rust
-pub struct ResourceManager {
-    connection_pool: ConnectionPool,
-    message_batcher: MessageBatcher,
-    state_cache: StateCache,
-    render_throttle: RenderThrottle,
-}
-```
-
-### Performance Metrics
-
-- **DKG Completion**: < 5 seconds for 3-party setup
-- **Signing Time**: < 2 seconds with all parties online
-- **UI Responsiveness**: < 50ms for user interactions
-- **Memory Usage**: < 100MB typical, < 500MB peak
+Earlier drafts of this section claimed connection-pooling,
+message-batching, a `ResourceManager { connection_pool,
+message_batcher, state_cache, render_throttle }` struct, and
+specific benchmark targets (< 5 s DKG / < 2 s signing / < 50 ms
+UI / < 500 MB peak memory). None of those types or numbers
+exist in source — removed to stay consistent with the tech-doc
+Performance section (41d5ca0).
 
 ## Extension Points
 
@@ -501,50 +517,43 @@ pub trait ExternalAPI {
 
 ### Module Organization
 
-```
-src/
-├── app_runner.rs       # Application orchestration
-├── ui/                 # Terminal UI components
-│   ├── mod.rs
-│   ├── tui.rs         # Main TUI implementation
-│   ├── provider.rs    # UI abstraction
-│   └── widgets/       # Custom widgets
-├── network/           # Networking code
-│   ├── websocket.rs
-│   ├── webrtc.rs
-│   └── offline.rs
-├── protocol/          # FROST implementation
-│   ├── dkg.rs
-│   ├── signing.rs
-│   └── types.rs
-├── keystore/          # Secure storage
-│   ├── encryption.rs
-│   ├── storage.rs
-│   └── models.rs
-└── handlers/          # Business logic
-    ├── session_handler.rs
-    ├── wallet_handler.rs
-    └── transaction_handler.rs
-```
+See the TUI file-structure appendix in
+[`../MPC_WALLET_TUI_ARCHITECTURE.md`](../MPC_WALLET_TUI_ARCHITECTURE.md)
+§ Appendix B for the authoritative layout (fixed in commit 4345c59
+to drop the earlier `app_runner.rs` / `handlers/` / `ui/tui.rs`
+tree that predated the Elm-architecture migration). In short:
+
+- `src/bin/mpc-wallet-tui.rs` — CLI entry
+- `src/elm/` — Elm-architecture app shell + per-screen components
+- `src/core/` — long-lived managers reused by native-node
+- `src/protocal/` — wire types + DKG/signing state machines
+  (note: intentional misspelling)
+- `src/webrtc/mesh_manager.rs` — full-mesh peer manager
+- `src/network/` — WebSocket client helpers
+- `src/keystore/` — encrypted share I/O
+- `src/offline/` and `src/hybrid/` — air-gap + mixed-mode
+- `src/utils/` — AppState, erc20_encoder, eth_helper, …
+- `src/lib.rs` — re-exports consumed by native-node
 
 ### Error Handling
 
+The real error-type landscape uses `thiserror`-derived per-domain
+enums:
+
 ```rust
-#[derive(Debug, thiserror::Error)]
-pub enum WalletError {
-    #[error("Network error: {0}")]
-    Network(#[from] NetworkError),
-    
-    #[error("Cryptographic error: {0}")]
-    Crypto(#[from] CryptoError),
-    
-    #[error("Storage error: {0}")]
-    Storage(#[from] StorageError),
-    
-    #[error("Invalid operation: {0}")]
-    InvalidOperation(String),
-}
+// src/errors.rs (+ per-module error types)
+pub enum DkgError { /* ... */ }
+pub enum SigningError { /* ... */ }
+pub enum KeystoreError { /* ... */ }
+pub enum ComponentError { /* ... */ }
+pub enum CryptoError { /* ... */ }
 ```
+
+Earlier drafts of this section sketched a `WalletError` umbrella
+enum with `Network`, `Crypto`, `Storage`, `InvalidOperation`
+variants. That enum doesn't exist — the actual scheme uses the
+per-domain types above (see tech-doc § Error Codes for the same
+note, removed in 9e9cb19).
 
 ### Testing Strategy
 
