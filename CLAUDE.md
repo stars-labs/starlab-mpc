@@ -39,7 +39,7 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 ### Applications
 - **`apps/tui-node/`** — Terminal UI (Ratatui) with Elm architecture (`src/elm/` for Model/Update/View). Exposes `lib.rs` so native-node can reuse business logic. Supports online (WebRTC mesh) and offline (SD card air-gap) DKG modes.
-- **`apps/native-node/`** — Desktop GUI (Slint) consuming tui-node as a library via `UIProvider` trait
+- **`apps/native-node/`** — Desktop GUI (Slint 1.x) reusing `tui-node::core::{*Manager, CoreState}` for business logic. Native UI events are bridged through the `UICallback` trait (impl: `NativeUICallback` in `src/ui_callback.rs`) which posts closures onto the Slint event loop via `Weak<MainWindow>` + `slint::invoke_from_event_loop` (closures must be `Send`; `MainWindow` is `!Send`). File dialogs use the `rfd` crate. See `apps/native-node/README.md` for feature-parity status.
 - **`apps/browser-extension/`** — Chrome/Firefox extension (WXT + Svelte 5). Manifest V3 with background worker, popup, offscreen document (WebRTC + WASM), content script.
 - **`apps/signal-server/`** — WebRTC signaling: standard WebSocket server + Cloudflare Worker variant
 
