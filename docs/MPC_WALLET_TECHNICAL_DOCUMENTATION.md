@@ -946,153 +946,83 @@ stateless WS upgrade handling, no HTTP response scaffolding).
 
 ## API Reference
 
-### Browser Extension API
+### Browser Extension: internal message types
 
-#### Wallet Management
+Internal `chrome.runtime.sendMessage` types are consts in
+`MESSAGE_TYPES` (see the actual enum in the extension source — grep
+for `case MESSAGE_TYPES.` in `src/entrypoints/background/messageHandlers.ts`
+for the full dispatch table). Key ones:
 
-```typescript
-// Create new MPC wallet
-chrome.runtime.sendMessage({
-  type: 'CREATE_WALLET',
-  payload: {
-    name: 'My MPC Wallet',
-    threshold: 2,
-    participants: 3,
-    blockchain: 'ethereum'
-  }
-});
+| Type | Purpose |
+|---|---|
+| `CREATE_DKG_WALLET` | Popup → background: kick off DKG for a new wallet |
+| `JOIN_DKG_SESSION` | Popup → background: join a peer's announced DKG |
+| `SAVE_DKG_WALLET` | Offscreen → background: persist the completed key share after DKG |
+| `CREATE_SIGNING_SESSION` | Popup/dApp → background: start a signing ceremony |
+| `ACCEPT_SESSION` / `DECLINE_SIGNING_SESSION` | Popup → background: join or refuse a signing session |
+| `REQUEST_SIGNING` | Popup → background: user-initiated sign-message flow |
+| `UNLOCK_KEYSTORE` | Popup → background: decrypt a wallet share with the password |
+| `GET_STATE` / `GET_WEBRTC_STATE` | Popup → background: read app state for render |
+| `LIST_DEVICES` | Popup → background: known peers on the signal server |
+| `RELAY` | Background: forward a WebSocket relay payload |
+| `FROM_OFFSCREEN` / `OFFSCREEN_READY` | Wrappers for background↔offscreen cross-context messages |
 
-// Get wallet details
-chrome.runtime.sendMessage({
-  type: 'GET_WALLET',
-  payload: {
-    walletId: 'wallet_001'
-  }
-});
+dApp-facing calls arrive as EIP-1193 RPC through the injected content
+script (`window.ethereum.request(...)`), NOT as `sendMessage` types.
+See `CLAUDE.md` § "Browser extension: threshold signing architecture"
+for the end-to-end flow from `personal_sign` to aggregate signature.
+
+### Terminal UI CLI Arguments
+
+Authoritative definitions in `apps/tui-node/src/bin/mpc-wallet-tui.rs`:
+
 ```
-
-#### DKG Operations
-
-```typescript
-// Initiate DKG session
-chrome.runtime.sendMessage({
-  type: 'INIT_DKG',
-  payload: {
-    sessionId: 'session_001',
-    threshold: 2,
-    participants: ['Device-001', 'Device-002', 'Device-003']
-  }
-});
-
-// Join DKG session
-chrome.runtime.sendMessage({
-  type: 'JOIN_DKG',
-  payload: {
-    sessionId: 'session_001',
-    deviceId: 'Device-002'
-  }
-});
-```
-
-#### Transaction Signing
-
-```typescript
-// Sign Ethereum transaction
-chrome.runtime.sendMessage({
-  type: 'SIGN_TRANSACTION',
-  payload: {
-    walletId: 'wallet_001',
-    transaction: {
-      to: '0x742d35Cc6634C0532...',
-      value: '1000000000000000000',
-      data: '0x',
-      gasLimit: '21000',
-      gasPrice: '20000000000'
-    }
-  }
-});
-```
-
-### Terminal UI Commands
-
-#### CLI Arguments
-
-```bash
 mpc-wallet-tui [OPTIONS]
 
 OPTIONS:
-    --device-id <ID>           Unique device identifier
-    --config <PATH>            Path to configuration file
-    --keystore <PATH>          Path to keystore directory
-    --signal-server <URL>      WebSocket signal server URL
-    --offline                  Run in offline mode
-    --log-level <LEVEL>        Logging level (debug, info, warn, error)
+    --device-id <ID>           FROST participant identity.
+                               Defaults to the machine hostname.
+    --signal-server <URL>      WebSocket signal server URL.
+                               Default: wss://xiongchenyu.dpdns.org
+    --offline                  Run in offline (SD-card air-gap) mode.
+    --log-location <PATH>      Log file path.
+                               Default: ~/.frost_keystore/logs/mpc-wallet.log
+    --log-level <LEVEL>        error | warn | info | debug | trace
+                               Default: info
 ```
 
-#### Interactive Commands
+There is no `--config`, `--keystore`, or `--help`-queryable sub-command
+arg — earlier drafts of this doc listed those. The keystore directory
+is fixed at `~/.frost_keystore/` (see the Core Components section).
 
-```
-Available Commands:
+The TUI itself is a keyboard-driven Ratatui app, not a REPL with typed
+commands. Keybindings are hardcoded in `src/elm/update.rs` and the
+per-screen components; see `apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md`.
 
-Wallet Management:
-  create <name> <threshold> <participants>  Create new MPC wallet
-  import <path>                            Import wallet from file
-  export <wallet-id> <path>                Export wallet to file
-  list                                     List all wallets
-  delete <wallet-id>                       Delete wallet
+### WebSocket signal protocol
 
-DKG Operations:
-  dkg init <threshold> <participants>      Initialize DKG session
-  dkg join <session-id>                    Join existing DKG session
-  dkg status                               Show DKG session status
+Shape-compatible with the TUI's wire format. Top-level serde tag is
+`type` (`snake_case`), each envelope has peer addressing + session
+context as inline fields. Authoritative: `apps/tui-node/src/protocal/signal.rs`
+and the TypeScript mirror in `packages/@mpc-wallet/types/src/session.ts`.
 
-Signing:
-  sign <wallet-id> <message>               Sign message
-  sign-tx <wallet-id> <tx-file>           Sign transaction from file
+Message types actually used:
 
-Network:
-  connect <peer-id>                        Connect to peer
-  disconnect <peer-id>                     Disconnect from peer
-  peers                                    List connected peers
-```
+| Type | Direction | Purpose |
+|---|---|---|
+| `announce_session` | Client → server (broadcast) | Declare a new DKG or signing session |
+| `session_available` | Server → clients | Server echoes an announce to every connected peer |
+| `request_active_sessions` | Client → server | Cold-start replay — "what did I miss before connecting?" |
+| `sessions_for_device` | Server → client | Reply to `request_active_sessions` |
+| `session_status_update` | Client → server | Emitted on join — grows the participants list |
+| `relay` | Client ↔ client (via server) | Opaque peer-to-peer envelope wrapping `websocket_msg_type`: WebRTCSignal (offer/answer/ICE), SessionProposal, SessionResponse, SigningDecline |
 
-### WebSocket Signal Protocol
-
-#### Message Format
-
-```json
-{
-  "type": "MessageType",
-  "from": "DeviceId",
-  "to": "DeviceId",
-  "sessionId": "SessionId",
-  "payload": {}
-}
-```
-
-#### Message Types
-
-```typescript
-enum MessageType {
-  // Session Management
-  CREATE_SESSION = "create_session",
-  JOIN_SESSION = "join_session",
-  LEAVE_SESSION = "leave_session",
-  
-  // WebRTC Signaling
-  OFFER = "offer",
-  ANSWER = "answer",
-  ICE_CANDIDATE = "ice_candidate",
-  
-  // Protocol Messages
-  DKG_ROUND1 = "dkg_round1",
-  DKG_ROUND2 = "dkg_round2",
-  DKG_ROUND3 = "dkg_round3",
-  
-  SIGNING_COMMITMENT = "signing_commitment",
-  SIGNING_SHARE = "signing_share"
-}
-```
+**DKG round packages and signature commitments do NOT go through the
+signal server.** They ride the peer-to-peer WebRTC mesh that's
+established once participants complete signaling. The signal server
+sees only session announcements, relay envelopes, and ICE exchange.
+Earlier drafts of this section claimed `DKG_ROUND1/2/3` and
+`SIGNING_COMMITMENT/SHARE` as wire types — incorrect.
 
 ---
 
