@@ -26,9 +26,9 @@ graph TB
     end
     
     subgraph "Application Core"
-        AR[AppRunner<br/>Event Loop]
-        AS[AppState<br/>Shared State]
-        IC[InternalCommand<br/>Message Queue]
+        AR[ElmApp&lt;C&gt;<br/>Event Loop]
+        AS[AppState&lt;C&gt;<br/>Shared State]
+        IC[InternalCommand&lt;C&gt;<br/>Message Queue]
     end
     
     subgraph "Protocol Layer"
@@ -652,25 +652,52 @@ These enhancements would significantly improve the system's reliability, securit
 
 ## Appendix B: Critical File Structure
 
+Real layout — verified against the current tree. Earlier drafts of
+this appendix referenced an `app_runner.rs` / `handlers/` / `ui/tui.rs`
+scheme that predates the Elm-architecture migration; none of those
+paths exist today.
+
 ```
 apps/tui-node/src/
-├── app_runner.rs           # Main event loop and command dispatcher
-├── utils/
-│   └── state.rs            # State definitions and InternalCommand enum
-├── handlers/
-│   ├── dkg_commands.rs     # DKG protocol handlers
-│   ├── mesh_commands.rs    # Mesh network handlers
-│   ├── session_handler.rs  # Session management handlers
-│   └── signing_commands.rs # Transaction signing handlers
+├── bin/
+│   └── mpc-wallet-tui.rs        # clap entry + keystore init + ElmApp bootstrap
+├── elm/
+│   ├── app.rs                   # ElmApp<C> — main event loop + tui-realm shell
+│   ├── model.rs                 # Model (immutable state snapshot)
+│   ├── update.rs                # Update fn: Message → state transition + Commands
+│   ├── command.rs               # Command<C> enum — side-effect tasks
+│   ├── message.rs               # Message enum — input events
+│   ├── provider.rs              # UIProvider trait (abstract UI backend)
+│   ├── ws_runtime.rs            # WebSocket client runtime
+│   ├── webrtc_signaling.rs      # WebRTC signaling over the signal server
+│   └── components/              # Per-screen tui-realm Component impls
+├── core/                        # Long-lived managers reused by native-node
+│                                # (WalletManager / SessionManager / DkgManager /
+│                                #  SigningManager / OfflineManager / ConnectionManager)
+├── protocal/                    # Wire types (note: intentional misspelling)
+│   ├── dkg.rs                   # DKG protocol state machine
+│   ├── dkg_coordinator.rs       # Round orchestration helper
+│   ├── signing.rs               # Signing protocol state machine
+│   ├── signal.rs                # Signal-server message types
+│   └── session_types.rs
+├── webrtc/
+│   └── mesh_manager.rs          # Full-mesh peer connection manager
 ├── network/
-│   ├── websocket.rs        # WebSocket message handling
-│   └── webrtc.rs          # WebRTC connection management
-├── protocal/
-│   ├── dkg.rs             # DKG protocol implementation
-│   ├── signal.rs          # Message type definitions
-│   └── dkg_robust.rs      # Enhanced DKG with retries
-└── ui/
-    └── tui.rs             # Terminal UI implementation
+│   └── webrtc.rs                # Low-level WebRTC helpers
+├── keystore/
+│   ├── storage.rs               # Keystore struct + `.json`/`.dat` I/O
+│   ├── encryption.rs            # AES-256-GCM + PBKDF2 100k
+│   ├── models.rs                # WalletFile / Metadata structs
+│   ├── frost_keystore.rs        # FROST-specific keystore plumbing
+│   └── extension_compat.rs      # Browser-extension format interop
+├── offline/                     # SD-card air-gap mode
+├── hybrid/                      # Online+offline mixed-participant mode
+├── utils/
+│   ├── state.rs                 # AppState<C> + InternalCommand<C> + DkgState
+│   ├── erc20_encoder.rs         # ERC-20 transfer encoding
+│   ├── eth_helper.rs            # EIP-191 personal_sign + ecrecover helpers
+│   └── …                        # (curve_traits, device, performance, …)
+└── lib.rs                       # Re-exports for native-node consumers
 ```
 
 ## Appendix C: Security Considerations
