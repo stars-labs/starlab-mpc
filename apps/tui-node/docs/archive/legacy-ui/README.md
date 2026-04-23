@@ -6,7 +6,9 @@ This directory contains comprehensive user interface and user experience documen
 
 ### Core Flow Documentation
 - `WALLET_FLOW_WIREFRAMES.md` - Main wallet flow wireframes including welcome, session management, DKG, and signing operations
-- `keystore_session_ux_flow.md` - Detailed UX flow for keystore session management, including wireframes and user interaction patterns
+
+The companion `keystore_session_ux_flow.md` wireframes live under
+the sibling archive dir [`../legacy-keystore-docs/`](../legacy-keystore-docs/).
 
 ### Critical Enterprise Paths
 - `KEY_ROTATION_WIREFRAMES.md` - Key rotation and participant management wireframes for security maintenance
