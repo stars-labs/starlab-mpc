@@ -266,29 +266,37 @@ work worth picking up.
 
 ### Rust Code
 
+Follow the conventions visible in existing source (e.g.
+`apps/tui-node/src/core/wallet_manager.rs`). Illustrative
+snippet:
+
 ```rust
-// Use descriptive names
+// Match the existing style: Arc<CoreState> + Arc<dyn UICallback>
+// dependency injection, not struct-level HashMaps of wallets.
 pub struct WalletManager {
-    wallets: HashMap<WalletId, Wallet>,
-    active_wallet: Option<WalletId>,
+    state: Arc<CoreState>,
+    ui_callback: Arc<dyn UICallback>,
+    keystore: Arc<Mutex<Option<Keystore>>>,
 }
 
-// Document public APIs
-/// Creates a new wallet with the specified parameters.
-/// 
-/// # Arguments
-/// * `name` - The wallet name
-/// * `threshold` - Minimum signatures required
-/// * `participants` - Total number of participants
-pub fn create_wallet(
-    name: &str,
-    threshold: u32,
-    participants: u32,
-) -> Result<Wallet> {
-    // Implementation
+// Async-first — most core methods take &self and return
+// CoreResult<T>, not sync Result<T>.
+impl WalletManager {
+    /// Create a new wallet entry for the active keystore.
+    pub async fn create_wallet(
+        &self,
+        name: String,
+        threshold: u16,
+        participants: Vec<String>,
+    ) -> CoreResult<WalletInfo> {
+        // Implementation
+    }
 }
 
-// Handle errors explicitly
+// Handle errors explicitly — prefer typed error enums over
+// anyhow for API surface. Real error types:
+//   DkgError / SigningError / KeystoreError / ComponentError /
+//   CryptoError — in `src/errors.rs`.
 match operation() {
     Ok(result) => process(result),
     Err(e) => {
@@ -341,32 +349,61 @@ const activeWallets = wallets
 
 ### Test Coverage
 
-- Minimum 80% code coverage
-- Critical paths require 100% coverage
-- All new features must include tests
-- Bug fixes must include regression tests
+- No hard coverage floor is enforced in CI (there's no CI today,
+  see the Code Review Process section). The existing bar is
+  "tests land alongside the code they cover":
+  - New features include unit tests in the relevant module's
+    `#[cfg(test)] mod tests` block + integration coverage where
+    appropriate
+  - Bug fixes include a regression test that would have caught
+    the bug
+- Earlier drafts of this section specified "Minimum 80% code
+  coverage / Critical paths 100%" — not enforced anywhere. If
+  you want coverage numbers, `bun test --coverage` works for
+  the extension; Rust-side needs `cargo install cargo-tarpaulin`
+  or equivalent (no tarpaulin config ships).
 
 ### Test Types
 
-#### Unit Tests
+#### Unit Tests (Rust)
+
+Follow existing patterns in
+`apps/tui-node/tests/update_transitions.rs` (pure state-machine
+transition assertions) + `component_rendering.rs` (ratatui
+`TestBackend` snapshot tests). Example shape:
+
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_wallet_creation() {
-        let wallet = create_wallet("test", 2, 3).unwrap();
-        assert_eq!(wallet.name, "test");
-        assert_eq!(wallet.threshold, 2);
+    #[tokio::test]
+    async fn create_wallet_registers_address() {
+        let state = Arc::new(CoreState::default());
+        let cb = Arc::new(NoOpUICallback);
+        let mgr = WalletManager::new(state, cb);
+
+        let info = mgr.create_wallet(
+            "test".to_string(),
+            2,
+            vec!["alice".into(), "bob".into(), "charlie".into()],
+        ).await.unwrap();
+        assert_eq!(info.name, "test");
     }
 }
 ```
 
-#### Integration Tests
+#### Integration Tests (TypeScript / Bun)
+
+Tests live under `apps/browser-extension/tests/` and import from
+`bun:test` — NOT vitest / jest (consistent with
+`docs/testing/TESTING.md`). Example shape:
+
 ```typescript
-describe('DKG Process', () => {
-  it('should complete DKG with 3 participants', async () => {
+import { describe, expect, test } from "bun:test";
+
+describe("DKG Process", () => {
+  test("completes DKG with 3 participants", async () => {
     const participants = await createParticipants(3);
     const result = await executeDKG(participants, 2);
     expect(result.success).toBe(true);
