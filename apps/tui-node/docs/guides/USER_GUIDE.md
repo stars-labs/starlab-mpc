@@ -30,7 +30,7 @@ The FROST MPC TUI Wallet provides enterprise-grade multi-party computation throu
 When you start the wallet for the first time:
 
 ```bash
-frost-mpc-wallet --device-id <your-unique-id>
+mpc-wallet-tui --device-id <your-unique-id>
 ```
 
 You'll see the main interface:
