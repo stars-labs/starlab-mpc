@@ -3,6 +3,7 @@ import type { DkgState } from './dkg';
 import type { MeshStatus } from './mesh';
 import type { AppState } from './appstate';
 import type { WebRTCAppMessage as DataChannelMessage } from './webrtc';
+import type { Account as WalletAccount } from './account';
 import { ServerMsg, ClientMsg, WebSocketMessagePayload, WebRTCSignal } from './websocket';
 
 // ===================================================================
@@ -201,7 +202,11 @@ export type BackgroundToPopupMessage =
     | { type: "signatureRequest"; signingId: string; message: string; origin: string; fromAddress: string } & BaseMessage
     | { type: "signatureComplete"; signingId: string; signature: string } & BaseMessage
     | { type: "signatureError"; signingId: string; error: string } & BaseMessage
-    | { type: "transactionRequest"; signingId: string; transaction: any; origin: string; fromAddress: string } & BaseMessage;
+    | { type: "transactionRequest"; signingId: string; transaction: any; origin: string; fromAddress: string } & BaseMessage
+    // Ext-1d: account list changed (wallet saved / removed). Popup
+    // re-fetches the relevant blockchain's accounts to refresh the
+    // picker. Emitted by completeAccountCreation and similar flows.
+    | { type: "accountsUpdated"; blockchain: "ethereum" | "solana"; accounts: WalletAccount[] } & BaseMessage;
 
 // --- Wrapper Message Types for Communication Direction ---
 export type BackgroundToOffscreenWrapper = {
