@@ -224,9 +224,25 @@ enum (one variant per component) is what `Application::mount` /
 User input arrives as `tuirealm::Event<UserEvent>`. Each component
 translates events into `Message` variants (`src/elm/message.rs`),
 which go through the `update` function (`src/elm/update.rs`) to
-produce state transitions plus a `Vec<Command<C>>` of side effects
-(`src/elm/command.rs`). There is no standalone `UIEvent` enum —
-that was a fabrication in earlier drafts of this doc.
+produce state transitions plus an optional `Command` side effect
+(`src/elm/command.rs`). Real signature verified at
+`src/elm/update.rs:33`:
+
+```rust
+pub fn update(model: &mut Model, msg: Message) -> Option<Command>
+```
+
+`Command` is **non-generic** (see `src/elm/command.rs:15`) and
+`update` returns `Option<Command>`, not `Vec<Command<C>>`. Earlier
+drafts of this doc (27615dd / 6612d58 trace) had the function
+return a vector of ciphersuite-generic commands — neither is
+accurate. Per-round DKG / signing orchestration that IS
+ciphersuite-generic lives in `InternalCommand<C>`
+(`src/utils/state.rs:104,113`); the Elm command and the
+protocol-round command are two separate enums.
+
+There is also no standalone `UIEvent` enum — that was a
+fabrication in earlier drafts of this doc.
 
 ### Rendering Pipeline
 
@@ -234,11 +250,11 @@ that was a fabrication in earlier drafts of this doc.
    pending crossterm events.
 2. **Route to component**: Active component's `Component::on` handles
    the event and optionally returns a `Message`.
-3. **Update model**: `update(&mut model, Message) -> Vec<Command<C>>`
-   mutates pure state and emits side effects.
-4. **Execute commands**: `Command<C>::execute` runs async tasks
-   (WebSocket send, keystore I/O, DKG rounds, etc.) that eventually
-   feed messages back into the queue.
+3. **Update model**: `update(&mut model, Message) -> Option<Command>`
+   mutates pure state and optionally emits one side effect.
+4. **Execute commands**: the returned `Command` runs as an async
+   task (WebSocket send, keystore I/O, etc.) that eventually feeds
+   a new `Message` back into the queue.
 5. **Draw**: tui-realm calls `Component::view` on the active
    screen, Ratatui flushes to the terminal.
 

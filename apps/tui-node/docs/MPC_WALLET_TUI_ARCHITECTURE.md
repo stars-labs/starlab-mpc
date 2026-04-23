@@ -674,7 +674,10 @@ apps/tui-node/src/
 │   ├── app.rs                   # ElmApp<C> — main event loop + tui-realm shell
 │   ├── model.rs                 # Model (immutable state snapshot)
 │   ├── update.rs                # Update fn: Message → state transition + Commands
-│   ├── command.rs               # Command<C> enum — side-effect tasks
+│   ├── command.rs               # Command enum — side-effect tasks
+│   │                             # (non-generic; ciphersuite-generic
+│   │                             #  round orchestration uses
+│   │                             #  InternalCommand<C> in utils/state.rs)
 │   ├── message.rs               # Message enum — input events
 │   ├── provider.rs              # UIProvider trait (abstract UI backend)
 │   ├── ws_runtime.rs            # WebSocket client runtime
