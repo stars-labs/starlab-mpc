@@ -53,7 +53,9 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 **frost-core internal types**: `SigningShare::new()`, `VerifyingShare::new()`, `VerifyingKey::new()` are `pub(crate)`. To construct these from outside frost-core, use `serialize()` / `deserialize()` round-trips through `Field::serialize`/`Group::serialize`.
 
-**UIProvider trait** (`apps/tui-node/`): Abstracts UI backend so TUI (Ratatui) and native (Slint) share the same DKG/signing/network logic.
+**UIProvider trait** (`apps/tui-node/src/elm/provider.rs`): Abstracts the TUI's Elm app loop over a UI backend. Separate from `UICallback` (see below).
+
+**UICallback trait** (`apps/tui-node/src/core/mod.rs`): Event-push surface for the non-Elm managers in `tui-node::core`. Both TUI and native-node consume `core::*Manager` types — TUI goes through the Elm loop, native-node implements `UICallback` directly (`NativeUICallback` in `apps/native-node/src/ui_callback.rs`) to push state onto Slint globals.
 
 **Elm architecture** in TUI: State is `Model`, transitions via `Update`, rendering via `View`. Event-driven through `InternalCommand<C>` enum.
 
@@ -132,6 +134,36 @@ DKG is analogous: `generate_round1()` returns our round-1 package as hex; `add_r
 ### Testing
 
 Signal-server live smoke tests need 3 browser instances — no bun harness exercises full FROST+WebRTC pairing. Unit coverage via `tests/entrypoints/background/` (regression suites: `dkgAutoTrigger`, `signingAutoTrigger`, `signingNotification`, `dappSignatureApproval`, `signingDecline`).
+
+## Native desktop node: Slint + tui-node::core
+
+`apps/native-node/` is a third MPC client that reuses `tui-node::core::{WalletManager, SessionManager, DkgManager, OfflineManager, ConnectionManager, SigningManager, CoreState}` as its business-logic backend. Architecture:
+
+```
+ui/*.slint (Slint 1.x)  <---callbacks--->  src/main.rs  <--->  src/core_adapter.rs  --->  tui_node::core::*Manager
+     |                                                              |
+     | AppState globals                                              | UICallback events
+     |                                                               ↓
+     |<-------------------- NativeUICallback (src/ui_callback.rs)   |
+                          dispatches via Weak<MainWindow> +
+                          slint::invoke_from_event_loop
+                          (closures must be Send;
+                           MainWindow is !Send → upgrade INSIDE closure)
+```
+
+**Send bridge pattern**. `MainWindow` contains `Cell<u32>` / `UnsafeCell<...>` and is therefore `!Send`. `invoke_from_event_loop` requires `Send + 'static` closures, so `NativeUICallback` holds `Weak<MainWindow>` (which IS Send), clones it into each callback closure, and upgrades inside. Pre-compute all values (e.g. `Vec<SlintWalletInfo>`) before the closure so only owned data crosses the Send boundary.
+
+**File dialogs**: `rfd` crate. Always spawn via `tokio::task::spawn_blocking(|| rfd::FileDialog::new()...)` — the dialog thread blocks; running it on the main tokio executor freezes the Slint event loop.
+
+**Slint 1.x gotchas** (all fixed during the rehabilitation pass, documented so future Slint bumps have a cheat-sheet):
+- `vertical-alignment` is only valid on `Text` — remove from `Rectangle` / `VerticalBox` / `HorizontalBox`.
+- `linear-gradient(...)` requires `@` prefix; stops take explicit percentages.
+- Strings have no `.length` / `.substring` / `.slice` — compute on the Rust side and push through struct properties.
+- `Rectangle` doesn't accept `padding` or `margin-*` — move to an inner layout element.
+- `Image.rotation-angle` removed (renamed `rotation`); `animate { loop: true }` unsupported.
+- `GridBox { Row { ... } }` doesn't accept `if`/`for` children — use `HorizontalBox`.
+
+**Feature-parity status** (see `apps/native-node/README.md` for the matrix): DKG + sessions + WebRTC + keystore import/export with password + signing UX (approve/reject modal) + SD-card export/import/clear all wired end-to-end. The single remaining gap: `SigningManager::approve` + SD-card artefact emission both delegate to stubs because `tui_node::protocal::{signing, dkg}` operates on `AppState<C>` via the Elm `Message` loop. Extracting a ciphersuite-generic backend shared between the Elm loop and `core::*Manager` is the one-PR remaining for full parity — UI surface + CoreAdapter wiring are all in place.
 
 ## Dependencies
 
