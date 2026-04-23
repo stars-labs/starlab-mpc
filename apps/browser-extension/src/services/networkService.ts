@@ -523,10 +523,17 @@ class NetworkService {
             blockExplorers: target.blockExplorers
         };
 
+        // viem PublicClient return type encodes the full chain
+        // shape via generic inference; our cache declares the
+        // no-arg createPublicClient return which diverges on a
+        // handful of method-signature details. Both types name
+        // themselves the same way ("Client"), causing TS to show
+        // "Two different types with this name exist" — cast to
+        // any to suppress and accept the imperfect alignment.
         const client = createPublicClient({
             chain: viemChain,
             transport: http()
-        });
+        }) as any;
         this.publicClientCache.set(target.id, client);
         return client;
     }

@@ -48,9 +48,13 @@ const mockPublicClient = {
 // Mock viem's createPublicClient
 const createPublicClientMock = mock(() => mockPublicClient);
 
-// Replace the actual import with our mock
+// Replace the actual import with our mock. Cast through any
+// because viem's createPublicClient has a generic-rich signature
+// that our simple mock() can't structurally satisfy — the test
+// only cares that the mocked function is called, not its full
+// return-type alignment.
 const originalModule = await import('viem');
-originalModule.createPublicClient = createPublicClientMock;
+(originalModule as any).createPublicClient = createPublicClientMock;
 
 describe('NetworkService', () => {
     let networkService: NetworkService;

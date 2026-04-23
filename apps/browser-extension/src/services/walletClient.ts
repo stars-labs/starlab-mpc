@@ -51,7 +51,7 @@ class WalletClientService {
         return createPublicClient({
             chain: currentNetwork as any,
             transport: http(currentNetwork.rpcUrls!.default.http[0])
-        });
+        }) as PublicClient;
     }
 
     private handleAccountChange(): void {
