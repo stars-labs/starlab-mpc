@@ -44,25 +44,40 @@ All blockchain addresses are **deterministically derived** from:
 - **Solana**: Base58 encoding of the public key
 - **Other ed25519 chains**: Chain-specific encoding
 
-## Example Simplified Wallet File
+## On-disk file layout
+
+Each wallet lives as a pair of files under
+`~/.frost_keystore/<device_id>/<curve>/`:
+
+- `<wallet_id>.json` — plaintext metadata (the `WalletMetadata`
+  struct above, serialized).
+- `<wallet_id>.dat` — raw AES-256-GCM output holding the encrypted
+  FROST key share:
+  ```
+  [ salt (16 B) ][ nonce (12 B) ][ ciphertext ][ GCM auth tag (16 B) ]
+  ```
+
+There is **no** single-JSON-with-embedded-base64-blob format
+(earlier drafts of this doc showed one, which is Ethereum
+keystore-V3 style, not what this codebase uses). The metadata
+sidecar and the ciphertext blob stay in separate files so that
+non-secret metadata is trivially inspectable without involving a
+password.
+
+`<wallet_id>.json` example:
 
 ```json
 {
-  "version": "2.0",
-  "encrypted": true,
-  "algorithm": "AES-256-GCM-PBKDF2",
-  "data": "base64_encrypted_frost_key_share",
-  "metadata": {
-    "session_id": "company-wallet-2of3",
-    "device_id": "alice-laptop",
-    "curve_type": "secp256k1",
-    "threshold": 2,
-    "total_participants": 3,
-    "participant_index": 1,
-    "group_public_key": "frost_public_key_hex",
-    "created_at": "2024-01-01T00:00:00Z",
-    "last_modified": "2024-01-01T00:00:00Z"
-  }
+  "session_id": "company-wallet-2of3",
+  "device_id": "alice-laptop",
+  "curve_type": "secp256k1",
+  "threshold": 2,
+  "total_participants": 3,
+  "participant_index": 1,
+  "group_public_key": "frost_public_key_hex",
+  "participants": ["alice-laptop", "bob-desktop", "charlie-mobile"],
+  "created_at": "2024-01-01T00:00:00Z",
+  "last_modified": "2024-01-01T00:00:00Z"
 }
 ```
 
