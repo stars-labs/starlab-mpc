@@ -83,7 +83,6 @@ class NetworkService {
 
     private async loadNetworks(): Promise<void> {
         try {
-            // Load stored networks
             if (typeof chrome !== 'undefined' && chrome.storage) {
                 const result = await chrome.storage.local.get([
                     this.STORAGE_KEY,
@@ -92,44 +91,26 @@ class NetworkService {
                 ]);
                 const storedNetworks = result[this.STORAGE_KEY];
 
-                // Initialize with default structure if not found or invalid
+                // Defensive: corrupted storage (non-object) resets to empty.
                 if (!storedNetworks || typeof storedNetworks !== 'object') {
                     this.networks = { ethereum: [], solana: [] };
                 } else {
-                    // Ensure the networks object has the correct structure
                     this.networks = {
                         ethereum: Array.isArray(storedNetworks.ethereum) ? storedNetworks.ethereum : [],
                         solana: Array.isArray(storedNetworks.solana) ? storedNetworks.solana : []
                     };
                 }
 
-                // Load current blockchain
-                this.currentBlockchain = result[this.CURRENT_BLOCKCHAIN_KEY] || 'ethereum';
+                // Validate currentBlockchain against allowed values.
+                const storedBlockchain = result[this.CURRENT_BLOCKCHAIN_KEY];
+                this.currentBlockchain = (storedBlockchain === 'ethereum' || storedBlockchain === 'solana')
+                    ? storedBlockchain
+                    : 'ethereum';
 
-                // Load current networks for each blockchain
                 this.currentNetworks = result[this.CURRENT_NETWORK_KEY] || { ethereum: undefined, solana: undefined };
-
-                // Add default networks if none exist for the current blockchain
-                if (!this.networks.ethereum || this.networks.ethereum.length === 0) {
-                    const defaultEthNetworks = this.getDefaultNetworks('ethereum');
-                    for (const network of defaultEthNetworks) {
-                        // Check if network already exists before adding
-                        const exists = this.networks.ethereum.some(n => n.id === network.id);
-                        if (!exists) {
-                            await this.addNetwork('ethereum', network);
-                        }
-                    }
-                }
-
-                // If no current network is set for ethereum, set to mainnet
-                if (!this.currentNetworks.ethereum) {
-                    const mainnetNetwork = this.networks.ethereum.find(n => n.id === mainnet.id);
-                    if (mainnetNetwork) {
-                        await this.setCurrentNetwork('ethereum', mainnetNetwork.id);
-                    }
-                }
             } else {
-                // Fallback for test environment
+                // No chrome.storage (test environment or non-extension context):
+                // start from empty — defaults get seeded below.
                 this.networks = { ethereum: [], solana: [] };
                 this.currentBlockchain = 'ethereum';
                 this.currentNetworks = { ethereum: undefined, solana: undefined };
@@ -137,6 +118,37 @@ class NetworkService {
         } catch (error) {
             console.error('Failed to load networks:', error);
             this.networks = { ethereum: [], solana: [] };
+            this.currentBlockchain = 'ethereum';
+            this.currentNetworks = { ethereum: undefined, solana: undefined };
+        }
+
+        // Seed defaults regardless of storage path — tests expect the
+        // "missing storage API" branch to still have Ethereum defaults.
+        if (!this.networks.ethereum || this.networks.ethereum.length === 0) {
+            const defaultEthNetworks = this.getDefaultNetworks('ethereum');
+            for (const network of defaultEthNetworks) {
+                const exists = this.networks.ethereum.some(n => n.id === network.id);
+                if (!exists) {
+                    try {
+                        await this.addNetwork('ethereum', network);
+                    } catch {
+                        // Ignore persistence failures during default seeding —
+                        // in-memory state is what callers observe via getNetworks().
+                        this.networks.ethereum.push(network);
+                    }
+                }
+            }
+        }
+
+        if (!this.currentNetworks.ethereum) {
+            const mainnetNetwork = this.networks.ethereum.find(n => n.id === mainnet.id);
+            if (mainnetNetwork) {
+                try {
+                    await this.setCurrentNetwork('ethereum', mainnetNetwork.id);
+                } catch {
+                    this.currentNetworks.ethereum = mainnetNetwork;
+                }
+            }
         }
     }
 
@@ -145,7 +157,7 @@ class NetworkService {
             return [
                 {
                     id: mainnet.id,
-                    name: 'Mainnet',
+                    name: mainnet.name,
                     network: 'mainnet',
                     nativeCurrency: {
                         name: mainnet.nativeCurrency.name,
@@ -192,22 +204,17 @@ class NetworkService {
     }
 
     private async saveNetworks(): Promise<void> {
-        try {
-            if (typeof chrome !== 'undefined' && chrome.storage) {
-                await chrome.storage.local.set({ [this.STORAGE_KEY]: this.networks });
-            }
-        } catch (error) {
-            console.error('Failed to save networks:', error);
+        // Propagate storage failures — callers (addCustomNetwork,
+        // removeCustomNetwork) need to know if persistence failed.
+        // Silently swallowing would leave in-memory state diverged from disk.
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            await chrome.storage.local.set({ [this.STORAGE_KEY]: this.networks });
         }
     }
 
     private async saveCurrentNetworks(): Promise<void> {
-        try {
-            if (typeof chrome !== 'undefined' && chrome.storage) {
-                await chrome.storage.local.set({ [this.CURRENT_NETWORK_KEY]: this.currentNetworks });
-            }
-        } catch (error) {
-            console.error('Failed to save current networks:', error);
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            await chrome.storage.local.set({ [this.CURRENT_NETWORK_KEY]: this.currentNetworks });
         }
     }
 

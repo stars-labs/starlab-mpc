@@ -38,28 +38,37 @@ const mockStorage = {
     }
 };
 
-// Mock viem clients to avoid network calls
+// Mock viem clients to avoid network calls. Each call returns a FRESH
+// wrapper object (distinct identity, required by "different clients"
+// tests) but all wrappers share the same underlying method mocks so
+// connectivity tests can assert `.toHaveBeenCalled()` on a stable
+// reference.
 const mockPublicClient = {
     getBlockNumber: mock(async () => 18000000n),
     getChainId: mock(async () => 1),
-    getBalance: mock(async () => 1000000000000000000n) // 1 ETH
+    getBalance: mock(async () => 1000000000000000000n), // 1 ETH
 };
+const createPublicClientMock = mock(() => ({ ...mockPublicClient }));
 
-// Mock viem's createPublicClient
-const createPublicClientMock = mock(() => mockPublicClient);
-
-// Replace the actual import with our mock. Cast through any
-// because viem's createPublicClient has a generic-rich signature
-// that our simple mock() can't structurally satisfy — the test
-// only cares that the mocked function is called, not its full
-// return-type alignment.
-const originalModule = await import('viem');
-(originalModule as any).createPublicClient = createPublicClientMock;
+// mock.module avoids the ESM readonly-export trap: direct property
+// assignment on an imported module throws at top-level and takes down
+// every other test file via "unhandled error between tests".
+mock.module('viem', () => ({
+    createPublicClient: createPublicClientMock,
+    http: mock(() => ({})),
+    custom: mock(() => ({})),
+    createWalletClient: mock(() => ({ account: { address: '0x0' } })),
+}));
 
 describe('NetworkService', () => {
     let networkService: NetworkService;
 
     beforeEach(async () => {
+        // Re-install file-local mockStorage onto chrome.storage.local.
+        // setup-bun.ts beforeEach replaces chrome.storage.local with its
+        // own mock; re-assign here so our spy is the one the service hits.
+        (global as any).chrome.storage.local = mockStorage;
+
         // Clear mock storage and reset mocks
         await mockStorage.clear();
         mockStorage.get.mockClear();
@@ -495,19 +504,23 @@ describe('NetworkService', () => {
         });
 
         it('should handle missing storage API', async () => {
-            // Temporarily remove chrome.storage
+            // Temporarily remove chrome.storage. Use try/finally so any
+            // exception in the body can't leave chrome deleted — setup-bun's
+            // beforeEach would then fail in every subsequent test with
+            // "chrome is not defined".
             const originalChrome = (global as any).chrome;
-            delete (global as any).chrome;
+            try {
+                delete (global as any).chrome;
 
-            NetworkService.resetInstance();
-            const newService = NetworkService.getInstance();
-            await newService.ensureInitialized();
+                NetworkService.resetInstance();
+                const newService = NetworkService.getInstance();
+                await newService.ensureInitialized();
 
-            const networks = newService.getNetworks();
-            expect(networks.ethereum.length).toBeGreaterThanOrEqual(2); // Should still have defaults
-
-            // Restore chrome
-            (global as any).chrome = originalChrome;
+                const networks = newService.getNetworks();
+                expect(networks.ethereum.length).toBeGreaterThanOrEqual(2); // Should still have defaults
+            } finally {
+                (global as any).chrome = originalChrome;
+            }
         });
     });
 

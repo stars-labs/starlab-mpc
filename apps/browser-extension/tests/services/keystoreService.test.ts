@@ -316,7 +316,9 @@ describe('KeystoreService', () => {
             const backup = await keystore.exportWallet('backup-wallet-1');
             
             expect(backup).toHaveProperty('version');
-            expect(backup).toHaveProperty('deviceId');
+            // Cross-client interop field name: the CLI uses snake_case
+            // for backup envelopes, so we match on `device_id`.
+            expect(backup).toHaveProperty('device_id');
             expect(backup).toHaveProperty('exportedAt');
             expect(backup.wallets).toHaveLength(1);
             expect(backup.wallets[0].metadata).toEqual(mockWallets[0].metadata);

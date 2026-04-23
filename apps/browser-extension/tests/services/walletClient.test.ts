@@ -21,18 +21,11 @@ mock.module('viem', () => ({
   custom: jest.fn(() => ({}))
 }));
 
-// Mock viem/chains
-mock.module('viem/chains', () => ({
-  mainnet: {
-    id: 1,
-    name: 'Ethereum',
-    rpcUrls: {
-      default: {
-        http: ['https://eth.merkle.io']
-      }
-    }
-  }
-}));
+// Intentionally not mocking viem/chains — it would bleed into other
+// test files (bun mock.module is process-global) and starve
+// networkService.test.ts of sepolia/polygon/arbitrum + nativeCurrency
+// fields. The real viem/chains is cheap to import and has no side
+// effects.
 
 describe('WalletClientService', () => {
   let walletClient: WalletClientService;
