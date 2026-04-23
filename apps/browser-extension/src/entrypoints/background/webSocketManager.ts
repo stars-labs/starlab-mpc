@@ -180,6 +180,42 @@ export class WebSocketManager {
             
             // Initial delay to ensure registration is processed
             setTimeout(requestDeviceList, 1500); // 1.5 second initial delay
+
+            // Cold-start session discovery (Ext-1a+): the
+            // `session_available` channel is a broadcast — only
+            // clients already connected at announcement time see
+            // it. If a TUI node ran `announce_session` before the
+            // extension's popup opened, we'd be blind to that
+            // session without an explicit replay query. Mirrors
+            // TUI's ws_runtime.rs which fires `RequestActiveSessions`
+            // on connect. The server answers with
+            // `sessions_for_device` (array of session_info blobs),
+            // which our incoming handler routes through
+            // `handleSessionAvailable` per entry.
+            //
+            // Fire-and-forget; sent after a slightly longer delay
+            // than the peer-list request so both don't race on
+            // serialization order (the server processes in arrival
+            // order, but peer-list arriving first gives the popup
+            // consistent "devices first, sessions next" UX).
+            setTimeout(() => {
+                try {
+                    if (
+                        this.wsClient &&
+                        this.wsClient.getReadyState() === WebSocket.OPEN
+                    ) {
+                        this.wsClient.requestActiveSessions();
+                        console.log(
+                            "[WebSocketManager] request_active_sessions sent — cold-start replay",
+                        );
+                    }
+                } catch (err) {
+                    console.warn(
+                        "[WebSocketManager] request_active_sessions failed:",
+                        err,
+                    );
+                }
+            }, 2000);
         });
 
         // Handle connection close
