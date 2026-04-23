@@ -115,26 +115,22 @@ The TUI uses colors and symbols to convey information:
 
 ### Step 1: Initiate Wallet Creation
 
-From the main menu, select "Create New Wallet":
+From the main menu, select "Create New Wallet". The real
+`CreateWalletComponent` (`src/elm/components/create_wallet.rs`) is
+a step-driven form — user progresses through Mode / Template /
+Parameters + Curve screens rather than filling a single form page
+with all fields at once. There is no per-peer "Participants to
+invite" checkbox list — peer discovery is driven by the session
+announcement + Join Session flow on each participant's side, not
+a push-invite from the creator.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Create New Wallet                                   │
-├─────────────────────────────────────────────────────┤
-│ Wallet Name: [company-treasury___]                  │
-│                                                     │
-│ Participants:    [3] ▼                              │
-│ Threshold:       [2] ▼                              │
-│ Blockchain:      [Ethereum (secp256k1)] ▼          │
-│                                                     │
-│ Participants to invite:                             │
-│ ☐ bob (online)                                      │
-│ ☐ charlie (online)                                  │
-│ ☐ dave (offline)                                    │
-│                                                     │
-│ [Create] [Cancel]                                   │
-└─────────────────────────────────────────────────────┘
-```
+Earlier drafts of this section showed a single-page form with
+fields for `Participants` + `Threshold` + `Blockchain` dropdowns
+PLUS a `Participants to invite: ☐ bob ☐ charlie ☐ dave` checkbox
+list and a `[Create] [Cancel]` button row. None of those UI
+elements exist — the ratatui components in `create_wallet.rs`
+don't draw dropdowns or checkboxes, and peer invitation isn't a
+creator-side feature (each co-signer joins from their own node).
 
 ### Step 2: Configure Parameters
 
@@ -167,24 +163,27 @@ Once initiated, the DKG process begins:
 
 ### Step 4: Wallet Created
 
-Upon successful completion:
+On successful completion the `WalletComplete` component
+(`src/elm/components/wallet_complete.rs`) shows the new wallet's
+metadata + derived address(es).
+
+The keystore file is written at:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ ✅ Wallet Created Successfully!                     │
-├─────────────────────────────────────────────────────┤
-│ Wallet: company-treasury                            │
-│ Type: 2-of-3 Ethereum Wallet                       │
-│ Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f7A │
-│                                                     │
-│ Your key share has been encrypted and saved.       │
-│ Location: ~/.frost_keystore/company-treasury.json  │
-│                                                     │
-│ ⚠️  Important: Back up your keystore file!         │
-│                                                     │
-│ [View Wallet] [Export Backup] [Done]               │
-└─────────────────────────────────────────────────────┘
+~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json
 ```
+
+Path is partitioned by `device_id` and curve
+(`secp256k1` / `ed25519`) — NOT a flat top-level
+`<name>.json` file as earlier drafts of this section claimed.
+Unified DKG mints both curves from the same ceremony so each
+participant ends up with a pair of files (one per curve).
+
+Earlier drafts of this section also showed an ASCII mock with
+`[View Wallet] [Export Backup] [Done]` action buttons. Real
+ratatui components don't render button rows like that — the
+screen has a fixed completion banner and you navigate with
+Enter/Esc.
 
 ## Managing Wallets
 
