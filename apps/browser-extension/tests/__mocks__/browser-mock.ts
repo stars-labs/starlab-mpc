@@ -1,4 +1,6 @@
 // Browser mock for tests
+import { jest } from 'bun:test';
+
 export const browser = (global as any).chrome || {
   runtime: {
     id: 'test-extension-id',

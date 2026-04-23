@@ -283,7 +283,18 @@ class NetworkService {
         await this.saveNetworks();
     }
 
-    public getNetworks(blockchain?: 'ethereum' | 'solana'): Chain[] | Record<string, Chain[]> {
+    /**
+     * Function overloads so TypeScript narrows the return type based
+     * on whether a blockchain arg is supplied. Previously the union
+     * return (`Chain[] | Record<string, Chain[]>`) forced every caller
+     * to type-assert; now `getNetworks()` returns the map and
+     * `getNetworks('ethereum')` returns a Chain[] directly.
+     */
+    public getNetworks(): Record<'ethereum' | 'solana', Chain[]>;
+    public getNetworks(blockchain: 'ethereum' | 'solana'): Chain[];
+    public getNetworks(
+        blockchain?: 'ethereum' | 'solana',
+    ): Chain[] | Record<'ethereum' | 'solana', Chain[]> {
         if (blockchain) {
             return this.networks[blockchain];
         }
