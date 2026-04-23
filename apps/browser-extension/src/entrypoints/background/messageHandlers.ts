@@ -180,6 +180,11 @@ export class PopupMessageHandler {
                     await this.handleSaveDkgWalletRequest(message, sendResponse);
                     break;
 
+                case MESSAGE_TYPES.CREATE_SIGNING_SESSION:
+                    console.log("🖊️ [PopupMessageHandler] CREATE_SIGNING_SESSION: Initiating signing ceremony");
+                    await this.handleCreateSigningSessionRequest(message, sendResponse);
+                    break;
+
                 case MESSAGE_TYPES.ACCEPT_SESSION:
                     console.log("🔐 [PopupMessageHandler] ACCEPT_SESSION: Accepting MPC session invite");
                     await this.handleAcceptSessionRequest(message, sendResponse);
@@ -597,6 +602,102 @@ export class PopupMessageHandler {
         }
         const result = await this.sessionManager.joinDkgSession(sessionId);
         sendResponse(result);
+    }
+
+    /**
+     * Ext-2a/b: popup → background "I want to sign this message with
+     * wallet X". Payload `{walletId, message}` where `message` is
+     * the user's plain UTF-8 text (or pre-hex if starts with `0x`).
+     * Handler:
+     *   1. Look up the wallet in KeystoreManager to get curve +
+     *      group_public_key — UI can't be trusted to send these.
+     *   2. For secp256k1, wrap `message` with EIP-191
+     *      (`\x19Ethereum Signed Message:\n<len><msg>` → keccak256)
+     *      so the resulting signature is ecrecover-compatible, same
+     *      as TUI's personal_sign path (eth_helper.rs). For ed25519,
+     *      sign the raw UTF-8 bytes.
+     *   3. Delegate to sessionManager.createSigningSession which
+     *      announces on the wire.
+     */
+    private async handleCreateSigningSessionRequest(
+        message: any,
+        sendResponse: (response: any) => void,
+    ): Promise<void> {
+        try {
+            const walletId = message.walletId;
+            const userMessage = message.message;
+            if (typeof walletId !== "string" || !walletId) {
+                sendResponse({ success: false, error: "walletId required" });
+                return;
+            }
+            if (typeof userMessage !== "string" || userMessage.length === 0) {
+                sendResponse({ success: false, error: "message required" });
+                return;
+            }
+
+            const { KeystoreManager } = await import(
+                "../../services/keystoreManager"
+            );
+            const km = KeystoreManager.getInstance();
+            const wallets = km.getWallets();
+            const wallet = wallets.find((w: any) => w.id === walletId);
+            if (!wallet) {
+                sendResponse({
+                    success: false,
+                    error: `No wallet with id ${walletId}`,
+                });
+                return;
+            }
+            const blockchain: "ethereum" | "solana" =
+                (wallet as any).blockchain === "solana" ? "solana" : "ethereum";
+
+            // Pull group_public_key + threshold/total from the saved
+            // keyshare data. KeystoreManager stores the KeyShareData
+            // alongside the metadata; we need it to populate the
+            // signing announcement. Fall back to placeholder values
+            // if the service doesn't expose the share (UI shouldn't
+            // offer Sign for walletless metadata).
+            const keyShare = (km as any).getKeyShareData?.(walletId);
+            const groupPublicKey =
+                keyShare?.group_public_key ?? (wallet as any).group_public_key ?? "";
+            const threshold = keyShare?.threshold ?? 2;
+            const total = keyShare?.total_participants ?? 3;
+
+            // EIP-191 wrap for secp256k1 ⇒ ecrecover-compatible.
+            // ed25519: raw UTF-8 bytes.
+            let messageHex: string;
+            if (blockchain === "ethereum") {
+                const { hashMessage } = await import("viem");
+                const hash = hashMessage(userMessage); // "0x..." hex
+                messageHex = hash.startsWith("0x") ? hash.slice(2) : hash;
+            } else {
+                const encoder = new TextEncoder();
+                const bytes = encoder.encode(userMessage);
+                messageHex = Array.from(bytes, (b) =>
+                    b.toString(16).padStart(2, "0"),
+                ).join("");
+            }
+
+            const result = await this.sessionManager.createSigningSession({
+                walletId,
+                walletName: (wallet as any).name ?? walletId,
+                groupPublicKey,
+                blockchain,
+                threshold,
+                total,
+                signingMessageHex: messageHex,
+            });
+            sendResponse(result);
+        } catch (err) {
+            console.error(
+                "[PopupMessageHandler] CREATE_SIGNING_SESSION failed:",
+                err,
+            );
+            sendResponse({
+                success: false,
+                error: (err as Error).message ?? String(err),
+            });
+        }
     }
 
     /**

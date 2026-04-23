@@ -268,6 +268,12 @@ export const MESSAGE_TYPES = {
     // keystore exists yet, create one with this password. Payload
     // is {password, walletName?}.
     SAVE_DKG_WALLET: "saveDkgWallet",
+    // Ext-2a/b: initiate a threshold signing ceremony. Mirror of
+    // CREATE_DKG_WALLET but for signing: builds session_info with
+    // session_type="signing", wallet_name, group_public_key, and
+    // signing_message_hex, then announces. Payload:
+    // {walletId, message, curve}.
+    CREATE_SIGNING_SESSION: "createSigningSession",
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",

@@ -654,6 +654,121 @@ export class SessionManager {
             return { success: false, error: (err as Error).message };
         }
     }
+
+    /**
+     * Ext-2: announce a threshold-signing ceremony for an existing
+     * wallet. Mirror of `createDkgWallet` but on the signing side of
+     * the TUI protocol:
+     *
+     *   - session_type: "signing" (flat string, matches TUI wire)
+     *   - wallet_name, group_public_key, blockchain, and
+     *     signing_message_hex filled in top-level per TUI's parser
+     *     (command.rs:286 line, signing-sibling fields).
+     *
+     * For secp256k1 wallets, the `message` parameter is hashed with
+     * EIP-191 before going on the wire — the signature must be
+     * ecrecover-compatible so dApps can verify it as a standard
+     * personal_sign. For ed25519, raw bytes are signed (Ed25519
+     * signs variable-length input natively).
+     *
+     * Does NOT actually run FROST rounds — that's the signing
+     * auto-trigger (Ext-2d). This commit just announces.
+     */
+    async createSigningSession(config: {
+        walletId: string;
+        walletName: string;
+        groupPublicKey: string;
+        blockchain: "ethereum" | "solana";
+        threshold: number;
+        total: number;
+        /** Hex-encoded bytes that FROST will sign. Caller is
+         *  responsible for EIP-191 wrapping if appropriate. */
+        signingMessageHex: string;
+    }): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+        if (!this.wsClient || this.wsClient.getReadyState() !== WebSocket.OPEN) {
+            return { success: false, error: "WebSocket not connected" };
+        }
+        if (!config.walletId || !config.groupPublicKey) {
+            return { success: false, error: "walletId and groupPublicKey required" };
+        }
+        if (!/^[0-9a-fA-F]*$/.test(config.signingMessageHex)) {
+            return { success: false, error: "signingMessageHex must be hex" };
+        }
+
+        const currentDeviceId = this.stateManager
+            ? this.stateManager.getState().deviceId
+            : this.appState.deviceId;
+        const sessionId = `sign_${cryptoHex(12)}`;
+        const curveType =
+            config.blockchain === "ethereum" ? "secp256k1" : "ed25519";
+
+        const sessionInfo: SessionInfo = {
+            session_id: sessionId,
+            proposer_id: currentDeviceId,
+            total: config.total,
+            threshold: config.threshold,
+            participants: [currentDeviceId],
+            session_type: "signing",
+            curve_type: curveType,
+            coordination_type: "Network",
+            // Signing-specific top-level siblings — TUI parser reads
+            // these at the top level (not nested).
+            wallet_name: config.walletName,
+            group_public_key: config.groupPublicKey,
+            blockchain: config.blockchain,
+            signing_message_hex: config.signingMessageHex,
+            accepted_devices: [currentDeviceId],
+        };
+
+        // Stash as active session so the popup's ceremony banner
+        // shows the signing in progress. Same dkgState enum is
+        // reused because offscreen's WebRTC+SigningManager keys off
+        // it (dkgState is a misnomer — it tracks ANY in-progress
+        // ceremony).
+        this.appState.sessionInfo = sessionInfo;
+        this.appState.invites = [
+            ...(this.appState.invites ?? []).filter(
+                (s) => s.session_id !== sessionId,
+            ),
+            sessionInfo,
+        ];
+        this.appState.dkgState = DkgState.Initializing;
+        if (this.stateManager) {
+            this.stateManager.updateState({
+                sessionInfo,
+                invites: this.appState.invites,
+                dkgState: DkgState.Initializing,
+                blockchain: config.blockchain,
+            });
+        }
+
+        try {
+            const wire = buildWireSessionInfo(sessionInfo);
+            this.wsClient.announceSession(wire);
+            console.log(
+                `[SessionManager] Created signing session ${sessionId} for wallet ${config.walletId} (${config.threshold}/${config.total} ${curveType})`,
+            );
+            this.broadcastToPopup({
+                type: "signingSessionCreated",
+                sessionInfo,
+            } as any);
+            return { success: true, sessionId };
+        } catch (error) {
+            console.error(
+                "[SessionManager] createSigningSession failed:",
+                error,
+            );
+            this.appState.sessionInfo = null;
+            this.appState.dkgState = DkgState.Idle;
+            if (this.stateManager) {
+                this.stateManager.updateState({
+                    sessionInfo: null,
+                    dkgState: DkgState.Idle,
+                });
+            }
+            return { success: false, error: (error as Error).message };
+        }
+    }
 }
 
 /**

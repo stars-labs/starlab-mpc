@@ -30,6 +30,18 @@
     let saveError = "";
     let saving = false;
 
+    // Ext-2a: Sign Transaction form state. Shown when keystore is
+    // initialized + unlocked + there's no active session (can't
+    // start a new ceremony mid-ceremony). Popup-local because the
+    // typed message doesn't need to survive popup close — if the
+    // user closes without hitting Sign, the draft is discarded,
+    // which matches TUI's behavior (clear_sign_draft on screen exit).
+    let showSignForm = false;
+    let signMessage = "";
+    let signError = "";
+    let signing_ = false;
+    let signWalletId = "";
+
     // Application state (consolidated from background) - the single source of truth
     let appState: AppState = { ...INITIAL_APP_STATE };
 
@@ -1245,6 +1257,114 @@
                     {/each}
                 </div>
             {/if}
+        {/if}
+
+        <!-- Ext-2a/b: Sign Transaction entry point. Rendered when we
+             have at least one saved wallet AND no active ceremony
+             (would conflict with the wallet-status banner below).
+             Clicking expands an inline form → background builds the
+             EIP-191 (or raw, per curve) hash and announces a
+             signing session. -->
+        {#if keystoreStatus.initialized && !keystoreStatus.locked && keystoreStatus.wallets?.length > 0 && !appState.sessionInfo}
+            <div class="mb-4 rounded border border-purple-200 bg-purple-50 p-3">
+                {#if !showSignForm}
+                    <div class="flex items-center justify-between">
+                        <p class="text-sm font-medium text-purple-900">Sign with an existing wallet</p>
+                        <button
+                            type="button"
+                            class="rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
+                            on:click={() => {
+                                showSignForm = true;
+                                signError = "";
+                                signMessage = "";
+                                signWalletId = keystoreStatus.activeWallet?.id ?? keystoreStatus.wallets[0].id;
+                            }}
+                            disabled={!appState.wsConnected}
+                            title={appState.wsConnected ? "Initiate a threshold signing ceremony" : "Signal server not connected"}
+                        >
+                            ✍️ Sign Message
+                        </button>
+                    </div>
+                {:else}
+                    <form
+                        class="space-y-2"
+                        on:submit|preventDefault={async () => {
+                            signError = "";
+                            if (!signMessage.trim()) {
+                                signError = "Message required";
+                                return;
+                            }
+                            if (!signWalletId) {
+                                signError = "Pick a wallet";
+                                return;
+                            }
+                            signing_ = true;
+                            try {
+                                const response = await chrome.runtime.sendMessage({
+                                    type: MESSAGE_TYPES.CREATE_SIGNING_SESSION,
+                                    walletId: signWalletId,
+                                    message: signMessage,
+                                });
+                                if (response?.success) {
+                                    console.log("[UI] Signing session:", response.sessionId);
+                                    showSignForm = false;
+                                    signMessage = "";
+                                } else {
+                                    signError = response?.error ?? "Sign failed";
+                                }
+                            } catch (e) {
+                                signError = (e as Error).message ?? String(e);
+                            } finally {
+                                signing_ = false;
+                            }
+                        }}
+                    >
+                        <p class="text-sm font-semibold text-purple-900">Sign Message</p>
+                        <select
+                            bind:value={signWalletId}
+                            class="w-full rounded border px-2 py-1 text-xs"
+                            disabled={signing_}
+                        >
+                            {#each keystoreStatus.wallets as w}
+                                <option value={w.id}>
+                                    {w.name ?? w.id} · {w.blockchain}
+                                </option>
+                            {/each}
+                        </select>
+                        <textarea
+                            bind:value={signMessage}
+                            class="w-full rounded border px-2 py-1 font-mono text-xs"
+                            rows="3"
+                            placeholder={`Message to sign (EIP-191 wrapped for Ethereum, raw UTF-8 for Solana)`}
+                            disabled={signing_}
+                        />
+                        {#if signError}
+                            <p class="text-xs text-red-600">{signError}</p>
+                        {/if}
+                        <div class="flex gap-2">
+                            <button
+                                type="submit"
+                                class="flex-1 rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:bg-purple-300"
+                                disabled={signing_}
+                            >
+                                {signing_ ? "Announcing…" : "Confirm & Announce"}
+                            </button>
+                            <button
+                                type="button"
+                                class="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
+                                on:click={() => {
+                                    showSignForm = false;
+                                    signMessage = "";
+                                    signError = "";
+                                }}
+                                disabled={signing_}
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    </form>
+                {/if}
+            </div>
         {/if}
 
         <!-- Wallet Status Banner -->
