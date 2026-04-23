@@ -1,4 +1,7 @@
-import type { MessageHandler } from '../../../src/entrypoints/background/messageHandlers';
+// MessageHandler no longer exported (split into PopupMessageHandler +
+// OffscreenMessageHandler). This test just uses a local duck-typed
+// mock, so aliasing as `any` keeps the legacy fixture working.
+type MessageHandler = any;
 import type { OffscreenManager } from '../../../src/entrypoints/background/offscreenManager';
 // Mock dependencies
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
