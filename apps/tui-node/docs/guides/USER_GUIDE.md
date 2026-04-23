@@ -168,7 +168,7 @@ Upon successful completion:
 │ Address: 0x742d35Cc6634C0532925a3b844Bc9e7595f7A │
 │                                                     │
 │ Your key share has been encrypted and saved.       │
-│ Location: ~/.frost-mpc/keystores/company-treasury  │
+│ Location: ~/.frost_keystore/company-treasury.json  │
 │                                                     │
 │ ⚠️  Important: Back up your keystore file!         │
 │                                                     │

@@ -22,8 +22,9 @@ struct Args {
     log_level: String,
 
     /// Device ID for this instance (must be unique)
-    /// Example: --device-id alice (creates .mpc-wallet-alice/)
-    /// If not provided, uses hostname
+    /// If not provided, uses hostname. The keystore is always at
+    /// ~/.frost_keystore (not per-device-id — device_id is the
+    /// participant identity in the FROST mesh, not a filesystem prefix).
     #[arg(long = "device-id")]
     device_id: Option<String>,
 

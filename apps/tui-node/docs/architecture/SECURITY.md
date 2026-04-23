@@ -284,7 +284,7 @@ impl Drop for SensitiveData {
 ┌─────────────────────────────────────────────────────────┐
 │ File Permissions (Unix)                                 │
 ├─────────────────────────────────────────────────────────┤
-│ ~/.frost-mpc/                                           │
+│ ~/.frost_keystore/                                           │
 │ ├── config.toml          (600) User read/write only   │
 │ ├── keystores/           (700) User access only       │
 │ │   ├── wallet1.dat      (600) Encrypted keystore     │
@@ -587,11 +587,11 @@ ufw allow 443/tcp  # Signal server
 ufw enable
 
 # File system hardening
-chmod 700 ~/.frost-mpc
-chmod 600 ~/.frost-mpc/keystores/*
+chmod 700 ~/.frost_keystore
+chmod 600 ~/.frost_keystore/keystores/*
 
 # Enable audit logging
-auditctl -w ~/.frost-mpc -p wa -k frost_mpc_changes
+auditctl -w ~/.frost_keystore -p wa -k frost_keystore_changes
 ```
 
 ### Application Hardening

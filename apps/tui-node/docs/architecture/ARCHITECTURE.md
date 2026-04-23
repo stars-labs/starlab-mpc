@@ -295,7 +295,7 @@ pub struct EncryptedWallet {
 ### Directory Structure
 
 ```
-~/.frost-mpc/
+~/.frost_keystore/
 ├── config.toml              # Application configuration
 ├── keystores/               # Encrypted wallet data
 │   ├── company-treasury.dat
