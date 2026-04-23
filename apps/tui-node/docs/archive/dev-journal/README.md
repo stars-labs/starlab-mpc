@@ -24,6 +24,7 @@ live documentation.
 | `REAL_DKG_IMPLEMENTATION.md` | Pre-cutover snapshot | Obsoleted by the COMPLETE doc above — documented the mock state that no longer exists (dated "As of 2025-09-15") |
 | `PERFORMANCE_FIXES.md` / `PERFORMANCE_OPTIMIZATIONS.md` / `performance-analysis.md` | Week 1 perf | Adaptive event loop, bounded channels, group-address determinism fix |
 | `OFFLINE_DKG_IMPLEMENTATION.md` | Design-spec, never built | Claimed "We have successfully implemented" `OfflineDKGProcessComponent` (offline_dkg_process.rs) + `SDCardManagerComponent` (sd_card_manager.rs). Verified neither file exists under `src/elm/components/`. Real offline mode works via `src/offline/` + the generic UI components (no dedicated per-phase wizard). Kept as a design-spec for the UX that was intended but never shipped |
+| `KEYBOARD_EVENT_ARCHITECTURE_ANALYSIS.md` | Historical analysis | Post-mortem of a past UI-hang issue blaming empty `vec![]` subscription args to `app.mount`. Proposed a `mount_with_subscriptions` helper that was never implemented (grep: zero hits); the existing code still uses `mount(..., vec![])` at 10 call sites in `elm/app.rs` and the keyboard paths work today. Either the analysis's root-cause diagnosis was wrong or the real fix landed through a different mechanism (the current stack uses tuirealm 4's CrosstermTerminalAdapter). Archived as historical artefact |
 
 Nothing in the active source, build scripts, or top-level docs
 cross-references these files — verified zero hits outside this dir.
