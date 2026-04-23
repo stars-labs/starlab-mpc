@@ -2,7 +2,7 @@
 
 ## Overview
 
-The MPC Wallet Terminal UI (TUI) Node is a professional-grade terminal application for managing multi-party computation wallets. Built with Rust and Ratatui, it provides an intuitive interface for distributed key generation, threshold signing, and secure wallet management without requiring command-line expertise.
+The MPC Wallet Terminal UI (TUI) Node is a keyboard-driven terminal application for distributed key generation (FROST DKG), threshold signing, and encrypted keystore management. Built in Rust with Ratatui via the tui-realm Elm-architecture framework; interoperates with the browser extension + native desktop app over the same wire protocol and keystore format.
 
 ## Documentation Structure
 

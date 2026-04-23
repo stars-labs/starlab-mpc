@@ -389,7 +389,11 @@ in SECURITY.md).
 
 ## Conclusion
 
-The complete offline workflow provides enterprise-grade security for MPC wallet operations. By combining DKG ceremony with transaction signing in a fully air-gapped environment, organizations can achieve maximum security for their digital assets while maintaining the benefits of threshold signatures.
+The offline workflow combines DKG and threshold signing over
+physical SD-card exchange, with no network connectivity required on
+the signing machines. Real production code lives at `src/offline/`
+(see the scope note at the top of this doc); the demo described
+here is `apps/tui-node/examples/offline_dkg_signing_demo.rs`.
 
 The implementation demonstrates:
 - ✅ Complete DKG ceremony with 3 participants

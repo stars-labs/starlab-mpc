@@ -13,13 +13,13 @@ MPC Wallet enables threshold signatures where private keys are split across mult
 
 ### Key Features
 
-- **Real FROST DKG**: Cryptographically secure distributed key generation using proper FROST protocol
+- **Real FROST DKG**: Distributed key generation via the ZCash Foundation's `frost-core 2.2` crates
 - **Threshold Signatures**: Configurable t-of-n threshold signing
 - **Multi-Platform**: Browser extension, desktop GUI, and terminal UI
 - **Multi-Chain Support**: Ethereum (secp256k1) and Solana (ed25519)
 - **Peer-to-Peer**: Direct WebRTC connections between participants
-- **Offline Mode**: Air-gapped operations for maximum security
-- **Production Ready**: Comprehensive testing and security audits
+- **Offline Mode**: Air-gapped SD-card operation option
+- **Test Coverage**: `cargo test --workspace` runs 174 Rust tests; the browser extension has 500+ Bun tests — no third-party security audit of this codebase has been performed (report security issues via GitHub Security Advisories)
 
 ## Quick Start
 

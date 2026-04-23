@@ -238,25 +238,34 @@ impl MainMenu {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Color::Cyan))
-                    .title(" Professional Multi-Party Computation ")
+                    .title(" MPC Wallet — Threshold FROST Signer ")
                     .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             );
         frame.render_widget(title, header_chunks[0]);
         
         // Subtitle with version info
-        let subtitle = Paragraph::new("Enterprise-Grade Threshold Signature System v1.0")
+        let subtitle = Paragraph::new(concat!(
+            "Threshold Signature System v",
+            env!("CARGO_PKG_VERSION"),
+        ))
             .style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
             .alignment(Alignment::Center);
         frame.render_widget(subtitle, header_chunks[1]);
         
         // Security notice
-        let security = Paragraph::new("🔐 FROST Protocol • Air-Gap Compatible • Production Ready")
+        let security = Paragraph::new("🔐 FROST Protocol • Online & Offline (SD-card) Modes")
             .style(Style::default().fg(Color::Green))
             .alignment(Alignment::Center);
         frame.render_widget(security, header_chunks[2]);
         
-        // Connection status (placeholder)
-        let connection = Paragraph::new("🌐 Network: Ready • WebRTC: Available • Signal Server: Connected")
+        // Connection status line. Placeholder: the real live
+        // connection state lives on AppState and would need to
+        // thread through MainMenu props to surface here. For now,
+        // deliberately render a neutral hint instead of the earlier
+        // hardcoded "Network: Ready • WebRTC: Available • Signal
+        // Server: Connected" text, which was wrong whenever the
+        // signal server was not yet reached.
+        let connection = Paragraph::new("🌐 Signal-server + WebRTC state shown per-screen during active ceremonies")
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
         frame.render_widget(connection, header_chunks[3]);

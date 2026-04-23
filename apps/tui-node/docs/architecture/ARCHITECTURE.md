@@ -14,7 +14,7 @@
 
 ## System Overview
 
-The FROST MPC TUI Wallet is built as a modular, event-driven system that provides enterprise-grade multi-party computation through a terminal interface. The architecture prioritizes security, usability, and extensibility.
+The MPC Wallet TUI is a modular, event-driven Ratatui application that wraps the FROST threshold-signature protocol (via `frost-core 2.2`) in a keyboard-driven terminal interface. The architecture aims for clear separation between the tui-realm Elm loop, the protocol state machines in `src/protocal/`, and the shared `*Manager` business-logic types in `src/core/` that are reused by native-node.
 
 ### High-Level Architecture
 

@@ -18,7 +18,7 @@ The FROST MPC TUI Wallet implements defense-in-depth security architecture, comb
 
 ### Security Principles
 
-1. **Zero Trust**: No single component or participant is fully trusted
+1. **Threshold trust**: No fewer than `t`-of-`n` participants together can produce a signature — compromise of `< t` key shares is insufficient
 2. **Least Privilege**: Components have minimal required permissions
 3. **Defense in Depth**: Multiple layers of security controls
 4. **Fail Secure**: System fails to a secure state

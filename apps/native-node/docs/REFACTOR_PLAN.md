@@ -363,7 +363,7 @@ impl NativeApp {
 
 ## 🎯 End Goal
 
-Transform the native node from a basic UI into a professional-grade MPC wallet application that:
+Transform the native node from a basic UI into a fully-featured MPC wallet application that:
 - Matches all TUI node capabilities
 - Provides superior visual experience
 - Supports enterprise requirements
