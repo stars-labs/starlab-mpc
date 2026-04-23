@@ -23,6 +23,7 @@ live documentation.
 | `FROST_DKG_IMPLEMENTATION_COMPLETE.md` / `REAL_FROST_IMPLEMENTATION.md` | Mock→real FROST | Cutover retrospective — stubbed DKG replaced with `frost-{secp256k1,ed25519}` crates |
 | `REAL_DKG_IMPLEMENTATION.md` | Pre-cutover snapshot | Obsoleted by the COMPLETE doc above — documented the mock state that no longer exists (dated "As of 2025-09-15") |
 | `PERFORMANCE_FIXES.md` / `PERFORMANCE_OPTIMIZATIONS.md` / `performance-analysis.md` | Week 1 perf | Adaptive event loop, bounded channels, group-address determinism fix |
+| `OFFLINE_DKG_IMPLEMENTATION.md` | Design-spec, never built | Claimed "We have successfully implemented" `OfflineDKGProcessComponent` (offline_dkg_process.rs) + `SDCardManagerComponent` (sd_card_manager.rs). Verified neither file exists under `src/elm/components/`. Real offline mode works via `src/offline/` + the generic UI components (no dedicated per-phase wizard). Kept as a design-spec for the UX that was intended but never shipped |
 
 Nothing in the active source, build scripts, or top-level docs
 cross-references these files — verified zero hits outside this dir.
