@@ -18,8 +18,18 @@ The only coverage exclusion option available is:
 
 ## Files Still Included in Coverage
 Despite configuration attempts, these files cannot be excluded with current Bun capabilities:
-- `pkg/mpc_wallet.js` (45.93% func, 49.02% line coverage) - Auto-generated WASM bindings
-- `src/entrypoints/offscreen/test-utils.ts` (69.23% func, 70.59% line coverage) - Test utilities
+- `packages/@mpc-wallet/core-wasm/pkg/mpc_wallet_core_wasm.js` — auto-generated `wasm-pack` bindings (linked into the extension at build time by WXT)
+- `apps/browser-extension/tests/entrypoints/offscreen/test-utils.ts` — Bun test helpers
+
+Earlier drafts of this section referenced these files at
+`pkg/mpc_wallet.js` and `src/entrypoints/offscreen/test-utils.ts`
+respectively — both paths moved during the monorepo migration
+(WASM bindings live in the shared `@mpc-wallet/core-wasm` package;
+test utilities live under the extension's `tests/` tree, not
+`src/`). Historical coverage percentages (45.93% func / 49.02% line
+for the WASM bindings; 69.23% func / 70.59% line for the test
+utilities) from when the doc was first written — rerun
+`bun test --coverage` for current numbers.
 
 ## Available Coverage Configuration Options
 Based on official documentation, Bun supports these coverage-related configurations:
