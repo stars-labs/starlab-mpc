@@ -59,6 +59,22 @@
     };
     let signPreview: SignPreview | null = null;
 
+    // Ext-2e: populated when the offscreen FROST ceremony finalizes
+    // (via the `signingCompleted` message from background). Renders
+    // a dismissable banner with the aggregated signature hex + a
+    // copy-to-clipboard button. EIP-191 badge shown for secp256k1
+    // signatures so the user knows they can feed it straight to
+    // ecrecover.
+    type SignatureBanner = {
+        signingId: string;
+        signature: string;
+        messageHex: string;
+        blockchain: "ethereum" | "solana";
+        sessionId: string;
+    };
+    let signatureBanner: SignatureBanner | null = null;
+    let signatureCopied = false;
+
     // Application state (consolidated from background) - the single source of truth
     let appState: AppState = { ...INITIAL_APP_STATE };
 
@@ -514,6 +530,25 @@
                     signatureRequests = signatureRequests.filter(req => req.signingId !== message.signingId);
                 }
                 break;
+
+            case "signingCompleted":
+                // Ext-2e: FROST threshold signing ceremony finalized.
+                // Different from `signatureComplete` (legacy dApp-bridge
+                // single-party path); this one comes from the
+                // announce-session flow and carries the aggregated
+                // signature. Stash it for the banner — user can
+                // copy/dismiss. Replaces any prior banner (only one
+                // signing ceremony runs at a time).
+                console.log("[UI] Signing ceremony completed:", message);
+                signatureBanner = {
+                    signingId: message.signingId,
+                    signature: message.signature,
+                    messageHex: message.messageHex,
+                    blockchain: message.blockchain,
+                    sessionId: message.sessionId,
+                };
+                signatureCopied = false;
+                break;
                 
             case "signatureError":
 //                 console.log("[UI] Processing signatureError:", message);
@@ -608,6 +643,24 @@
         // Note: signMessage intentionally preserved so user can edit
         // and re-preview without retyping. TUI parity with Stage 3
         // CancelSigningRequest behavior.
+    }
+
+    async function copySignatureToClipboard() {
+        if (!signatureBanner) return;
+        try {
+            await navigator.clipboard.writeText(signatureBanner.signature);
+            signatureCopied = true;
+            setTimeout(() => {
+                signatureCopied = false;
+            }, 2000);
+        } catch (e) {
+            console.warn("[UI] Clipboard copy failed:", e);
+        }
+    }
+
+    function dismissSignatureBanner() {
+        signatureBanner = null;
+        signatureCopied = false;
     }
 
     onMount(async () => {
@@ -1516,6 +1569,76 @@
                             Cancel
                         </button>
                     </div>
+                </div>
+            </div>
+        {/if}
+
+        <!-- Ext-2e: Signature Complete banner. Renders when the
+             FROST ceremony finalizes (signingCompleted message
+             from background). Green on purpose — DKG complete is
+             green too, keeping the "big success state" visual
+             language consistent. EIP-191 badge for secp256k1 so
+             the user knows the hex is directly ecrecover-ready. -->
+        {#if signatureBanner}
+            <div
+                class="mb-4 rounded border border-green-300 bg-green-50 p-3"
+            >
+                <div class="mb-2 flex items-center justify-between">
+                    <p class="text-sm font-semibold text-green-900">
+                        ✓ Signature complete
+                    </p>
+                    <button
+                        type="button"
+                        class="text-xs text-green-700 hover:text-green-900"
+                        on:click={dismissSignatureBanner}
+                        aria-label="Dismiss"
+                    >
+                        ✕
+                    </button>
+                </div>
+                <dl class="space-y-1.5 text-xs">
+                    {#if signatureBanner.blockchain === "ethereum"}
+                        <dd>
+                            <span
+                                class="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
+                            >
+                                EIP-191 · ecrecover-compatible
+                            </span>
+                        </dd>
+                    {:else}
+                        <dd>
+                            <span
+                                class="inline-block rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-900"
+                            >
+                                ed25519 · Solana
+                            </span>
+                        </dd>
+                    {/if}
+                    <div>
+                        <dt class="font-semibold text-gray-700">Signature</dt>
+                        <dd
+                            class="break-all rounded bg-white p-2 font-mono text-[10px] text-gray-900 border border-green-200"
+                        >
+                            0x{signatureBanner.signature.replace(/^0x/, "")}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="font-semibold text-gray-700">Message hash</dt>
+                        <dd
+                            class="break-all font-mono text-[10px] text-gray-600"
+                        >
+                            0x{signatureBanner.messageHex.replace(/^0x/, "")}
+                        </dd>
+                    </div>
+                </dl>
+                <div class="mt-3 flex gap-2">
+                    <button
+                        type="button"
+                        class="flex-1 rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
+                        on:click={copySignatureToClipboard}
+                    >
+                        {signatureCopied ? "✓ Copied" : "Copy signature"}
+                    </button>
                 </div>
             </div>
         {/if}
