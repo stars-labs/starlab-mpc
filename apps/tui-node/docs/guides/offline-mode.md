@@ -138,7 +138,7 @@ All data exchanged via SD card uses JSON format with the following structure:
 #### Offline Mode Initialization
 ```bash
 # Start node in offline mode
-frost-mpc-cli-node --offline --device-id offline-signer-1
+mpc-wallet-tui --offline --device-id offline-signer-1
 
 # Or toggle offline mode in running node
 /offline on
