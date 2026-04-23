@@ -259,21 +259,22 @@ describe('KeystoreService', () => {
                     name: 'Wallet 1',
                     blockchain: 'ethereum',
                     address: '0x123',
-                    sessionId: 'session-1',
+                    session_id: 'session-1',
                     isActive: true,
-                    hasBackup: false
+                    hasBackup: false,
                 },
                 keyShare: {
-                    keyPackage: 'key-1',
-                    groupPublicKey: '0xabc',
-                    sessionId: 'session-1',
-                    deviceId: 'device-123',
-                    participantIndex: 1,
+                    key_package: 'key-1',
+                    group_public_key: '0xabc',
+                    session_id: 'session-1',
+                    device_id: 'device-123',
+                    participant_index: 1,
                     threshold: 2,
-                    totalParticipants: 3,
+                    total_participants: 3,
                     participants: ['device1', 'device2', 'device3'],
                     curve: 'secp256k1' as const,
-                    createdAt: Date.now()
+                    blockchains: [],
+                    created_at: Date.now(),
                 }
             }
         ];
