@@ -325,6 +325,15 @@ class NetworkService {
     }
 
     /**
+     * Flat list of every registered network across blockchains.
+     * Useful for UIs that show a single unified list (network
+     * picker / search) rather than the map form from getNetworks().
+     */
+    public getAllNetworks(): Chain[] {
+        return [...this.networks.ethereum, ...this.networks.solana];
+    }
+
+    /**
      * Find a network by chainId across both blockchains (ethereum
      * first, then solana). Handy when callers have only a chainId
      * and don't know which blockchain it belongs to — e.g. dApps
