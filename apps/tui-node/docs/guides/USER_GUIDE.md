@@ -229,111 +229,81 @@ Selecting a wallet shows comprehensive information:
 └─────────────────────────────────────────────────────┘
 ```
 
-## Signing Transactions
+## Signing Messages
 
-### Initiating a Signing Session
+### Scope of what the TUI signs
 
-From wallet details or main menu:
+The TUI produces **EIP-191 `personal_sign` signatures** over a
+user-supplied message string (see the docstring of
+`src/elm/components/sign_transaction.rs`: "Phase C scope:
+message-only field"). It does NOT:
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Sign Transaction - company-treasury                 │
-├─────────────────────────────────────────────────────┤
-│ Transaction Type: [Ethereum Transfer] ▼             │
-│                                                     │
-│ To Address:                                         │
-│ [0x9876543210987654321098765432109876543210___]   │
-│                                                     │
-│ Amount: [1.5___] ETH                                │
-│                                                     │
-│ Gas Settings:                                       │
-│ • Max Fee: [50] gwei                                │
-│ • Priority: [2] gwei                                │
-│                                                     │
-│ Message/Note (optional):                            │
-│ [Q1 2024 contractor payment_________________]      │
-│                                                     │
-│ Required Signers: 2 of 3                            │
-│ Available: alice ✓, bob ✓, charlie ✗              │
-│                                                     │
-│ [Initiate Signing] [Cancel]                         │
-└─────────────────────────────────────────────────────┘
-```
+- build Ethereum transactions (no to-address / amount / gas-price /
+  gas-limit / nonce fields)
+- broadcast transactions to any chain (no RPC integration)
+- open Etherscan / block explorer links
+- track transaction hashes on-chain
 
-### Signing Process
+Earlier drafts of this guide showed a "Sign Transaction" form with
+Transaction Type / To Address / Amount / Max Fee / Priority Fee /
+Broadcasting Status / View-on-Etherscan button. None of that UI
+exists. To actually send a signed transaction on-chain, take the
+raw signature output from the TUI and hand it to an external tool
+(wallet front-end, ethers/web3 script, etc.) that constructs and
+broadcasts the transaction.
 
-During the signing process:
+### Initiating a signing session
+
+From the wallet list or wallet detail screen, select "Sign". The
+real Sign screen is a single-field message input:
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ Signing in Progress - Transaction #4521             │
-├─────────────────────────────────────────────────────┤
-│ Transaction Summary:                                │
-│ • From: company-treasury (2-of-3)                  │
-│ • To: 0x987...3210                                 │
-│ • Amount: 1.5 ETH                                  │
-│ • Note: Q1 2024 contractor payment                 │
-│                                                     │
-│ Signature Collection:                               │
-│ • alice    ✅ Signed at 10:45:23                   │
-│ • bob      ⏳ Reviewing transaction...             │
-│ • charlie  ⬜ Not participating                    │
-│                                                     │
-│ Progress: 1 of 2 signatures collected              │
-│ ▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ 50%                          │
-│                                                     │
-│ Status: Waiting for 1 more signature...            │
-│                                                     │
-│ [View Details] [Cancel]                            │
-└─────────────────────────────────────────────────────┘
+┌── 🖊️  Sign with <wallet_id> ────────────┐
+│ Group key: <short>...                 │
+│                                        │
+│ ┌ Message to sign ─────────────────┐   │
+│ │ <user text>_                     │   │
+│ └──────────────────────────────────┘   │
+│                                        │
+│ <error, if any>                        │
+│                                        │
+│ Enter = Sign    Esc = Cancel           │
+└────────────────────────────────────────┘
 ```
 
-### Transaction Completion
+### Signing process
 
-Once threshold is reached:
+Once the user submits the message, the TUI kicks off a FROST
+signing ceremony. Progress is shown in the `DKGProgress`-style
+gauge (the same component handles both DKG and signing ceremonies
+— name is historical). Participants are fetched from the active
+session; each must have their key share unlocked before they can
+contribute a signature share.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ ✅ Transaction Signed Successfully!                 │
-├─────────────────────────────────────────────────────┤
-│ Transaction Hash:                                   │
-│ 0xf3d4e2c1b0a9e8d7c6b5a4f3e2d1c0b9a8e7d6c5b4a3   │
-│                                                     │
-│ Signatures collected: 2 of 2 required               │
-│ • alice - Signed at 10:45:23                       │
-│ • bob - Signed at 10:46:15                         │
-│                                                     │
-│ Transaction Status: Broadcasting...                 │
-│                                                     │
-│ [View on Etherscan] [Copy TX Hash] [Done]         │
-└─────────────────────────────────────────────────────┘
-```
+### Completion
+
+On successful aggregation, the TUI shows the raw signature hex
+via the `SignatureComplete` component. Copy it out for use in
+whatever external tool will broadcast the actual transaction. No
+on-chain activity happens inside the TUI.
 
 ## Offline Operations
 
 ### Enabling Offline Mode
 
-For air-gapped security, switch to offline mode:
+Offline mode is a **startup-time** decision, not a runtime toggle:
+launch with the `--offline` CLI flag.
 
+```bash
+mpc-wallet-tui --device-id alice --offline
 ```
-┌─────────────────────────────────────────────────────┐
-│ 🔒 Offline Mode Settings                            │
-├─────────────────────────────────────────────────────┤
-│ Current Status: Online                              │
-│                                                     │
-│ ⚠️  Switching to offline mode will:                │
-│ • Disable all network connections                  │
-│ • Require SD card for data transfer                │
-│ • Enable air-gapped signing workflow               │
-│                                                     │
-│ SD Card Mount Point: [/mnt/sdcard___]              │
-│                                                     │
-│ ☑ Verify SD card is formatted and empty            │
-│ ☑ I understand the offline workflow                │
-│                                                     │
-│ [Switch to Offline] [Cancel]                       │
-└─────────────────────────────────────────────────────┘
-```
+
+Earlier drafts of this guide showed an in-app "Switch to Offline"
+settings screen with SD-card mount-point configuration. No such
+screen exists. The `--offline` flag tells the TUI to skip WebSocket
+signaling + peer discovery; file paths for SD-card export/import
+are chosen via file dialog / entered path when the specific action
+runs (not configured globally).
 
 ### Offline Signing Workflow
 
