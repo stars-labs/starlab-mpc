@@ -48,7 +48,7 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 ### WASM & Blockchain
 - **`packages/@mpc-wallet/core-wasm/`** — Thin `wasm-bindgen` wrapper around frost-core
-- **`packages/@mpc-wallet/blockchain/`** — Multi-chain support (solana-sdk, ethers, bitcoin crate)
+- **`packages/@mpc-wallet/blockchain/`** — Multi-chain support. Only `solana-sdk` is pulled in directly; `bitcoin.rs` and `ethereum.rs` are hand-rolled over `sha2` / `sha3` / `bs58` primitives (ethers/bitcoin crate deps were removed when their dependent examples were disabled — see the Cargo.toml comment at line 27)
 
 ## Key Patterns
 
@@ -171,7 +171,7 @@ ui/*.slint (Slint 1.x)  <---callbacks--->  src/main.rs  <--->  src/core_adapter.
 ## Dependencies
 
 FROST: `frost-core` 2.2.0, `frost-ed25519` 2.2.0, `frost-secp256k1` 2.2.0 (ZCash implementations).
-Crypto: `sha2`, `sha3`, `k256`, `aes-gcm`, `argon2`, `pbkdf2` (keystore KDF in tui-node), `hkdf` + `hmac` (root-secret HKDF in frost-core). No direct `ed25519-dalek` — ed25519 curve ops go through `frost-ed25519` which pulls `curve25519-dalek` transitively.
+Crypto: `sha2`, `sha3`, `k256`, `aes-gcm`, `argon2`, `pbkdf2` (keystore KDF — used in both `tui-node::keystore::encryption` and `frost-core::keystore`), `hkdf` (root-secret expansion in frost-core), `hmac` (both HKDF and BIP-32-style HD derivation in frost-core's `hd_derivation.rs`). No direct `ed25519-dalek` — ed25519 curve ops go through `frost-ed25519` which pulls `curve25519-dalek` transitively.
 Dev environment: Nix flake (`nix develop`) provides all system deps including graphics libs.
 
 ## Workspace Layout
