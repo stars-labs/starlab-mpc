@@ -272,12 +272,18 @@ recommendation.
 ┌─────────────────────────────────────────────────────────┐
 │ Role-Based Access Control                               │
 ├─────────────────────────────────────────────────────────┤
-│ Role          │ Create │ Sign │ Admin │ Audit │ Backup │
-├───────────────┼────────┼──────┼───────┼───────┼────────┤
-│ Participant   │   ✓    │  ✓   │   ✗   │   ✗   │   ✓    │
-│ Coordinator   │   ✓    │  ✓   │   ✓   │   ✗   │   ✓    │
-│ Auditor       │   ✗    │  ✗   │   ✗   │   ✓   │   ✗    │
-│ Administrator │   ✗    │  ✗   │   ✓   │   ✓   │   ✓    │
+│ No RBAC model is implemented. The only access-control primitive │
+│ is the threshold itself: any `t`-of-`n` participants who hold   │
+│ the decrypted key shares (obtained by entering the correct      │
+│ keystore password for each) can sign. There's no Coordinator    │
+│ vs Auditor vs Administrator distinction; the "coordinator" is   │
+│ just whichever participant initiated a given DKG / signing      │
+│ ceremony and has no elevated privileges afterward.              │
+│                                                                 │
+│ Earlier drafts of this section showed a                         │
+│ Participant / Coordinator / Auditor / Administrator matrix      │
+│ with permissions for Create / Sign / Admin / Audit / Backup —   │
+│ that RBAC scheme does not exist in code.                        │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -504,34 +510,40 @@ auditctl -w ~/.frost_keystore -p wa -k frost_keystore_changes
 
 ### Application Hardening
 
-```toml
-# config.toml - Security Settings
-[security]
-# Password policy
-min_password_length = 16
-require_special_chars = true
-password_history = 5
-max_password_age_days = 90
+The TUI does NOT read a `config.toml` file — all runtime settings
+are CLI flags (see `docs/README.md` § Configuration, rewritten in
+6f896ad). Earlier drafts of this section showed a `[security]`
+TOML block with:
 
-# Session management
-session_timeout_minutes = 15
-max_concurrent_sessions = 1
-require_mfa = true
+  - `min_password_length`, `require_special_chars`, `password_history`,
+    `max_password_age_days` — no password policy is enforced beyond
+    "the keystore unlock must match"
+  - `session_timeout_minutes`, `max_concurrent_sessions`, `require_mfa`
+    — no session timeout, no session counter, no MFA
+  - `allowed_ips`, `rate_limit_per_minute`, `connection_timeout_seconds`
+    — no IP allowlist, no rate limiter (the signal server is an
+    unauthenticated relay), connection timeouts are transport
+    defaults
+  - `min_key_share_entropy_bits`, `require_secure_random`,
+    `key_derivation_iterations` — the first two are not settings
+    (the code unconditionally uses OS-entropy ChaCha20Rng for
+    FROST); PBKDF2 iterations are the hardcoded `PBKDF2_ITERATIONS`
+    constant (100_000)
 
-# Network security
-allowed_ips = ["192.168.1.0/24"]
-rate_limit_per_minute = 60
-connection_timeout_seconds = 30
-
-# Cryptographic settings
-min_key_share_entropy_bits = 256
-require_secure_random = true
-key_derivation_iterations = 100000
-```
+None of those config keys are read anywhere in source. Hardening
+today is entirely in-code constants + the operator's own
+deployment posture (firewall, kernel sysctls — see the System
+Hardening subsection above).
 
 ## Conclusion
 
-Security is not a feature but a continuous process. The FROST MPC TUI Wallet implements comprehensive security controls at every layer, from cryptographic protocols to operational procedures. Regular security assessments, updates, and training ensure the system remains secure against evolving threats.
+Security is a continuous process. This codebase gives you threshold
+cryptography (FROST t-of-n, upstream ZCash `frost-core 2.2`) and
+encrypted keystores (AES-256-GCM + PBKDF2). It does not give you
+RBAC, MFA, audit logs, a compliance framework, or a formal
+response SLA — those live outside this doc and, if needed, must
+be added by the operator.
 
-For security concerns or vulnerability reports, please open a private
-advisory via [GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new).
+For vulnerability reports, open a private advisory via
+[GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new).
+For operational bugs, use [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues).
