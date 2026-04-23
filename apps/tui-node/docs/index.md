@@ -96,10 +96,14 @@ drafts of this page was not actually implemented.
 
 ### Keystore
 
-- Key shares at rest are PBKDF2-HMAC-SHA256 (100k iterations) +
-  AES-256-GCM. Stored under
-  `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.{json,dat}` —
-  `.json` is plaintext metadata, `.dat` is the encrypted share.
+- Key shares at rest are AES-256-GCM with password-derived keys
+  (PBKDF2-HMAC-SHA256 at 100k iterations or Argon2id, selectable
+  per wallet). Stored as a single JSON file per wallet at
+  `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` —
+  plaintext metadata plus the base64-encoded ciphertext inside a
+  `WalletFile` JSON wrapper (earlier drafts of this section
+  described a two-file `.json` + `.dat` split; no `.dat` file is
+  ever written).
 - Import/export round-trips with the browser extension keystore
   (same format), covered by the interop tests under
   `apps/browser-extension/tests/`.

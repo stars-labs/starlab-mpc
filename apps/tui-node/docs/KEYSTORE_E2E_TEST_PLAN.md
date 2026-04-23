@@ -23,43 +23,56 @@ Curve: secp256k1
 1. Perform complete DKG ceremony
 2. Encrypt key shares with password (AES-256-GCM + PBKDF2 100k iterations)
 3. Save to keystore on each participant:
-   - `~/.frost_keystore/<device_id>/secp256k1/<wallet_id>.json` — metadata (non-secret)
-   - `~/.frost_keystore/<device_id>/secp256k1/<wallet_id>.dat` — encrypted FROST key share
-4. Verify both files exist and `.dat` is opaque ciphertext
+   - Single file per wallet:
+     `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json`
+   - The file wraps plaintext metadata AND the base64-encoded
+     encrypted-share blob in one `WalletFile` JSON document —
+     there is NO separate `<wallet_id>.dat` sidecar. (Earlier
+     drafts of this test plan described a two-file split; that
+     split does not exist.)
+4. Verify the `.json` file exists and the `data` field inside is
+   opaque base64 ciphertext (not readable key material).
 
 #### 1.2 Keystore file layout
 
-Real layout is split across two files per wallet (see
-`apps/tui-node/src/keystore/storage.rs`). The metadata `.json`
-sidecar is plaintext; the key-material `.dat` blob is the
-password-encrypted share.
-
-`<wallet_id>.json` — metadata (serialized `WalletFile`):
+Real layout is ONE file per wallet — see
+`save_wallet_file_v2_with_method` in
+`apps/tui-node/src/keystore/storage.rs:216-247`. The on-disk
+format is the `WalletFile` struct defined in
+`src/keystore/models.rs:438-453`:
 
 ```json
 {
   "version": "2.0",
-  "wallet_id": "...",
-  "name": "...",
-  "curve_type": "secp256k1",
-  "group_public_key": "hex",
-  "threshold": 2,
-  "total_participants": 3,
-  "participant_id": 1,
-  "addresses": [ { "blockchain": "ethereum", "address": "0x…" } ],
-  "created_at": "ISO-8601"
+  "encrypted": true,
+  "algorithm": "AES-256-GCM-Argon2id",
+  "data": "<base64-encoded ciphertext of the FROST key-share blob>",
+  "metadata": {
+    "wallet_id": "...",
+    "curve_type": "secp256k1",
+    "group_public_key": "hex",
+    "threshold": 2,
+    "total_participants": 3,
+    "blockchains": [ { "blockchain": "ethereum", "address": "0x…" } ],
+    "created_at": <unix-timestamp-u64>
+  }
 }
 ```
 
-`<wallet_id>.dat` — raw AES-256-GCM output:
+The wrapper fields are `version` / `encrypted` / `algorithm` /
+`data` / `metadata`; inside `metadata` sits the serialized
+`WalletMetadata` (`src/keystore/models.rs:222`). Earlier drafts
+of this doc showed the metadata fields (wallet_id, curve_type,
+group_public_key, ...) hoisted to the top level of the JSON, with
+a separate `.dat` blob carrying the ciphertext. That layout is
+wrong — the real serializer writes the whole thing as one
+embedded JSON document.
 
-```
-[ salt (16 B) ][ nonce (12 B) ][ ciphertext ][ GCM auth tag (16 B) ]
-```
-
-KDF: PBKDF2-HMAC-SHA256, `PBKDF2_ITERATIONS = 100_000`
-(`src/keystore/encryption.rs:25`). No Ethereum-keystore-V3-style
-single-file JSON here — the sidecar + `.dat` split is the real format.
+The ciphertext inside `data` decrypts with password + either
+PBKDF2-HMAC-SHA256 (`PBKDF2_ITERATIONS = 100_000`, constant at
+`src/keystore/encryption.rs:25`) or Argon2id, depending on the
+`algorithm` field. Both algorithms use AES-256-GCM underneath. No
+Ethereum-keystore-V3 compatibility — this is a bespoke format.
 
 ### 🔑 Phase 2: Wallet Loading
 

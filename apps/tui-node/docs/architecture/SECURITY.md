@@ -214,7 +214,8 @@ Encryption:
   Auth tag:   16 bytes (standard GCM tag, appended to ciphertext
               by the aes-gcm crate — no separate storage field)
 
-`.dat` on-disk layout (no version prefix):
+Internal framing of the ciphertext produced by
+`encrypt_data_with_method` (no version prefix):
   ┌─────────────────────────────────────────────┐
   │ salt       (16 B)                           │
   │ nonce      (12 B)                           │
@@ -226,6 +227,14 @@ Earlier drafts of this section claimed a 32-byte salt and a
 leading `Version (4 bytes)` field — neither is true (verified
 against `encryption.rs:20-21` for the constants and `:99` for
 the write format).
+
+**On-disk shape**: the framed ciphertext above is NOT written to
+its own `.dat` file — it's base64-encoded and embedded inside the
+single `<wallet_id>.json` wallet file (the `data` field of the
+`WalletFile` struct, `src/keystore/models.rs:438-453`). Earlier
+drafts of this section labeled the framing above as the "`.dat`
+on-disk layout" and showed a two-file directory tree (`.json`
+metadata + `.dat` ciphertext); that layout never shipped.
 
 ### Memory Protection
 
@@ -254,15 +263,15 @@ PasswordPrompt draft buffers) is tracked as open hardening work.
 │ File Permissions (Unix, recommended)                   │
 ├─────────────────────────────────────────────────────────┤
 │ ~/.frost_keystore/                                      │
-│ ├── index.json           (600) Wallet index            │
+│ ├── index.json           (600) Legacy wallet index     │
 │ ├── device_id            (600) Device identity         │
 │ └── <device_id>/                                        │
 │     ├── ed25519/         (700) Curve-scoped dir        │
-│     │   ├── <wid>.json   (600) Wallet metadata         │
-│     │   └── <wid>.dat    (600) Encrypted key share     │
+│     │   └── <wid>.json   (600) WalletFile (plaintext   │
+│     │                          metadata + base64       │
+│     │                          encrypted share)        │
 │     └── secp256k1/       (700)                         │
-│         ├── <wid>.json   (600)                         │
-│         └── <wid>.dat    (600)                         │
+│         └── <wid>.json   (600) same format             │
 └─────────────────────────────────────────────────────────┘
 ```
 

@@ -46,40 +46,51 @@ All blockchain addresses are **deterministically derived** from:
 
 ## On-disk file layout
 
-Each wallet lives as a pair of files under
-`~/.frost_keystore/<device_id>/<curve>/`:
+Each wallet lives as a **single JSON file** per wallet under
+`~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json`. The file
+serializes the `WalletFile` struct
+(`apps/tui-node/src/keystore/models.rs:438-453`), which wraps
+plaintext metadata and the base64-encoded encrypted share in one
+document. The serializer is `save_wallet_file_v2_with_method` in
+`src/keystore/storage.rs:216-247`.
 
-- `<wallet_id>.json` — plaintext metadata (the `WalletMetadata`
-  struct above, serialized).
-- `<wallet_id>.dat` — raw AES-256-GCM output holding the encrypted
-  FROST key share:
-  ```
-  [ salt (16 B) ][ nonce (12 B) ][ ciphertext ][ GCM auth tag (16 B) ]
-  ```
+Earlier revisions of this doc claimed the opposite — a two-file
+split with `<wallet_id>.json` carrying only metadata + a separate
+`<wallet_id>.dat` blob holding `salt | nonce | ciphertext | tag`,
+and explicitly asserted "no single-JSON-with-embedded-base64-blob
+format" existed. That retraction ran in the wrong direction: the
+single-JSON-with-embedded-blob format is exactly what ships. There
+is no `.dat` file written to disk, and `save_wallet_file_v2_*`
+only calls `File::create(wallet_path)` once, where `wallet_path` is
+the `<wallet_id>.json` path.
 
-There is **no** single-JSON-with-embedded-base64-blob format
-(earlier drafts of this doc showed one, which is Ethereum
-keystore-V3 style, not what this codebase uses). The metadata
-sidecar and the ciphertext blob stay in separate files so that
-non-secret metadata is trivially inspectable without involving a
-password.
-
-`<wallet_id>.json` example:
+`<wallet_id>.json` example (real shape):
 
 ```json
 {
-  "session_id": "company-wallet-2of3",
-  "device_id": "alice-laptop",
-  "curve_type": "secp256k1",
-  "threshold": 2,
-  "total_participants": 3,
-  "participant_index": 1,
-  "group_public_key": "frost_public_key_hex",
-  "participants": ["alice-laptop", "bob-desktop", "charlie-mobile"],
-  "created_at": "2024-01-01T00:00:00Z",
-  "last_modified": "2024-01-01T00:00:00Z"
+  "version": "2.0",
+  "encrypted": true,
+  "algorithm": "AES-256-GCM-Argon2id",
+  "data": "<base64 ciphertext — salt+nonce+ct+tag framing is
+           internal to encrypt_data_with_method, NOT visible here>",
+  "metadata": {
+    "wallet_id": "company-wallet-2of3",
+    "curve_type": "secp256k1",
+    "threshold": 2,
+    "total_participants": 3,
+    "group_public_key": "frost_public_key_hex",
+    "devices": [ { /* DeviceInfo per participant */ } ],
+    "blockchains": [ /* BlockchainInfo list */ ],
+    "created_at": <unix-timestamp-u64>
+  }
 }
 ```
+
+Real metadata field names come from `WalletMetadata` at
+`src/keystore/models.rs:222`. Note that `created_at` is a
+unix-timestamp `u64`, not an ISO-8601 string (an earlier draft
+showed the latter). Device list is `devices: Vec<DeviceInfo>`, not
+a flat `participants: Vec<String>`.
 
 ## Benefits of This Approach
 

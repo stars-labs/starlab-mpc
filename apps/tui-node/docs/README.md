@@ -128,8 +128,11 @@ for the authoritative reference.
    the session id.
 5. When participants == total, DKG runs automatically
    (Round 1 → Round 2 → Finalization).
-6. The wallet is persisted to
-   `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.{json,dat}`.
+6. The wallet is persisted as a single JSON file at
+   `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` —
+   plaintext metadata plus the base64-encoded encrypted share
+   inside a `WalletFile` wrapper (no separate `.dat` blob, despite
+   what earlier drafts of this step claimed).
 
 Earlier drafts said "Select [1] Wallet from main menu" — no such
 item exists; the top-level label is "Create New Wallet".

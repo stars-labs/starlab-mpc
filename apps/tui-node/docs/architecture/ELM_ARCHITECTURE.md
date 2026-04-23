@@ -490,11 +490,14 @@ emits tracing events per-message through `tracing::debug!` /
 showed `Model::save_state() / load_state() / persistent_state()`
 methods that serialize to JSON — none exist. Persistence surface:
 
-- **Keystore files**: wallet metadata (plaintext) +
-  encrypted key share (AES-256-GCM blob) per wallet, at
-  `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.{json,dat}`.
-  Written when `Command::SaveWallet` fires (real variant at
-  `src/elm/command.rs:36`); re-read via
+- **Keystore files**: one JSON file per wallet, wrapping
+  plaintext metadata and the base64-encoded AES-256-GCM
+  ciphertext in a `WalletFile` struct
+  (`src/keystore/models.rs:438-453`). On-disk path:
+  `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` —
+  single file, no `.dat` sidecar despite what earlier drafts
+  claimed. Written when `Command::SaveWallet` fires (real variant
+  at `src/elm/command.rs:36`); re-read via
   `Keystore::load_wallet_file(wallet_id, password)` at
   `src/keystore/storage.rs:251` — earlier drafts called the
   re-read method `load_wallet` which does not exist.

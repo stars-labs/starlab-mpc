@@ -371,11 +371,20 @@ maintains the metadata index and dispatches reads/writes.
 **Encryption scheme** (see `src/keystore/encryption.rs`):
 
 - Key derivation: PBKDF2-HMAC-SHA256, 100_000 iterations
-  (`PBKDF2_ITERATIONS` constant)
+  (`PBKDF2_ITERATIONS` constant) — or Argon2id, selectable per
+  wallet via the `algorithm` field in `WalletFile`
 - Encryption + authentication: AES-256-GCM (the GCM tag is the MAC —
   no separate HMAC layer, matching the tech-doc fix in 8016f1a)
-- Wire format on disk for each `.dat` blob:
-  `salt(16 B) | nonce(12 B) | ciphertext | gcm_tag(16 B)`
+- On-disk shape: a single JSON file per wallet wrapping plaintext
+  metadata AND the base64-encoded encrypted-share blob inside a
+  `WalletFile` struct (see `src/keystore/models.rs:438-453`).
+  Earlier drafts of this doc claimed a `salt(16) | nonce(12) |
+  ciphertext | gcm_tag(16)` "wire format on disk for each `.dat`
+  blob"; there is **no** separate `.dat` file on disk — the
+  ciphertext is base64-encoded inside the JSON's `data` field, and
+  the framing (salt + nonce) is internal to the
+  `encrypt_data_with_method` helper in `encryption.rs` rather than
+  being a visible on-disk layout.
 - Backup format: round-trips with the browser extension's keystore
   (`src/keystore/extension_compat.rs` handles the import/export
   wrapping)
@@ -384,21 +393,25 @@ maintains the metadata index and dispatches reads/writes.
 
 ### Directory Structure
 
-The structure is partitioned by device_id and curve (see
-`src/keystore/storage.rs`):
+Partitioned by device_id and curve (see `src/keystore/storage.rs`,
+`save_wallet_file_v2_with_method` at lines 216-247):
 
 ```
 ~/.frost_keystore/
-├── index.json                    # Wallet index (device_id × curve → wallet list)
+├── index.json                    # Legacy wallet index (migration-only)
 ├── device_id                     # This node's device_id
 └── <device_id>/
     ├── ed25519/
-    │   ├── <wallet_id>.json      # Wallet metadata (threshold, participants, etc.)
-    │   └── <wallet_id>.dat       # Encrypted FROST key share (AES-256-GCM)
+    │   └── <wallet_id>.json      # WalletFile (plaintext metadata +
+    │                             # base64 encrypted share in `data`)
     └── secp256k1/
-        ├── <wallet_id>.json
-        └── <wallet_id>.dat
+        └── <wallet_id>.json      # same format
 ```
+
+Earlier drafts of this diagram showed two files per wallet —
+`<wallet_id>.json` for metadata + `<wallet_id>.dat` for the raw
+encrypted share. That split never shipped; everything is in the
+single `.json` document, and the `.dat` convention was fabricated.
 
 The TUI currently has no config-file, session-history, log-archive, or
 automated-backup functionality — all runtime config goes through CLI
@@ -422,7 +435,10 @@ Real persistence surface is a handful of `Keystore` methods
   serialize metadata + the encrypted share to disk in one pass,
   returning the new wallet_id
 - `Keystore::load_wallet_file(wallet_id, password) -> Result<Vec<u8>>` —
-  reads the `.dat` file and decrypts the share back to raw bytes
+  reads the single `<wallet_id>.json` file, extracts the base64
+  ciphertext from the `data` field of the `WalletFile` wrapper,
+  and decrypts it back to raw bytes (no separate `.dat` file —
+  everything lives in the JSON)
 - `Keystore::list_wallets() -> Vec<&WalletMetadata>` — scans the
   cached metadata
 - `Keystore::get_wallet(wallet_id) -> Option<&WalletMetadata>` —
