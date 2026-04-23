@@ -68,4 +68,7 @@ MIT OR Apache-2.0
 
 ## Repository
 
-[https://github.com/stars-labs/crypto-rust-tools](https://github.com/stars-labs/crypto-rust-tools)
+This crate lives in the [mpc-wallet monorepo](https://github.com/hecoinfo/mpc-wallet)
+under `apps/signal-server/server/`. It was previously published from
+`stars-labs/crypto-rust-tools` before being absorbed into the monorepo;
+older crates.io metadata may still point there.
