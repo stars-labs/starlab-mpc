@@ -145,7 +145,13 @@ impl FrostDkgEd25519 {
     }
 
     pub fn can_start_round2(&self) -> bool {
-        self.round1_packages.len() == self.total as usize && self.round1_secret.is_some()
+        // frost-core's dkg::part2 expects round1_packages to contain
+        // entries for every OTHER participant — so (total - 1). Our
+        // generate_round1() only stores the local round1_secret and
+        // never self-inserts the public package. Matching both sides
+        // means checking for n-1 here.
+        self.round1_packages.len() == (self.total.saturating_sub(1)) as usize
+            && self.round1_secret.is_some()
     }
 
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
@@ -416,7 +422,13 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn can_start_round2(&self) -> bool {
-        self.round1_packages.len() == self.total as usize && self.round1_secret.is_some()
+        // frost-core's dkg::part2 expects round1_packages to contain
+        // entries for every OTHER participant — so (total - 1). Our
+        // generate_round1() only stores the local round1_secret and
+        // never self-inserts the public package. Matching both sides
+        // means checking for n-1 here.
+        self.round1_packages.len() == (self.total.saturating_sub(1)) as usize
+            && self.round1_secret.is_some()
     }
 
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {

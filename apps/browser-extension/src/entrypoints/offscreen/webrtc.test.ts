@@ -94,20 +94,17 @@ describe('WebRTCManager mesh readiness', () => {
     });
 });
 
-// SKIPPED — these tests drive the full multi-round FROST DKG ceremony
-// inside the WebRTCManager by constructing peer `FrostDkgEd25519` /
-// `FrostDkgSecp256k1` instances and exchanging packages manually.
-// That collides with an asymmetry in the core-wasm binding:
-// `can_start_round2()` returns true only when `round1_packages.len()
-// == total` (all n, including self), but `generate_round2()` passes
-// that same map to FROST's `dkg_part2`, which per the frost-core
-// contract expects n-1 packages excluding self. So any local fix that
-// satisfies can_start_round2 breaks generate_round2, and vice versa.
-// Unblocking these tests needs a coordinated change in
-// packages/@mpc-wallet/core-wasm (either filter self out inside
-// generate_round2, or adjust can_start_round2's threshold to
-// total - 1) followed by a WASM rebuild. Until then, the flow is
-// verified by the live 3-browser smoke tests described in CLAUDE.md.
+// SKIPPED — blocked by a mismatch between generate_round2 (returns
+// plain JSON of a map whose keys are u16 participant indices) and the
+// WebRTC consumer which hex-decodes the return value before JSON-parsing
+// (webrtc.ts _generateAndBroadcastRound2). Round 1 returns hex-encoded
+// JSON; Round 2 does not. Unblocking these tests additionally needs
+// either (a) generate_round2 to wrap its output in hex::encode to
+// match generate_round1's format, or (b) the WebRTC consumer to stop
+// hex-decoding when reading the Round 2 package map. Both touch
+// production crypto paths so need careful integration testing. The
+// can_start_round2 fix landed in core-wasm (n-1 per FROST spec) is
+// independent and retained.
 describe.skip('WebRTCManager DKG Process', () => {
     const sessionInfo = {
         session_id: 'test-session',
@@ -221,12 +218,13 @@ describe.skip('WebRTCManager DKG Process', () => {
         }
 
 
-        // The state transitions to Round2InProgress when all Round 1 packages are received and processed
-        // and can_start_round2() is true
-        if ((manager as any).frostDkg.can_start_round2()) {
-            await (manager as any)._generateAndBroadcastRound2();
-        }
-
+        // After the second _handleDkgRound1Package call above, all n-1
+        // peer packages are in the WASM and can_start_round2 returns
+        // true. _handleDkgRound1Package itself flips the state to
+        // Round2InProgress and fires _generateAndBroadcastRound2
+        // internally (webrtc.ts line 1389-1393). So by this point the
+        // manager should already be in Round2InProgress with no extra
+        // nudging needed.
         expect(manager.dkgState).toBe(DkgState.Round2InProgress);
         expect((manager as any).receivedRound1Packages.size).toBe(3); // a, b, c
 
