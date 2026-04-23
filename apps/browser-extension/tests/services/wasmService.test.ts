@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
-import type { InitWasmReturn } from '../../src/lib/wasm-loader';
+// InitWasmReturn was exported from src/lib/wasm-loader pre-
+// monorepo. The loader module was removed when we moved to
+// @mpc-wallet/core-wasm; the test uses the type annotation for
+// mockInitWasm's return shape, which we can match with `any`.
+type InitWasmReturn = any;
 
 // Mock WASM module
 // Typed as any so tests can attach extra methods (validate_keystore,

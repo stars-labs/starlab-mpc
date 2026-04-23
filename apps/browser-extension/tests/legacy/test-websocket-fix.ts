@@ -2,7 +2,7 @@
  * TypeScript test to verify the WebSocket relayMessage fix
  */
 
-import { WebSocketClient } from './src/entrypoints/background/websocket.js';
+import { WebSocketClient } from '../../src/entrypoints/background/websocket';
 
 console.log("🔧 Testing WebSocket relayMessage async fix...");
 
