@@ -1,5 +1,12 @@
-//! Comprehensive WebRTC mesh network E2E test with rejoin functionality
-//! Tests 2/3 threshold signing with disconnections and network partitions
+//! Comprehensive WebRTC mesh network E2E test with rejoin functionality.
+//! Tests 2/3 threshold signing with disconnections and network partitions.
+//!
+//! Holds `std::sync::MutexGuard`s across `.await` points for the same
+//! reason the sibling `mesh_simulator` module does — sequential
+//! scenario execution on one task, no concurrent awaiters on the
+//! same locks. See src/webrtc/mesh_simulator.rs for the full
+//! rationale. Same allow directive carried here.
+#![allow(clippy::await_holding_lock)]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

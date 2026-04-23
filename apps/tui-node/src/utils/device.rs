@@ -127,16 +127,16 @@ pub async fn create_and_setup_device_connection<C>(
         // Only the higher-id side of the pair opens the data channel;
         // the lower-id side gets it via the RTCPeerConnection's
         // on_data_channel callback set up below.
-        if self_device_id < device_id {
-            if let Ok(dc) = pc_arc.create_data_channel(DATA_CHANNEL_LABEL, None).await {
-                tracing::debug!("Data channel state: {:?}", dc.ready_state());
-                setup_data_channel_callbacks(
-                    dc,
-                    device_id.clone(),
-                    state_log.clone(),
-                    cmd_tx.clone(),
-                ).await;
-            }
+        if self_device_id < device_id
+            && let Ok(dc) = pc_arc.create_data_channel(DATA_CHANNEL_LABEL, None).await
+        {
+            tracing::debug!("Data channel state: {:?}", dc.ready_state());
+            setup_data_channel_callbacks(
+                dc,
+                device_id.clone(),
+                state_log.clone(),
+                cmd_tx.clone(),
+            ).await;
         }
 
         let device_id_on_ice = device_id.clone();

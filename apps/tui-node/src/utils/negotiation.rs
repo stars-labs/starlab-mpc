@@ -39,15 +39,16 @@ pub async fn initiate_offers_for_session<C>(
         let should_initiate = self_device_id < device_id;
 
 
-        if should_initiate {
-            if let Some(pc_arc) = device_conns.get(&device_id) {
-                state
-                    .lock()
-                    .await
-                    .log
-                    .push(format!("Found PC object for device {}", device_id));
-                let current_state = pc_arc.connection_state();
-                let signaling_state = pc_arc.signaling_state();
+        if should_initiate
+            && let Some(pc_arc) = device_conns.get(&device_id)
+        {
+            state
+                .lock()
+                .await
+                .log
+                .push(format!("Found PC object for device {}", device_id));
+            let current_state = pc_arc.connection_state();
+            let signaling_state = pc_arc.signaling_state();
 
                 // We need to create an offer if:
                 // 1. Connection is new/closed/failed/disconnected
@@ -165,7 +166,6 @@ pub async fn initiate_offers_for_session<C>(
                         .log
                         .push(format!("Set making_offer=false for {}", device_id_clone));
                 });
-            }
         }
     }
 
