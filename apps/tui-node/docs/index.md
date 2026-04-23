@@ -35,7 +35,6 @@ Ratatui + tui-realm in the Elm architecture.
 - [Top-level README](./README.md) — quick-start + CLI flags
 - [`KEYBOARD_NAVIGATION_GUIDE.md`](./KEYBOARD_NAVIGATION_GUIDE.md)
 - [`KEYBOARD_HANDLING_GUIDE.md`](./KEYBOARD_HANDLING_GUIDE.md) — for developers adding new screens
-- [`ERROR_HANDLING_GUIDE.md`](./ERROR_HANDLING_GUIDE.md)
 - [`MPC_WALLET_TUI_ARCHITECTURE.md`](./MPC_WALLET_TUI_ARCHITECTURE.md) — deeper state-machine writeup
 - [`WEBRTC_MESH_IMPLEMENTATION.md`](./WEBRTC_MESH_IMPLEMENTATION.md)
 - [`OFFLINE_DKG_GUIDE.md`](./OFFLINE_DKG_GUIDE.md) — manual ceremony procedure
