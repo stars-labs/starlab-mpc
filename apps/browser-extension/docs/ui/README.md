@@ -1,30 +1,15 @@
-# Browser Extension UI Documentation
+# Browser Extension UI
 
-This directory contains user interface documentation for the MPC Wallet browser extension.
+The popup interface is a Svelte 5 app at
+`src/entrypoints/popup/App.svelte`. It covers:
 
-## Contents
+- Session creation / invitation flow (Ext-3)
+- DKG progress + group-public-key display
+- Signing confirm / progress / complete modals (Ext-2)
+- Chain + network selection
+- WebRTC / WebSocket status indicators
 
-- `DKG_ADDRESS_UI_IMPLEMENTATION.md` - Implementation details for DKG address display UI
-
-## UI Components
-
-The browser extension UI includes:
-
-- **Popup Interface** - Main wallet interface built with Svelte
-- **Address Display** - Shows both single-party and DKG-generated addresses
-- **Session Management** - Create/join DKG sessions
-- **Chain Selection** - Switch between Ethereum and Solana
-- **Network Status** - WebRTC/WebSocket connection indicators
-
-## Design Principles
-
-- Clean, minimal interface
-- Clear status indicators
-- Responsive design
-- Dark mode support
-- Accessibility considerations
-
-## Related Documentation
-
-- For technical architecture, see [architecture docs](../architecture/)
-- For user guides, see [guides](../guides/)
+Design intent: single-panel popup that surfaces session state
+and one actionable affordance at a time. State transitions are
+driven from the background service worker via
+`chrome.runtime.connect({name: "popup"})` messages.
