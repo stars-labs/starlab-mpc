@@ -42,7 +42,6 @@
     "@mpc-wallet/types": "workspace:*",
     "@tailwindcss/vite": "^4.1.10",
     "tailwindcss": "^4.1.10",
-"ts-pattern": "^5.7.1",
     "uuid": "^11.1.0",
     "viem": "^2.31.4",
     "vite-plugin-top-level-await": "^1.5.0",
