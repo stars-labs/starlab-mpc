@@ -1,5 +1,5 @@
 // Test wrapper that provides mocks for #imports
-import { jest } from 'bun:test';
+import { jest, mock } from 'bun:test';
 
 // Create module mock
 const importsMock = {
@@ -14,8 +14,10 @@ const importsMock = {
   }
 };
 
-// Use Bun's module mock functionality
-Bun.mock.module('#imports', () => importsMock);
+// Use bun:test's mock.module (the `Bun.mock.module` path doesn't
+// exist on the global Bun namespace — correct import is from
+// 'bun:test').
+mock.module('#imports', () => importsMock);
 
 // Export for use in tests
 export { importsMock };

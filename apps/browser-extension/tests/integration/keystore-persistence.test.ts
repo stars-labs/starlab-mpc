@@ -135,8 +135,11 @@ describe('Keystore Persistence Integration', () => {
         // Step 8: Verify we can get the key share
         const keyShare = await manager2.getKeyShare('imported-wallet');
         expect(keyShare).toBeDefined();
-        expect(keyShare?.keystore_id).toBe('cli-imported');
-        expect(keyShare?.party_index).toBe(1);
+        // Legacy-shape fields preserved by the round-trip; access
+        // through `any` since they're not on the KeyShareData type
+        // (see comment on the addWallet site above).
+        expect((keyShare as any)?.keystore_id).toBe('cli-imported');
+        expect((keyShare as any)?.party_index).toBe(1);
     });
     
     it('should handle multiple wallets and active wallet switching', async () => {
