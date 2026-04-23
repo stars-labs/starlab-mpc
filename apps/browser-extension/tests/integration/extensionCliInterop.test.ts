@@ -383,17 +383,18 @@ describe('Extension-CLI Keystore Interoperability', () => {
             // Import wallets from different CLI devices
             for (const device of devices) {
                 const keyShare: KeyShareData = {
-                    keyPackage: btoa(`key-${device.id}`),
-                    groupPublicKey: '0xSHARED_GROUP_KEY',
-                    sessionId: sessionId,
-                    deviceId: 'device-123',
-                    participantIndex: device.index,
+                    key_package: btoa(`key-${device.id}`),
+                    group_public_key: '0xSHARED_GROUP_KEY',
+                    session_id: sessionId,
+                    device_id: 'device-123',
+                    participant_index: device.index,
                     threshold: 2,
-                    totalParticipants: 3,
+                    total_participants: 3,
                     participants: devices.map(d => d.id),
                     curve: 'secp256k1',
-                    ethereumAddress: '0xSHARED_ADDRESS',
-                    createdAt: Date.now()
+                    blockchains: [],
+                    ethereum_address: '0xSHARED_ADDRESS',
+                    created_at: Date.now(),
                 };
                 
                 await extensionKeystore.addWallet(`wallet-${device.id}`, keyShare, {

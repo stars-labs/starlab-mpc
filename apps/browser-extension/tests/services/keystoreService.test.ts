@@ -111,16 +111,17 @@ describe('KeystoreService', () => {
         const password = 'test-password';
         const deviceId = 'test-device-123';
         const mockKeyShareData: KeyShareData = {
-            keyPackage: 'mock-key-package',
-            groupPublicKey: '0x1234567890abcdef',
-            sessionId: 'session-123',
-            deviceId: 'device-123',
-            participantIndex: 1,
+            key_package: 'mock-key-package',
+            group_public_key: '0x1234567890abcdef',
+            session_id: 'session-123',
+            device_id: 'device-123',
+            participant_index: 1,
             threshold: 2,
-            totalParticipants: 3,
+            total_participants: 3,
             participants: ['device1', 'device2', 'device3'],
             curve: 'secp256k1',
-            createdAt: Date.now()
+            blockchains: [],
+            created_at: Date.now(),
         };
         
         const mockMetadata: WalletMetadata = {
@@ -395,16 +396,17 @@ describe('KeystoreService', () => {
             await keystore.unlock('password');
             
             const keyShare: KeyShareData = {
-                keyPackage: 'test',
-                groupPublicKey: '0x123',
-                sessionId: 'session-1',
-                deviceId: 'device-123',
-                participantIndex: 1,
+                key_package: 'test',
+                group_public_key: '0x123',
+                session_id: 'session-1',
+                device_id: 'device-123',
+                participant_index: 1,
                 threshold: 2,
-                totalParticipants: 3,
+                total_participants: 3,
                 participants: ['device1', 'device2', 'device3'],
                 curve: 'secp256k1',
-                createdAt: Date.now()
+                blockchains: [],
+                created_at: Date.now(),
             };
             
             // Mock crypto.getRandomValues to track salt generation
