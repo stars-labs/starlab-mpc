@@ -214,34 +214,35 @@ pub enum Command {
     
     // Cryptographic operations
     StartDKG { config: WalletConfig },
+    // DKG / signing operations
+    StartDKG { config: WalletConfig },    // session announce
+    StartFrostProtocol,                   // run FROST part1/part2/part3
     StartSigning { request: SigningRequest },
-    
+
     // Storage operations
-    SaveWallet { wallet: Wallet },
-    DeleteWallet { id: WalletId },
-    ExportWallet { id: WalletId, path: PathBuf },
+    SaveWallet { wallet_data: Vec<u8> },  // encrypted blob
+    DeleteWallet { wallet_id: String },
+    ExportWallet { wallet_id: String, path: PathBuf },
     ImportWallet { path: PathBuf },
-    
-    // UI operations
-    SendMessage(Message),
-    ShowNotification { text: String, kind: NotificationKind },
-    RefreshUI,
-    
-    // System operations
-    Quit,
-    None,
+
+    // …~60 more variants
 }
 
 impl Command {
-    pub async fn execute(self, tx: Sender<Message>) -> Result<()> {
+    // Note: `execute` is generic over the ciphersuite, the enum itself
+    // is not. This lets the same `Command` carry through both the
+    // ed25519 and secp256k1 code paths — monomorphization happens on
+    // the execute call, using the ciphersuite that's already pinned on
+    // `AppState<C>`.
+    pub async fn execute<C: frost_core::Ciphersuite + …>(
+        self,
+        tx: UnboundedSender<Message>,
+        app_state: &Arc<Mutex<AppState<C>>>,
+    ) -> anyhow::Result<()> {
         match self {
-            Command::LoadWallets => {
-                let wallets = load_wallets_from_keystore().await?;
-                tx.send(Message::WalletsLoaded { wallets }).await?;
-            }
-            Command::StartDKG { config } => {
-                spawn_dkg_task(config, tx).await?;
-            }
+            Command::LoadWallets => { /* read ~/.frost_keystore, send back */ }
+            Command::StartDKG { config } => { /* announce + await mesh */ }
+            Command::StartFrostProtocol => { /* frost-core part1/2/3 */ }
             // ... execute other commands
         }
         Ok(())
@@ -249,130 +250,140 @@ impl Command {
 }
 ```
 
+Earlier drafts of this section listed `Command::SendMessage(Message)`,
+`Command::Quit`, `Command::None` — none are real variants. Commands
+don't carry Messages as payloads; the Option return from `update`
+either has a side-effect Command or doesn't. Quit isn't a Command
+either (terminate via system interrupt; see KEYBOARD_NAVIGATION_GUIDE).
+`SaveWallet` takes `wallet_data: Vec<u8>` not a `Wallet` struct (there
+is no such type; encrypted shares stay as bytes until unlock).
+
 ## Component Architecture
 
 ### Component Hierarchy
 
+Real per-screen components are flat — each is a separate file under
+`src/elm/components/`. Earlier drafts of this section showed nested
+`WalletManager { WalletList, WalletDetail, WalletActions }` /
+`DKGWizard { … }` / `SigningFlow { … }` / `Settings { NetworkSettings,
+SecuritySettings, About }` grouping components. None of those
+parent containers exist; each screen stands alone:
+
 ```
-Application
-├── MainMenu
-├── WalletManager
-│   ├── WalletList
-│   ├── WalletDetail
-│   └── WalletActions
-├── DKGWizard
-│   ├── ModeSelection
-│   ├── CurveSelection
-│   ├── TemplateSelection
-│   └── DKGProgress
-├── SigningFlow
-│   ├── TransactionInput
-│   ├── SigningProgress
-│   └── SignatureResult
-└── Settings
-    ├── NetworkSettings
-    ├── SecuritySettings
-    └── About
+src/elm/components/
+├── main_menu.rs
+├── mode_selection.rs
+├── threshold_config.rs
+├── create_wallet.rs
+├── dkg_progress.rs
+├── sign_transaction.rs
+├── signature_complete.rs
+├── password_prompt.rs
+├── wallet_list.rs
+├── wallet_detail.rs
+├── wallet_complete.rs
+├── join_session.rs
+├── notification.rs
+└── modal.rs
 ```
 
 ### Component Implementation
 
-Each component implements the `Component` trait from tui-realm:
+Each screen is a tui-realm `Component<Message, UserEvent>` — note
+the `UserEvent` second type parameter (not `()` as earlier drafts
+showed; the real type is defined in `src/elm/components/mod.rs`):
 
 ```rust
+use crate::elm::components::UserEvent;
+
 pub struct MainMenu {
     items: Vec<MenuItem>,
     selected: usize,
+    focused: bool,
+    wallet_count: usize,
 }
 
-impl Component<Message, ()> for MainMenu {
-    fn on(&mut self, event: Event<()>) -> Option<Message> {
+impl Component<Message, UserEvent> for MainMenu {
+    fn on(&mut self, event: Event<UserEvent>) -> Option<Message> {
         match event {
-            Event::Key(KeyEvent { code: KeyCode::Up, .. }) => {
+            Event::Keyboard(KeyEvent { code: Key::Up, .. }) => {
                 self.selected = self.selected.saturating_sub(1);
-                self.render(); // Update visual state
                 None
             }
-            Event::Key(KeyEvent { code: KeyCode::Down, .. }) => {
+            Event::Keyboard(KeyEvent { code: Key::Down, .. }) => {
                 self.selected = (self.selected + 1).min(self.items.len() - 1);
-                self.render();
                 None
             }
-            Event::Key(KeyEvent { code: KeyCode::Enter, .. }) => {
-                // Return navigation message based on selection
-                match self.selected {
-                    0 => Some(Message::Navigate(Screen::CreateWallet)),
-                    1 => Some(Message::Navigate(Screen::ManageWallets)),
-                    2 => Some(Message::Navigate(Screen::JoinSession)),
-                    3 => Some(Message::Navigate(Screen::Settings)),
-                    4 => Some(Message::Quit),
-                    _ => None,
-                }
+            Event::Keyboard(KeyEvent { code: Key::Enter, .. }) => {
+                // Return a SelectItem message; the update function
+                // translates the index into the appropriate action
+                Some(Message::SelectItem { index: self.selected })
             }
             _ => None,
         }
     }
-}
 
-impl MockComponent for MainMenu {
-    fn render(&mut self, frame: &mut Frame, area: Rect) {
-        // Render the component
-        let items: Vec<ListItem> = self.items
-            .iter()
-            .enumerate()
-            .map(|(i, item)| {
-                let style = if i == self.selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default()
-                };
-                ListItem::new(item.label.clone()).style(style)
-            })
-            .collect();
-            
-        let list = List::new(items)
-            .block(Block::default()
-                .title("MPC Wallet")
-                .borders(Borders::ALL));
-                
-        frame.render_widget(list, area);
+    fn view(&mut self, frame: &mut Frame, area: Rect) {
+        // Render the menu into `area`; see main_menu.rs:152 onward.
     }
+    // plus `state()` / `perform()` accessors — full Component trait
 }
 ```
+
+Earlier drafts used `Message::Navigate(Screen::...)` and
+`Message::Quit` inside the Enter match arm. Real variants are
+`Message::SelectItem { index }` + per-screen SelectMode /
+SelectCurve / ThresholdConfigConfirm / etc. — the update function
+is where the index-to-screen mapping happens, not the component.
+
+Also: earlier drafts used `impl MockComponent for MainMenu` with a
+`render(&mut self, …)` method. `MockComponent` is not the trait
+name the real components implement — they implement
+`tuirealm::component::Component` directly with its `view(&mut self,
+frame, area)` method.
 
 ## Navigation System
 
 ### Navigation Stack
 
-The navigation stack maintains history for proper back navigation:
+Navigation lives directly on `Model` (`src/elm/model.rs`), not on a
+separate `NavigationStack` struct:
 
 ```rust
-pub struct NavigationStack {
-    stack: Vec<Screen>,
-    max_depth: usize,
+// From src/elm/model.rs
+pub struct Model {
+    pub navigation_stack: Vec<Screen>,   // unbounded
+    pub current_screen: Screen,
+    // …
 }
 
-impl NavigationStack {
-    pub fn push(&mut self, screen: Screen) {
-        if self.stack.len() >= self.max_depth {
-            self.stack.remove(0); // Remove oldest
+impl Model {
+    pub fn push_screen(&mut self, screen: Screen) {
+        self.navigation_stack.push(self.current_screen.clone());
+        self.current_screen = screen;
+    }
+
+    pub fn pop_screen(&mut self) -> bool {
+        if let Some(prev) = self.navigation_stack.pop() {
+            self.current_screen = prev;
+            true
+        } else {
+            false
         }
-        self.stack.push(screen);
     }
-    
-    pub fn pop(&mut self) -> Option<Screen> {
-        self.stack.pop()
-    }
-    
-    pub fn clear(&mut self) {
-        self.stack.clear();
-    }
-    
-    pub fn depth(&self) -> usize {
-        self.stack.len()
+
+    pub fn go_home(&mut self) {
+        self.navigation_stack.clear();
+        self.current_screen = Screen::MainMenu;
     }
 }
 ```
+
+Earlier drafts of this section showed a dedicated
+`NavigationStack { stack, max_depth }` struct with `push` / `pop` /
+`depth` methods. No such struct exists — verified by grep. The
+stack is unbounded (no `max_depth` cap; same finding as 3f87b38
+for COMPLETE_TUI_DOCUMENTATION.md).
 
 ### Screen Transitions
 
