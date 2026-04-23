@@ -154,29 +154,37 @@ Once a direct WebRTC connection is established, nodes exchange application-level
 
 ### 1. Session Management
 
-```json
-{
-  "type": "session_proposal",
-  "payload": {
-    "session_id": "<id>",
-    "total": 3,
-    "threshold": 2,
-    "participants": ["device1", "device2", "device3"]
-  }
-}
-```
-Proposes a new MPC session with specified parameters.
+> **Correction**: `SessionProposal` and `SessionResponse` live on the
+> `WebSocketMessage` enum (`signal.rs:91,93`), NOT on `WebRTCMessage`.
+> They're relayed **through the signal server** wrapped in a
+> `ClientMsg::Relay` envelope — not sent over the peer-to-peer
+> data channel. Earlier drafts of this section placed them under
+> "WebRTC (Device-to-Device) Message Types"; that's wrong. They
+> appear here because the mesh hasn't formed yet when session
+> negotiation happens — peers can't reach each other over WebRTC
+> before the SDP/ICE exchange completes.
+
+Real shape on the wire (inside a `Relay` envelope, `data` field):
 
 ```json
 {
-  "type": "session_response",
-  "payload": {
-    "session_id": "<id>",
-    "accepted": true
-  }
+  "websocket_msg_type": "SessionProposal",
+  "session_id": "<id>",
+  "total": 3,
+  "threshold": 2,
+  "participants": ["device1", "device2", "device3"]
 }
 ```
-Responds to a session proposal.
+
+And for the response:
+
+```json
+{
+  "websocket_msg_type": "SessionResponse",
+  "session_id": "<id>",
+  "accepted": true
+}
+```
 
 ---
 
