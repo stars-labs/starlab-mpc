@@ -421,44 +421,60 @@ Each participant Pi:
 3. Receive shares fji from all other participants
 ```
 
-**Round 3: Verification**
+**Round 3: Local finalize** (no wire traffic)
 ```
 Each participant Pi:
 1. Verify received shares using commitments
 2. Compute final share xi = Σ(fji)
-3. Compute verification share yi = xi * G
-4. Broadcast yi for group public key computation
+3. Run frost-core::dkg::part3 to produce KeyPackage + VerifyingKey
 ```
+
+Round 3 is local — there is NO broadcast step. Each participant
+derives the shared `VerifyingKey` (group public key) independently
+from the accumulated round1 + round2 packages; if participants
+agree on those, they agree on the VerifyingKey. Earlier drafts of
+this section showed a "Broadcast yi for group public key
+computation" step — that's a Feldman-VSS notation that doesn't
+apply to the FROST pipeline as implemented by the ZCash crates.
 
 ### Key Storage and Security
 
 #### Keystore Format
 
+Real on-disk layout is **one JSON file per wallet** at
+`~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` —
+there is NO wrapping `{ "wallets": [...] }` container. The
+serialized shape is the `WalletFile` struct
+(`apps/tui-node/src/keystore/models.rs:438-453`):
+
 ```json
 {
   "version": "2.0",
-  "wallets": [
-    {
-      "id": "wallet_001",
-      "name": "Primary Wallet",
-      "blockchain": "ethereum",
-      "threshold": 2,
-      "participants": 3,
-      "public_key": "0x04...",
-      "address": "0x742d35Cc6634C0532...",
-      "key_shares": {
-        "encrypted": true,
-        "algorithm": "AES-256-GCM",
-        "data": "base64_encrypted_shares"
-      },
-      "metadata": {
-        "created_at": "2025-01-15T10:00:00Z",
-        "last_used": "2025-01-20T15:30:00Z"
-      }
-    }
-  ]
+  "encrypted": true,
+  "algorithm": "AES-256-GCM-Argon2id",
+  "data": "<base64 ciphertext of the FROST key-share blob>",
+  "metadata": {
+    "wallet_id": "...",
+    "curve_type": "secp256k1",
+    "threshold": 2,
+    "total_participants": 3,
+    "group_public_key": "hex",
+    "created_at": <unix-timestamp-u64>,
+    "devices": [ /* DeviceInfo list */ ],
+    "blockchains": [ /* BlockchainInfo list */ ]
+  }
 }
 ```
+
+Earlier drafts of this section showed a `{ "wallets": [{ id,
+name, blockchain, public_key, address, key_shares: { encrypted,
+algorithm, data }, metadata: { created_at, last_used } }] }`
+shape. That structure never shipped — there's no wallet array,
+no `last_used` timestamp, no flat `blockchain/address`
+properties (the real `metadata` nests blockchain addresses in
+a `blockchains` Vec, and derives them on demand from
+`group_public_key` + `curve_type`). Same finding as f4fc866 for
+the broader keystore-layout retraction.
 
 #### Encryption Scheme
 
