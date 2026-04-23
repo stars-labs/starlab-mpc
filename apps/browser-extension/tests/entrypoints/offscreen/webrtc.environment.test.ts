@@ -127,13 +127,14 @@ describe('FROST DKG Environment', () => {
     // Create a minimal WebRTCManager to test actual DKG processing
     const manager = new WebRTCManager('test-peer');
     
-    // Set up session info
+    // Set up session info — same partial-SessionInfo cast as the
+    // src-path duplicate of this file.
     manager.sessionInfo = {
       session_id: 'test-session',
       participants: ['test-peer', 'other-peer'],
       accepted_devices: ['test-peer', 'other-peer'],
-      status: 'accepted' as any
-    };
+      status: 'accepted' as any,
+    } as any;
     
     // Initialize DKG with Ethereum (secp256k1) like in production
     const success = await manager.initializeDkg('ethereum', 2, ['test-peer', 'other-peer'], 1);
