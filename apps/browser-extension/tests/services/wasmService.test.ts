@@ -63,8 +63,10 @@ describe('WASM Service Integration', () => {
     let wasmModule: any;
 
     beforeEach(async () => {
-        // Reset all mocks
-        Object.values(mockWasmModule).forEach(mockFn => {
+        // Reset all mocks. TS sees mockFn as `Function` from
+        // Object.values; narrow with cast to any so
+        // .mockClear (bun:test Mock method) is accessible.
+        Object.values(mockWasmModule).forEach((mockFn: any) => {
             if (typeof mockFn === 'function') {
                 mockFn.mockClear();
             }

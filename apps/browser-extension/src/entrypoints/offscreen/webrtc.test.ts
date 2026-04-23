@@ -594,7 +594,7 @@ describe('WebRTCManager DKG Process', () => {
         expect(status.state).toBe(DkgState.Round1InProgress);
         expect(status.stateName).toBe('Round1InProgress');
         expect(status.participantIndex).toBe(1);
-        expect(status.sessionInfo.session_id).toBe('test-session');
+        expect(status.sessionInfo?.session_id).toBe('test-session');
         expect(status.receivedRound1Packages).toEqual(['a']);
         expect(status.frostDkgInitialized).toBe(true);
     });
