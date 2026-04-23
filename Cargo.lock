@@ -13382,7 +13382,6 @@ dependencies = [
 name = "webrtc-signal-server-cloudflare-worker"
 version = "0.1.0"
 dependencies = [
- "console_error_panic_hook",
  "futures",
  "serde",
  "serde_json",
