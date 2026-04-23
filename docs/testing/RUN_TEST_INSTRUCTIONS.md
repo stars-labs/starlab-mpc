@@ -5,7 +5,12 @@ you're at the repo root (wherever that is on your machine — no
 hardcoded paths).
 
 For an automated smoke test instead, see `scripts/smoke-dkg.sh`
-and `apps/tui-node/scripts/README.md`.
+(repo root) and the cluster helpers in `apps/tui-node/scripts/`
+(`build-tui-node.sh`, `launch-3node-cluster.sh`,
+`monitor-cluster.sh`, `health-check.sh`, `run-signal-server.sh`).
+There is no README inside `apps/tui-node/scripts/` — earlier
+drafts linked to one, but the scripts are self-documenting via
+top-of-file comments.
 
 ## Build first
 
@@ -23,9 +28,11 @@ directory).
 RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-1
 ```
 
-1. Press `n` for "New Wallet"
-2. Select `2 of 3 (secp256k1)`
-3. Note the session code that appears
+Navigate with arrow keys:
+
+1. Select **Create New Wallet** from the main menu → Enter.
+2. Fill in the form: Name, Threshold (`2`), Total (`3`), Blockchain.
+3. Submit; the app displays the session id for this ceremony.
 
 ## Terminal 2 — MPC-2 (joiner)
 
@@ -33,8 +40,9 @@ RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-1
 RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-2
 ```
 
-1. Press `d` for "Discover Wallets"
-2. Press `j` to join the discovered session
+1. Select **Join Session** from the main menu.
+2. Either pick the announced session from the list, or enter the
+   session id from MPC-1.
 
 ## Terminal 3 — MPC-3 (joiner)
 
@@ -42,8 +50,14 @@ RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-2
 RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-3
 ```
 
-1. Press `d` for "Discover Wallets"
-2. Press `j` to join the discovered session
+Same steps as MPC-2.
+
+> Earlier drafts of this section used single-letter hotkeys like
+> `Press n for "New Wallet"` / `Press d for "Discover Wallets"` /
+> `Press j`. None of those bindings exist — the TUI navigates by
+> arrow keys + Enter. See
+> [`apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md`](../../apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md)
+> for the authoritative keybind table.
 
 ## What should happen
 

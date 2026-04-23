@@ -113,24 +113,36 @@ There is no `DATA_DIR` env var — the keystore location is fixed at
 
 ## Health checks and monitoring
 
-Real helper scripts in `scripts/` are signal-server-focused:
+Real helper scripts live in two places:
+
+**Repo-root `scripts/`** (signal-server focused):
 
 ```bash
-# Continuous signal-server health monitor (polls the WS upgrade
-# endpoint on a loop — see scripts/signal-server-monitor.sh)
+# Continuous signal-server health monitor (polls WS upgrade on a loop)
 ./scripts/signal-server-monitor.sh
 
 # Debug runner that starts the signal server with verbose logging
 ./scripts/signal-server-debug.sh
 ```
 
-Earlier drafts of this section referenced `./scripts/health-check.sh
---verbose` and `MONITOR_INTERVAL=30 ./scripts/monitor-cluster.sh`.
-Neither file exists — `ls scripts/` shows only
-`build-all.sh / clean-all.sh / README.md / signal-server-debug.sh /
-signal-server-monitor.sh / smoke-dkg.sh / test-all.sh`. Node-level
-health monitoring (per-node process state + log tailing) is not
-automated today and would need custom tooling.
+**`apps/tui-node/scripts/`** (node + cluster focused):
+
+```bash
+# Per-node health check
+./apps/tui-node/scripts/health-check.sh
+
+# 3-node cluster monitoring
+./apps/tui-node/scripts/monitor-cluster.sh
+```
+
+(Correction to earlier drafts of this section: an earlier retraction
+here claimed `health-check.sh` / `monitor-cluster.sh` /
+`launch-3node-cluster.sh` didn't exist in-tree. They don't exist at
+the repo-root `scripts/` level, but they DO exist under
+`apps/tui-node/scripts/`. The earlier `ls scripts/`-based check was
+scoped too narrowly. Full list:
+`apps/tui-node/scripts/{build-signal-server,build-tui-node,
+health-check,launch-3node-cluster,monitor-cluster,run-signal-server}.sh`.)
 
 There is no `/health` HTTP endpoint on the signal server (earlier
 drafts of this guide showed `curl -v http://localhost:9000/health`
@@ -151,16 +163,22 @@ cargo run -p tui-node --bin mpc-wallet-tui -- \
 
 # Smoke DKG test (runs the whole workspace test suite)
 ./scripts/smoke-dkg.sh
+
+# 3-node cluster launcher — spins up three mpc-wallet-tui processes
+# with distinct --device-id values against a running signal server
+./apps/tui-node/scripts/launch-3node-cluster.sh
 ```
 
-Earlier drafts of this section referenced
-`./scripts/launch-3node-cluster.sh` for a "Full 3-node cluster"
-launch. That script does not exist. Multi-node local testing is
-done by running three `mpc-wallet-tui` processes manually (in
-separate terminals) with distinct `--device-id` values against one
-signal server. The `examples/webrtc_mesh_e2e_test.rs` binary
-exercises 3-peer mesh behaviour in-process for smoke coverage
-without needing three real TUI instances.
+(Correction: an earlier retraction here claimed
+`launch-3node-cluster.sh` didn't exist. It exists at
+`apps/tui-node/scripts/launch-3node-cluster.sh` — the earlier
+`ls scripts/` check only surveyed the repo-root scripts/ dir.)
+
+The `examples/webrtc_mesh_e2e_test.rs` binary also exercises
+3-peer mesh behaviour in-process for smoke coverage without needing
+three real TUI instances. For a fully manual walkthrough (good for
+debugging), see
+[`docs/testing/RUN_TEST_INSTRUCTIONS.md`](../../../docs/testing/RUN_TEST_INSTRUCTIONS.md).
 
 ## Resource requirements
 
