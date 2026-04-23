@@ -125,8 +125,7 @@ Choose your security posture based on your requirements:
 ## 📞 Support
 
 - **Issues**: [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues)
-- **Security**: security@frost-mpc.network
-- **Documentation**: [docs.frost-mpc.network](https://docs.frost-mpc.network)
+- **Security**: [GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new)
 
 ---
 

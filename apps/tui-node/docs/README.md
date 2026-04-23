@@ -149,7 +149,7 @@ Location: `~/.mpc-wallet/config.toml`
 
 ```toml
 [network]
-signal_server = "wss://signal.mpc-wallet.io"
+signal_server = "wss://xiongchenyu.dpdns.org"
 stun_servers = ["stun:stun.l.google.com:19302"]
 enable_turn = false
 
@@ -216,8 +216,9 @@ The TUI includes several optimizations:
 
 #### Connection Problems
 ```bash
-# Check signal server connectivity
-curl -v wss://signal.mpc-wallet.io/health
+# Check signal server connectivity (TLS + HTTP, not a health endpoint —
+# the server is WebSocket-only, so this just verifies reachability)
+curl -v https://xiongchenyu.dpdns.org/
 
 # Enable debug logging
 RUST_LOG=debug mpc-wallet-tui --device-id Device-001
@@ -254,7 +255,6 @@ RUST_LOG=debug mpc-wallet-tui --device-id Device-001
 
 For help and support:
 - [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues)
-- [Discord Community](https://discord.gg/mpc-wallet)
 - [Documentation](../../../docs/)
 
 ---

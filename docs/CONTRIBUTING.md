@@ -407,7 +407,7 @@ Use ASCII art or Mermaid diagrams for complex concepts
 **DO NOT** create public issues for security vulnerabilities.
 
 Instead:
-1. Email security@mpc-wallet.io
+1. Open a private advisory via [GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new)
 2. Include:
    - Description of the vulnerability
    - Steps to reproduce
@@ -427,9 +427,8 @@ Instead:
 
 ### Getting Help
 
-- **Discord**: [Join our server](https://discord.gg/mpc-wallet)
 - **GitHub Discussions**: Ask questions and share ideas
-- **Stack Overflow**: Tag questions with `mpc-wallet`
+- **GitHub Issues**: Report bugs, request features
 
 ### Ways to Contribute
 
@@ -448,18 +447,19 @@ Beyond code:
 Contributors are recognized in:
 - GitHub contributors page
 - Release notes
-- Annual contributor report
-- Special badges in Discord
 
 ## License
 
-By contributing to MPC Wallet, you agree that your contributions will be licensed under the MIT License.
+By contributing to MPC Wallet, you agree that your contributions will be
+licensed under the license of the crate/package you're modifying. The
+workspace default is Apache-2.0 (see the workspace `Cargo.toml`);
+individual crates under `packages/` and `apps/signal-server/` set their
+own — check each crate's `Cargo.toml` before submitting.
 
 ## Questions?
 
-If you have questions about contributing, please:
-1. Ask in [GitHub Discussions](https://github.com/hecoinfo/mpc-wallet/discussions)
-2. Join our [Discord](https://discord.gg/mpc-wallet)
+If you have questions about contributing, please ask in
+[GitHub Discussions](https://github.com/hecoinfo/mpc-wallet/discussions).
 
 ---
 

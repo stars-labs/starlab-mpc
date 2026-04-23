@@ -487,7 +487,7 @@ Comprehensive backup interface:
 │                                                     │
 │ Diagnostics:                                        │
 │ • Network: ✅ Connected                             │
-│ • DNS: ✅ Resolved signal.frost-mpc.network        │
+│ • DNS: ✅ Resolved xiongchenyu.dpdns.org           │
 │ • Server: ❌ Connection refused                     │
 │                                                     │
 │ Possible solutions:                                 │

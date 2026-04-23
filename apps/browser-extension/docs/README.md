@@ -230,5 +230,4 @@ has a condensed version covering the critical sequence.
 
 For issues and questions:
 - [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues)
-- [Discord Community](https://discord.gg/mpc-wallet)
 - [Documentation](../../../docs/)

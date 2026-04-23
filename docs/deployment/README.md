@@ -378,7 +378,7 @@ wscat -c ws://localhost:8080
 perf top -p $(pgrep signal-server)
 
 # Check network latency
-mtr signal.mpc-wallet.io
+mtr xiongchenyu.dpdns.org
 ```
 
 ## Navigation

@@ -625,4 +625,5 @@ key_derivation_iterations = 100000
 
 Security is not a feature but a continuous process. The FROST MPC TUI Wallet implements comprehensive security controls at every layer, from cryptographic protocols to operational procedures. Regular security assessments, updates, and training ensure the system remains secure against evolving threats.
 
-For security concerns or vulnerability reports, please contact: security@frost-mpc.network
+For security concerns or vulnerability reports, please open a private
+advisory via [GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new).

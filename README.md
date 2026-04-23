@@ -218,13 +218,9 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 
 ### Community
 
-- [Discord](https://discord.gg/mpc-wallet) - Join our community
 - [GitHub Issues](https://github.com/hecoinfo/mpc-wallet/issues) - Report bugs
-- [Documentation](https://docs.mpc-wallet.io) - Full documentation
-
-### Commercial Support
-
-For enterprise support and custom development, contact: enterprise@mpc-wallet.io
+- [GitHub Discussions](https://github.com/hecoinfo/mpc-wallet/discussions) - Ask questions
+- [Documentation](docs/) - Full documentation in this repo
 
 ## Roadmap
 

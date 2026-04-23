@@ -1271,8 +1271,9 @@ impl StateCache {
 
 **Solutions**:
 ```bash
-# Check connectivity
-curl -v https://signal.mpc-wallet.io/health
+# Check connectivity — the server is WebSocket-only, so curl just
+# verifies DNS + TLS + that something is listening on 443.
+curl -v https://xiongchenyu.dpdns.org/
 
 # Test STUN server
 npm install -g stun
@@ -1350,9 +1351,9 @@ pub struct ProtocolAnalyzer {
 echo "MPC Wallet Network Diagnostics"
 echo "=============================="
 
-# Check signal server
+# Check signal server (TCP/TLS reachability only — no health endpoint)
 echo -n "Signal server: "
-curl -s https://signal.mpc-wallet.io/health | jq -r .status
+curl -s -o /dev/null -w "%{http_code}\n" https://xiongchenyu.dpdns.org/
 
 # Check STUN servers
 echo -n "STUN server: "
