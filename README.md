@@ -57,18 +57,24 @@ bun run dev
 #### Terminal UI
 
 ```bash
-# Run the TUI application
-cargo run -p tui-node -- --device-id Device-001
-
-# Create a wallet (interactive)
-> create my_wallet 2 3
+# Run the TUI application (binary name is mpc-wallet-tui,
+# lives in the tui-node package)
+cargo run -p tui-node --bin mpc-wallet-tui -- --device-id Device-001
 ```
+
+Inside the TUI, navigate with arrow keys → `Create New Wallet`
+and fill in the form; there is no REPL prompt. (Earlier drafts of
+this section showed a `> create my_wallet 2 3` command; no such
+slash-style command shipped — the TUI is ratatui-based, not a
+line-mode REPL.)
 
 #### Desktop Application
 
 ```bash
-# Run the native desktop app
-cargo run -p native-node
+# Run the native desktop app (package name is mpc-wallet-native,
+# NOT native-node — the directory is native-node/ but the
+# Cargo package is mpc-wallet-native)
+cargo run -p mpc-wallet-native
 ```
 
 ## Documentation
