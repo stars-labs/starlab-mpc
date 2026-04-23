@@ -1,5 +1,16 @@
 # Complete Offline DKG + Signing Workflow
 
+> **Scope note**: This document describes the DEMO code in
+> `apps/tui-node/examples/offline_dkg_signing_demo.rs`, which
+> simulates the end-to-end offline flow using placeholder
+> strings (e.g. `format!("key_share_{}", self.id)`) in place of
+> real FROST cryptographic material. The demo exists to exercise
+> the round-by-round SD-card exchange pattern in isolation. For
+> the actual production offline-mode code that uses real
+> frost-core packages, see `src/offline/` and
+> [OFFLINE_DKG_GUIDE.md](./OFFLINE_DKG_GUIDE.md). Where the demo
+> differs from production is called out inline below.
+
 ## Overview
 
 This document describes the complete end-to-end workflow for offline MPC wallet operations, covering both the Distributed Key Generation (DKG) ceremony and transaction signing process using air-gapped machines and SD card data exchange.
@@ -263,26 +274,27 @@ cargo test --example offline_dkg_signing_demo
   • Participants: P1, P2, P3
   • Mode: Offline (SD Card Exchange)
 
-╔════════════════════════════════════════╗
-║        PART 1: DKG CEREMONY            ║
-╚════════════════════════════════════════╝
-
 [DKG phases execute with SD card exchanges]
 
 ✅ DKG COMPLETE - Wallet Ready!
-  • Address: 0x742d35Cc6634C053...
-  • Public Key: 0x04a7b8c9d2e3f4...
-
-╔════════════════════════════════════════╗
-║      PART 2: TRANSACTION SIGNING       ║
-╚════════════════════════════════════════╝
+  • Address (derived, placeholder): 0x742d35Cc6634C053...
+  • Public Key (placeholder): 0x04a7b8c9d2e3f4...
 
 [Signing phases execute with SD card exchanges]
 
-✅ Transaction broadcast successfully!
-  🔗 Transaction hash: 0xabcd1234...
-  🌐 View on explorer: https://etherscan.io/tx/0xabcd1234...
+✅ Signature aggregated.
+  🔗 Signature hex: 0xabcd1234...
 ```
+
+Note: the demo produces placeholder signatures, not valid
+signatures that can be broadcast. The real production
+offline-mode path in `src/offline/` does produce valid
+FROST signatures. Neither the demo nor the real path
+broadcasts the transaction — that's an external-tool step
+(see the USER_GUIDE "Signing Messages" section in c48fbf0).
+Earlier drafts of this section showed a "View on explorer:
+https://etherscan.io/tx/…" line suggesting on-chain
+broadcasting, which the TUI does not do.
 
 ## Security Considerations
 
@@ -305,19 +317,21 @@ cargo test --example offline_dkg_signing_demo
 
 ## Time Estimates
 
-### Real-World Scenarios
+Ceremony wall-clock is dominated by physical logistics (vetting SD
+cards at handoff, transporting media, signing off on each phase),
+not by compute budget. Earlier drafts of this section quoted
+specific estimates ("3-4 hours DKG, 1-2 hours signing, 4-6 hours
+total, ~20 SD-card exchanges"); those numbers had no source and
+have been removed. Same removal applied to OFFLINE_DKG_GUIDE.md
+in 0214b30.
 
-| Operation | Estimated Time | SD Card Exchanges |
-|-----------|---------------|-------------------|
-| DKG Ceremony | 3-4 hours | ~10-12 |
-| Transaction Signing | 1-2 hours | ~6-8 |
-| Total for Complete Flow | 4-6 hours | ~20 |
+Factors that dominate:
 
-### Factors Affecting Time
 - Physical distance between participants
-- Number of participants (scales linearly)
-- Verification thoroughness
-- Security procedures (checksums, visual verification)
+- Number of participants (scales roughly linearly — each extra
+  participant adds a round-trip per phase)
+- Verification thoroughness at each handoff
+- Security procedures (checksums, visual metadata review)
 
 ## Testing
 
@@ -353,11 +367,19 @@ fn test_complete_offline_flow() {
 - Physical security controls
 - Suitable for high-value treasury operations
 
-### Regulatory Compliance
-- Meets strict security requirements
-- Full audit trail via SD card logs
-- Verifiable security procedures
-- Suitable for institutional use
+### Operational traceability
+- The physical chain of custody of SD cards is the integrity layer
+  (see OFFLINE_DKG_GUIDE.md § Verification Procedures, fixed in
+  0214b30). No cryptographic file-signature layer is applied.
+- There is no built-in audit-trail-to-disk feature; operators who
+  need one add their own logging around each SD-card handoff
+  (serial-number tracking, witness sign-off, etc.).
+
+Earlier drafts of this section claimed "Full audit trail via SD
+card logs" and "Meets strict [regulatory] requirements / Suitable
+for institutional use". No audit logs ship; no regulatory
+certifications apply (same fabrication class as 6d7fd5a removed
+in SECURITY.md).
 
 ### Trade-offs
 - Slower than online operations
