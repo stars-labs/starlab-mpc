@@ -288,8 +288,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // announced by `Command::StartDKG`, which runs from inside
         // `Message::CreateWallet`'s handler).
         //
-        // Stage 2 will introduce the actual keystore-write step that
-        // reads `pending_password` and clears it after encryption.
+        // The password stashed here is later consumed by the keystore-
+        // write in the `DKGKeyGenerated` handler (line ~1382), which
+        // clears `pending_password` after encryption.
         Message::SubmitPassword { value } => {
             info!(
                 "Password submitted ({} chars) — routing to DKG/sign",
