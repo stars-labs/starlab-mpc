@@ -180,54 +180,46 @@ Upon successful completion:
 
 ### Wallet List View
 
-Access your wallets from the main menu:
+The "Manage Wallets" menu item opens the WalletList component
+(`src/elm/components/wallet_list.rs`). It shows the `WalletMetadata`
+fields the keystore holds — threshold, total participants, curve,
+creation timestamp — for each wallet in `~/.frost_keystore/`.
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Your Wallets                                        │
-├─────────────────────────────────────────────────────┤
-│ > company-treasury (2/3)                   Ethereum │
-│   Balance: 5.432 ETH                                │
-│   Created: 2024-01-20                               │
-│   Last used: 2 hours ago                            │
-│                                                     │
-│   defi-operations (3/5)                     Solana  │
-│   Balance: 1,234.56 SOL                             │
-│   Created: 2024-01-15                               │
-│   Last used: 1 day ago                              │
-│                                                     │
-│ [Enter: Details] [E: Export] [B: Backup] [D: Delete]│
-└─────────────────────────────────────────────────────┘
-```
+Earlier drafts of this section showed per-wallet `Balance` rows
+(5.432 ETH, 1,234.56 SOL) and a `Last used: 2 hours ago` indicator.
+The TUI does **not** query blockchain RPCs or track "last used"
+timestamps — no balance data, no activity heatmap. The list shows
+only what's stored in the keystore metadata `.json` files.
+
+The real shortcuts on this screen are the tui-realm navigation
+keys (`↑` / `↓` / `Enter` for details / `Esc` to go back).
+Single-letter shortcuts like `E` / `B` / `D` for Export / Backup /
+Delete are not implemented globally — operations happen through
+the wallet-detail screen.
 
 ### Wallet Details
 
-Selecting a wallet shows comprehensive information:
+Selecting a wallet opens the WalletDetail component
+(`src/elm/components/wallet_detail.rs`), which shows:
 
-```
-┌─────────────────────────────────────────────────────┐
-│ Wallet Details: company-treasury                    │
-├─────────────────────────────────────────────────────┤
-│ Configuration:                                      │
-│ • Threshold: 2 of 3                                 │
-│ • Blockchain: Ethereum (secp256k1)                 │
-│ • Created: 2024-01-20 14:30:00                     │
-│                                                     │
-│ Address:                                            │
-│ 0x742d35Cc6634C0532925a3b844Bc9e7595f7A          │
-│                                                     │
-│ Participants:                                       │
-│ 1. alice (You) - Key Share #1                      │
-│ 2. bob - Key Share #2                              │
-│ 3. charlie - Key Share #3                          │
-│                                                     │
-│ Recent Activity:                                    │
-│ • 2024-01-20 16:45 - Signed transaction (2 of 3)   │
-│ • 2024-01-20 15:30 - Wallet created                │
-│                                                     │
-│ [Sign Transaction] [Export] [Back]                  │
-└─────────────────────────────────────────────────────┘
-```
+- Wallet name (session_id)
+- Threshold + total participants
+- Curve (secp256k1 / ed25519)
+- Creation timestamp
+- Derived addresses per blockchain (Ethereum / Solana) — these are
+  computed on-demand from the stored `group_public_key` (see
+  `WalletMetadata::derive_ethereum_address` /
+  `derive_solana_address` in `src/keystore/models.rs`)
+- Participant list (device IDs from the DKG session)
+
+The screen does **not** show "Recent Activity" or a signing
+history — earlier drafts of this section listed entries like
+"2024-01-20 16:45 - Signed transaction (2 of 3)", which would
+require an activity log that doesn't exist (same scope note as
+the absent audit log in SECURITY.md, fixed in 6d7fd5a).
+
+Available actions from this screen lead to the Sign Message flow
+(see below) or go back to the wallet list.
 
 ## Signing Messages
 
