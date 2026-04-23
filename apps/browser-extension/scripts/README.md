@@ -1,40 +1,35 @@
 # Scripts Directory
 
-This directory contains utility scripts for development, testing, and building the MPC Wallet extension.
+Utility scripts for development, testing, and building the MPC Wallet extension.
 
 ## Structure
 
 ### `/test`
-Testing scripts:
-- `run-all-tests.sh` - Run all test suites
-- `run-tests.sh` - Run specific tests
-- `test-dkg-ui.sh` - Test DKG UI functionality
+- `run-all-tests.sh` — run all test suites
+- `run-tests.sh` — run specific tests
 
 ### `/build`
-Build and maintenance scripts:
-- `fix-all-syntax-errors.sh` - Fix syntax errors in source files
-- `fix-bun-imports.js` - Fix import statements for Bun compatibility
-- `remove-debug-logs.sh` - Remove debug logging statements
+- `fix-all-syntax-errors.sh` — fix syntax errors in source files
+- `fix-bun-imports.js` — fix import statements for Bun compatibility
+- `remove-debug-logs.sh` — strip debug logging
 
-### `/`
-Development utilities:
-- `benchmark.ts` - Performance benchmarking
-- `dev.ts` - Development server script
-- `performance.ts` - Performance testing utilities
+### `/` (top-level)
+- `gen-frost-fixtures.ts` — generate FROST test fixtures (DKG round 1/2 packages, signing shares) used by the Vitest / bun-test suites
+- `test-dkg-ui.sh` — headless UI smoke-test for the DKG flow
 
 ## Usage
 
-### Running Tests
+### Running tests
 ```bash
 ./scripts/test/run-all-tests.sh
 ```
 
-### Development
+### Regenerate FROST fixtures
 ```bash
-bun run scripts/dev.ts
+bun run scripts/gen-frost-fixtures.ts
 ```
 
-### Build Fixes
+### Build fixes
 ```bash
 ./scripts/build/fix-all-syntax-errors.sh
 ```
