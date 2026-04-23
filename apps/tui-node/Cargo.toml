@@ -92,11 +92,6 @@ lru = "0.17.0"
 
 [dev-dependencies]
 tempfile = "3.14.0"
-criterion = { version = "0.8.2", features = ["async_tokio", "html_reports"] }
-
-[[bench]]
-name = "performance_bench"
-harness = false
 
 [[bin]]
 name = "mpc-wallet-tui"
