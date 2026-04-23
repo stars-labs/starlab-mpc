@@ -346,7 +346,9 @@ impl NativeApp {
 
 ## 🔄 Backwards Compatibility
 
-- Maintain existing AppRunner interface
+- Maintain existing library entry-point surface (plan-era
+  `AppRunner`; post-Elm-migration `ElmApp<C>` / `tui_node::core::*Manager`
+  re-exports serve the same role)
 - Keep current UI functional during migration
 - Support gradual feature rollout
 - Preserve existing keystore format

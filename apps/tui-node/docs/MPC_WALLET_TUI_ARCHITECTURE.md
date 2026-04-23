@@ -215,10 +215,10 @@ Sessions maintain synchronized state through:
 sequenceDiagram
     participant WS as WebSocket Server
     participant WSH as WebSocket Handler
-    participant AR as AppRunner
+    participant AR as ElmApp&lt;C&gt;
     participant IC as InternalCommand Queue
     participant H as Handler (DKG/Session/Mesh)
-    participant AS as AppState
+    participant AS as AppState&lt;C&gt;
     
     WS->>WSH: ServerMsg::Relay
     WSH->>WSH: Parse WebSocketMessage

@@ -340,4 +340,7 @@ The docs-architect has created/updated:
 5. ✅ **DEPLOYMENT.md** - Production deployment guide
 6. ✅ **CLAUDE.md** - Updated with latest changes
 
-All documentation reflects the recent AppRunner refactoring and provides clear guidance for developers.
+All documentation reflects the recent Elm-architecture migration
+(the pre-migration entry type was named `AppRunner`; it's now
+`ElmApp<C>` — see `apps/tui-node/src/elm/app.rs:25`) and provides
+clear guidance for developers.
