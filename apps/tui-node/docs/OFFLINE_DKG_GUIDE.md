@@ -33,13 +33,14 @@ Offline DKG is a process where multiple parties generate cryptographic key share
 
 ### Process Timeline
 
-| Phase | Coordinator Time | Participant Time | Total Time |
-|-------|------------------|------------------|------------|
-| Setup | 30 minutes | 15 minutes | 30 minutes |
-| Round 1 | 45 minutes | 30 minutes | 45 minutes |
-| Round 2 | 60 minutes | 45 minutes | 60 minutes |
-| Finalization | 30 minutes | 20 minutes | 30 minutes |
-| **Total** | **2.5-3 hours** | **2 hours** | **3-4 hours** |
+Earlier drafts of this section showed a per-phase time table
+(Setup 30 min, Round 1 45 min, Round 2 60 min, Finalization
+30 min, total 2.5–3 hours). Those numbers had no source and have
+been removed — actual ceremony duration is dominated by physical
+logistics (reviewing SD card contents, signing off each phase,
+transporting media between participants) rather than by any
+fixed compute budget. Plan for "as long as your chain-of-custody
+procedure takes".
 
 ---
 
@@ -65,9 +66,16 @@ Offline DKG is a process where multiple parties generate cryptographic key share
 ### Recommended Security Measures
 
 🔒 **Hardware Security**
-- Use write-protected SD cards when possible
-- Dedicated SD card reader
-- Hardware security modules (HSM) for key storage
+- Use write-protected SD cards when possible for handoff-direction
+  media (coordinator → participants once parameters are finalised)
+- Dedicated SD card reader per participant — sharing a reader
+  across trust boundaries defeats the air-gap.
+
+Note: no HSM integration ships today (zero hits for HSM / PKCS#11
+code in source). Earlier drafts of this guide recommended "Hardware
+security modules (HSM) for key storage" — that's not an option the
+TUI supports. Key shares encrypt to disk via PBKDF2 + AES-256-GCM
+only.
 
 🔒 **Operational Security**
 - Two-person control for coordinator
@@ -464,46 +472,39 @@ mkdir -p /Volumes/DKG_TRANSFER/dkg_ceremony/final
 
 ## Data Formats
 
-### Session Parameters
+All offline artefacts are wrapped in the `OfflineData` envelope
+defined at `apps/tui-node/src/offline/types.rs:12` — that struct
+(not the hand-rolled JSONs earlier drafts of this guide showed)
+is what the export/import code reads and writes:
+
 ```json
 {
   "version": "1.0",
-  "session_id": "dkg_[uuid]",
-  "threshold": 2,
-  "participants": 3,
-  "curve": "secp256k1",
-  "participant_ids": ["P1", "P2", "P3"],
+  "type": "signing_request | commitments | signing_package | signature_share | aggregated_signature",
+  "session_id": "<unique-id>",
   "created_at": "2025-01-05T14:00:00Z",
-  "coordinator": "P1"
+  "expires_at": "2025-01-05T15:00:00Z",
+  "data": { … type-specific payload … }
 }
 ```
 
-### Round 1 Commitment
-```json
-{
-  "round": 1,
-  "participant_id": "P1",
-  "session_id": "dkg_[uuid]",
-  "commitment": {
-    "points": ["0x04abc...", "0x04def..."],
-    "proof_of_knowledge": "0x7f3a9b..."
-  },
-  "signature": "0x3045022100..."
-}
-```
+The `data` payload for DKG rounds is the frost-core package type
+serialized through serde — `frost_core::keys::dkg::round1::Package<C>`
+or `::round2::Package<C>`. There is **no** manually-structured
+`{points, proof_of_knowledge}` object; that was a fabrication in
+earlier drafts. The frost-core types are opaque blobs; the
+ciphersuite itself handles round-2 share encryption internally
+(FROST's built-in per-peer encryption), which is why the on-wire
+`round2` package does not wrap shares in a separate `AES256-GCM:…`
+layer.
 
-### Round 2 Encrypted Share
-```json
-{
-  "round": 2,
-  "from": "P1",
-  "to": "P2",
-  "session_id": "dkg_[uuid]",
-  "encrypted_share": "AES256-GCM:0x8b3f...",
-  "share_commitment": "0x04abc...",
-  "signature": "0x3045022100..."
-}
-```
+There is also **no** application-level per-file signature. Earlier
+drafts of this guide showed each JSON artefact carrying a
+`"signature": "0x3045…"` field and instructed coordinators to
+"reject unsigned or invalid signatures". That layer doesn't exist —
+the offline protocol's integrity assumption is the physical
+chain-of-custody of the SD cards, not a cryptographic signature
+chain on the files.
 
 ---
 
@@ -511,24 +512,32 @@ mkdir -p /Volumes/DKG_TRANSFER/dkg_ceremony/final
 
 ### At Each Round
 
-1. **File Integrity**
+1. **File integrity (chain of custody)**: the offline protocol
+   does NOT apply file-level cryptographic signatures. Integrity
+   is physically enforced — coordinator vets each SD card, serial
+   numbers are logged, suspicious cards are rejected.
+
+   If you want a software-level sanity check on delivery integrity
+   (not authenticity), pair with sha256sums written out-of-band:
+
    ```bash
-   # Generate checksum
+   # Coordinator, before handing off:
    sha256sum round1_P1_commitment.json > checksums.txt
-   
-   # Verify checksum
+   # Recipient, on import:
    sha256sum -c checksums.txt
    ```
 
-2. **Signature Verification**
-   - Each file should be signed by sender
-   - Verify using participant's public key
-   - Reject unsigned or invalid signatures
+   This only catches bit-flips / corrupted media — it does not
+   detect a malicious coordinator substituting a valid-but-wrong
+   file, because the checksums travel with the file.
 
-3. **Cryptographic Validation**
-   - Commitments match expected format
-   - Shares decrypt successfully
-   - Proofs verify correctly
+2. **Protocol-level validation**: the real check that matters is
+   done automatically inside `frost-core` when each participant
+   runs `dkg::part2` and `dkg::part3`. An invalid commitment or
+   share causes the DKG call to error out — the participant
+   cannot derive a working key package. So a silent tampered
+   file will produce a FROST error at import, not a valid-but-
+   compromised key.
 
 ### Final Verification
 
