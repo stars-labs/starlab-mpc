@@ -44,6 +44,10 @@ pub trait FrostCurve {
         rng: &mut OsRng,
     ) -> Result<(Self::Round1SecretPackage, Self::Round1Package)>;
     
+    // Return type can't be type-aliased from the trait itself (alias would
+    // need to be generic over `C: FrostCurve` at the module level, which is
+    // more noise than this one call site). Left as-is.
+    #[allow(clippy::type_complexity)]
     fn dkg_part2(
         round1_secret: Self::Round1SecretPackage,
         round1_packages: &BTreeMap<Self::Identifier, Self::Round1Package>,

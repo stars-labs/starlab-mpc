@@ -38,6 +38,11 @@ pub enum FrostKeystoreError {
 
 type Result<T> = std::result::Result<T, FrostKeystoreError>;
 
+/// Output of `encrypt_data`: `(ciphertext, salt, iv, tag)`.
+/// `ciphertext` is AES-256-GCM, `salt` is the 32-byte PBKDF2 salt,
+/// `iv` is the 12-byte AES-GCM nonce, `tag` is the auth tag.
+type EncryptedBundle = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
+
 /// FROST keystore format for persistent storage
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FrostKeystore {
@@ -259,7 +264,7 @@ impl FrostKeystoreManager {
     }
     
     /// Encrypts data using AES-256-GCM with PBKDF2 key derivation
-    fn encrypt_data(&self, data: &[u8], password: &str) -> Result<(Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>)> {
+    fn encrypt_data(&self, data: &[u8], password: &str) -> Result<EncryptedBundle> {
         // Generate random salt and IV via the OS CSPRNG directly — stable API
         // and avoids the higher-level `rand` crate's trait-version churn.
         let mut salt = vec![0u8; 32];
