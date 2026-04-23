@@ -46,14 +46,14 @@ fn main() {
         .collect();
 
     // Distribute round 1 packages
-    for sender_idx in 0..max_signers as usize {
-        for receiver_idx in 0..max_signers as usize {
+    for (sender_idx, pkg) in round1_packages.iter().enumerate() {
+        let sender_id = (sender_idx + 1) as u16;
+        for (receiver_idx, participant) in participants.iter_mut().enumerate() {
             if sender_idx == receiver_idx {
                 continue;
             }
-            let sender_id = (sender_idx + 1) as u16;
-            participants[receiver_idx]
-                .add_round1_package(sender_id, &round1_packages[sender_idx])
+            participant
+                .add_round1_package(sender_id, pkg)
                 .expect("add_round1_package failed");
         }
     }
@@ -73,22 +73,22 @@ fn main() {
         .collect();
 
     // Distribute round 2 packages
-    for sender_idx in 0..max_signers as usize {
+    for (sender_idx, sender_pkgs) in round2_packages.iter().enumerate() {
         let sender_id = (sender_idx + 1) as u16;
-        for receiver_idx in 0..max_signers as usize {
+        for (receiver_idx, participant) in participants.iter_mut().enumerate() {
             let receiver_id = (receiver_idx + 1) as u16;
             if sender_id == receiver_id {
                 continue;
             }
-            let ed_hex = round2_packages[sender_idx]
+            let ed_hex = sender_pkgs
                 .ed25519
                 .get(&receiver_id)
                 .expect("missing ed25519 round2 package");
-            let secp_hex = round2_packages[sender_idx]
+            let secp_hex = sender_pkgs
                 .secp256k1
                 .get(&receiver_id)
                 .expect("missing secp256k1 round2 package");
-            participants[receiver_idx]
+            participant
                 .add_round2_package(sender_id, ed_hex, secp_hex)
                 .expect("add_round2_package failed");
         }
@@ -291,10 +291,10 @@ fn main() {
 
     // Verify all participants derive the same child addresses
     for index in 0..3u32 {
-        for p_idx in 1..max_signers as usize {
+        for (p_idx, participant) in participants.iter().enumerate().skip(1) {
             let p_ed_derived = derive_child_key::<frost_ed25519::Ed25519Sha512>(
-                participants[p_idx].ed25519_key_package().unwrap(),
-                participants[p_idx].ed25519_public_key_package().unwrap(),
+                participant.ed25519_key_package().unwrap(),
+                participant.ed25519_public_key_package().unwrap(),
                 &ed_chain_code,
                 index,
             ).unwrap();

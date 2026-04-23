@@ -404,14 +404,13 @@ mod tests {
             .map(|p| p.generate_round1().unwrap())
             .collect();
 
-        for sender in 0..max_signers as usize {
-            for receiver in 0..max_signers as usize {
+        for (sender, pkg) in round1_packages.iter().enumerate() {
+            let sender_id = (sender + 1) as u16;
+            for (receiver, participant) in participants.iter_mut().enumerate() {
                 if sender == receiver {
                     continue;
                 }
-                participants[receiver]
-                    .add_round1_package((sender + 1) as u16, &round1_packages[sender])
-                    .unwrap();
+                participant.add_round1_package(sender_id, pkg).unwrap();
             }
         }
 
@@ -421,16 +420,16 @@ mod tests {
             .map(|p| p.generate_round2().unwrap())
             .collect();
 
-        for sender in 0..max_signers as usize {
+        for (sender, sender_pkgs) in round2_packages.iter().enumerate() {
             let sender_id = (sender + 1) as u16;
-            for receiver in 0..max_signers as usize {
+            for (receiver, participant) in participants.iter_mut().enumerate() {
                 let receiver_id = (receiver + 1) as u16;
                 if sender_id == receiver_id {
                     continue;
                 }
-                let ed_hex = round2_packages[sender].ed25519.get(&receiver_id).unwrap();
-                let secp_hex = round2_packages[sender].secp256k1.get(&receiver_id).unwrap();
-                participants[receiver]
+                let ed_hex = sender_pkgs.ed25519.get(&receiver_id).unwrap();
+                let secp_hex = sender_pkgs.secp256k1.get(&receiver_id).unwrap();
+                participant
                     .add_round2_package(sender_id, ed_hex, secp_hex)
                     .unwrap();
             }
