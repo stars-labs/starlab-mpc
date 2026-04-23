@@ -123,25 +123,20 @@ pub async fn create_and_setup_device_connection<C>(
             }
         }; // Release the lock here
 
-        // Now set up callbacks and data channel (outside the lock)
+        // Now set up callbacks and data channel (outside the lock).
+        // Only the higher-id side of the pair opens the data channel;
+        // the lower-id side gets it via the RTCPeerConnection's
+        // on_data_channel callback set up below.
         if self_device_id < device_id {
-            match pc_arc.create_data_channel(DATA_CHANNEL_LABEL, None).await {
-                Ok(dc) => {
-                    
-                    // Log the initial state of the data channel
-                    tracing::debug!("Data channel state: {:?}", dc.ready_state());
-                    
-                    setup_data_channel_callbacks(
-                        dc,
-                        device_id.clone(),
-                        state_log.clone(),
-                        cmd_tx.clone(),
-                    ).await;
-                }
-                Err(_e) => {
-                }
+            if let Ok(dc) = pc_arc.create_data_channel(DATA_CHANNEL_LABEL, None).await {
+                tracing::debug!("Data channel state: {:?}", dc.ready_state());
+                setup_data_channel_callbacks(
+                    dc,
+                    device_id.clone(),
+                    state_log.clone(),
+                    cmd_tx.clone(),
+                ).await;
             }
-        } else {
         }
 
         let device_id_on_ice = device_id.clone();
@@ -344,11 +339,9 @@ pub async fn create_and_setup_device_connection<C>(
                 let cmd_tx_clone = cmd_tx_on_data.clone();
 
                 Box::pin(async move {
-                    
                     if dc.label() == DATA_CHANNEL_LABEL {
                         tracing::debug!("Received data channel state: {:?}", dc.ready_state());
                         setup_data_channel_callbacks(dc, device_id, state_log, cmd_tx_clone).await;
-                    } else {
                     }
                 })
             }));
@@ -416,11 +409,9 @@ pub async fn setup_data_channel_callbacks<C>(
                 data_channel_open: true,
             });
 
-            if let Err(_e) = cmd_tx_open.send(InternalCommand::ReportChannelOpen {
+            let _ = cmd_tx_open.send(InternalCommand::ReportChannelOpen {
                 device_id: device_id_open.clone(),
-            }) {
-            } else {
-            }
+            });
         })
     }));
 

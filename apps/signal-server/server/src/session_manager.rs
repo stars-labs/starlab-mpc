@@ -42,6 +42,12 @@ pub struct InMemorySessionStorage {
     device_sessions: HashMap<String, Vec<String>>,
 }
 
+impl Default for InMemorySessionStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InMemorySessionStorage {
     pub fn new() -> Self {
         Self {
@@ -75,7 +81,7 @@ impl SessionStorage for InMemorySessionStorage {
     fn add_device_session(&mut self, device_id: String, session_key: String) {
         self.device_sessions
             .entry(device_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(session_key);
     }
     
@@ -138,11 +144,10 @@ impl SessionManager {
             // Update active participants based on who's connected
             session.active_participants.clear();
             for p in participants {
-                if let Some(participant_id) = p.as_str() {
-                    if connected_devices.contains(&participant_id.to_string()) {
+                if let Some(participant_id) = p.as_str()
+                    && connected_devices.contains(&participant_id.to_string()) {
                         session.active_participants.push(participant_id.to_string());
                     }
-                }
             }
             
             // Update session info
@@ -216,11 +221,10 @@ impl SessionManager {
         
         // Now update active participants
         for (key, session_info, needs_update) in all_sessions {
-            if needs_update {
-                if let Some(session_mut) = storage.get_session_mut(&key) {
+            if needs_update
+                && let Some(session_mut) = storage.get_session_mut(&key) {
                     session_mut.active_participants.push(device_id.to_string());
                 }
-            }
             my_sessions.push(session_info);
             session_keys_to_track.push(key);
         }

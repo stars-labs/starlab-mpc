@@ -165,7 +165,6 @@ pub async fn initiate_offers_for_session<C>(
                         .log
                         .push(format!("Set making_offer=false for {}", device_id_clone));
                 });
-            } else {
             }
         }
     }

@@ -18,6 +18,12 @@ pub struct CloudflareSessionStorage {
     pub removed_sessions: Vec<String>,
 }
 
+impl Default for CloudflareSessionStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CloudflareSessionStorage {
     pub fn new() -> Self {
         Self {
@@ -90,7 +96,7 @@ impl SessionStorage for CloudflareSessionStorage {
     fn add_device_session(&mut self, device_id: String, session_key: String) {
         self.device_sessions
             .entry(device_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(session_key);
     }
     
