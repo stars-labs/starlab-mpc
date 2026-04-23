@@ -180,6 +180,15 @@ class AccountService {
         return this.accounts.find(acc => acc.address === address);
     }
 
+    /**
+     * Address-keyed lookup. Complementary to `getAccountById`; matches
+     * the pair naming convention the test suite expects. Returns null
+     * (not undefined) for consistency with `getAccountById`.
+     */
+    public getAccountByAddress(address: string): Account | null {
+        return this.accounts.find(acc => acc.address === address) || null;
+    }
+
     public getAccountById(id: string): Account | null {
         return this.accounts.find(acc => acc.id === id) || null;
     }
@@ -425,7 +434,18 @@ class AccountService {
         }
     }
 
-    public async setCurrentAccount(accountId: string): Promise<void> {
+    /**
+     * Set the active account by id, or pass `null` to clear the
+     * active selection (useful for sign-out / account-reset flows
+     * without wiping the full account list).
+     */
+    public async setCurrentAccount(accountId: string | null): Promise<void> {
+        if (accountId === null) {
+            this.currentAccountAddress = undefined;
+            await this.saveCurrentAccount();
+            this.notifyAccountChange(null);
+            return;
+        }
         const account = this.accounts.find(acc => acc.id === accountId);
         if (!account) {
             throw new Error('Account not found');
