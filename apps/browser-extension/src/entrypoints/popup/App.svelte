@@ -75,6 +75,20 @@
     let signatureBanner: SignatureBanner | null = null;
     let signatureCopied = false;
 
+    // Ext-2d-progress: live per-peer roster during an active FROST
+    // signing ceremony. Updated by the `signingProgress` event from
+    // background every time a commitment or share lands on
+    // offscreen. Cleared when signingCompleted fires (the success
+    // banner takes over the visual slot).
+    type SigningProgress = {
+        signingId: string;
+        state: string;
+        selectedSigners: string[];
+        commitmentsReceived: string[];
+        sharesReceived: string[];
+    };
+    let signingProgress: SigningProgress | null = null;
+
     // Application state (consolidated from background) - the single source of truth
     let appState: AppState = { ...INITIAL_APP_STATE };
 
@@ -548,6 +562,24 @@
                     sessionId: message.sessionId,
                 };
                 signatureCopied = false;
+                // Success banner replaces the in-progress roster.
+                signingProgress = null;
+                break;
+
+            case "signingProgress":
+                // Ext-2d-progress: roster snapshot. Fires on every
+                // commitment/share milestone. Overwrites any prior
+                // state for the same signing_id; stale snapshots
+                // from abandoned ceremonies get reset to null by
+                // signingCompleted or when the user starts a new
+                // session.
+                signingProgress = {
+                    signingId: message.signingId,
+                    state: message.state,
+                    selectedSigners: message.selectedSigners ?? [],
+                    commitmentsReceived: message.commitmentsReceived ?? [],
+                    sharesReceived: message.sharesReceived ?? [],
+                };
                 break;
                 
             case "signatureError":
@@ -1570,6 +1602,76 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        {/if}
+
+        <!-- Ext-2d-progress: live signing roster. Renders while the
+             ceremony is running (between InitiateSigning and
+             AggregatedSignature). Each selected signer gets a row
+             with two checkmarks: ✓ = they submitted their round-1
+             commitment, ✓✓ = they also submitted their round-2
+             share. Mirrors TUI's DkgProgressComponent overlay
+             (051cdbc). Disappears when signingCompleted fires. -->
+        {#if signingProgress && !signatureBanner}
+            <div
+                class="mb-4 rounded border border-blue-300 bg-blue-50 p-3"
+            >
+                <p class="mb-2 text-sm font-semibold text-blue-900">
+                    Signing Progress
+                    <span class="ml-2 text-xs font-normal text-blue-700">
+                        {signingProgress.state}
+                    </span>
+                </p>
+                <ul class="space-y-1">
+                    {#each signingProgress.selectedSigners as signer (signer)}
+                        {@const hasCommit =
+                            signingProgress.commitmentsReceived.includes(
+                                signer,
+                            )}
+                        {@const hasShare =
+                            signingProgress.sharesReceived.includes(signer)}
+                        {@const isSelf = signer === appState.deviceId}
+                        <li
+                            class="flex items-center justify-between rounded bg-white px-2 py-1 text-xs border border-blue-100"
+                        >
+                            <span
+                                class="truncate font-mono"
+                                class:font-semibold={isSelf}
+                            >
+                                {signer}
+                                {#if isSelf}
+                                    <span class="text-blue-600">(you)</span>
+                                {/if}
+                            </span>
+                            <span class="ml-2 flex items-center gap-1.5">
+                                <span
+                                    class="rounded px-1.5 py-0.5 text-[10px] font-medium"
+                                    class:bg-gray-100={!hasCommit}
+                                    class:text-gray-400={!hasCommit}
+                                    class:bg-blue-100={hasCommit && !hasShare}
+                                    class:text-blue-800={hasCommit && !hasShare}
+                                    class:bg-green-100={hasShare}
+                                    class:text-green-800={hasShare}
+                                    title={hasShare
+                                        ? "Commitment + share received"
+                                        : hasCommit
+                                          ? "Commitment received"
+                                          : "Waiting for commitment"}
+                                >
+                                    {hasShare
+                                        ? "✓✓"
+                                        : hasCommit
+                                          ? "✓"
+                                          : "…"}
+                                </span>
+                            </span>
+                        </li>
+                    {/each}
+                </ul>
+                <p class="mt-2 text-[10px] text-blue-700">
+                    ✓ = commitment sent · ✓✓ = signature share sent · … =
+                    waiting
+                </p>
             </div>
         {/if}
 

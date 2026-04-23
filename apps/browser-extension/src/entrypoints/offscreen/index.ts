@@ -290,6 +290,19 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
                     });
                 };
 
+                // Ext-2d-progress: roster progression events
+                // (commitments/shares arriving). Fires on every
+                // per-peer milestone so the popup's roster overlays
+                // update in real time. Fire-and-forget — no
+                // back-pressure at this throughput (≤ 2*threshold
+                // events per ceremony).
+                webRTCManager.onSigningProgress = (payload) => {
+                    sendToBackground({
+                        type: "fromOffscreen",
+                        payload: { type: "signingProgress", ...payload },
+                    });
+                };
+
                 webRTCManager.onWebRTCConnectionUpdate = (deviceId: string, connected: boolean) => {
                     console.log("Offscreen: WebRTC connection update:", deviceId, connected);
 

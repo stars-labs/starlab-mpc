@@ -566,6 +566,28 @@ export class StateManager {
                 }
                 break;
 
+            case "signingProgress":
+                // Ext-2d-progress: per-peer roster snapshot.
+                // Stashed in appState so late popup mounts can
+                // read current state without waiting for the next
+                // event; broadcast too for live reactivity on
+                // already-open popups.
+                {
+                    const info: any = payload;
+                    (this.appState as any).signingProgress = {
+                        signingId: info.signingId,
+                        state: info.state,
+                        selectedSigners: info.selectedSigners ?? [],
+                        commitmentsReceived: info.commitmentsReceived ?? [],
+                        sharesReceived: info.sharesReceived ?? [],
+                    };
+                    this.broadcastToPopupPorts({
+                        type: "signingProgress",
+                        ...info,
+                    } as any);
+                }
+                break;
+
             case "signingComplete":
                 // Ext-2d-offscreen-rounds: the FROST signing ceremony
                 // finalized. Stash the signature + metadata in appState
@@ -597,6 +619,10 @@ export class StateManager {
                         this.appState.sessionInfo = null;
                         this.appState.dkgState = DkgState.Idle;
                     }
+                    // Clear the live progress roster now that the
+                    // ceremony has finished — the success banner
+                    // supersedes the per-peer check marks.
+                    (this.appState as any).signingProgress = null;
                     console.log(
                         "[StateManager] Signing complete received:",
                         (this.appState as any).lastSignature,

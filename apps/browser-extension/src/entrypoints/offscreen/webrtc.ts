@@ -99,6 +99,26 @@ export class WebRTCManager {
   }) => void = () => { };
   public onSigningStateUpdate: (state: SigningState, info: SigningInfo | null) => void = () => { };
   /**
+   * Ext-2d-progress: fires on every signing-ceremony progression
+   * milestone (commitment sent/received, share sent/received) with
+   * the current per-participant roster. TUI parity with the
+   * `signing_commitments_received` / `signing_shares_received`
+   * HashSets (051cdbc) that overlay ✓ / ✓✓ on the participant list
+   * while the ceremony runs — lets the creator see Bob committing
+   * and Carol sharing in real time instead of staring at a blank
+   * "waiting" screen between kickoff and SignatureComplete.
+   *
+   * The payload is JSON-plain (arrays, not Maps) so it crosses the
+   * runtime.sendMessage boundary without serialization gymnastics.
+   */
+  public onSigningProgress: (payload: {
+    signingId: string;
+    state: SigningState;
+    selectedSigners: string[];
+    commitmentsReceived: string[];
+    sharesReceived: string[];
+  }) => void = () => { };
+  /**
    * Ext-2d-offscreen-rounds: fires once per ceremony when the final
    * aggregated signature is available. All signers receive this
    * (the aggregator after calling `aggregate_signature`, co-signers
@@ -1682,6 +1702,25 @@ export class WebRTCManager {
   }
 
   /**
+   * Ext-2d-progress: snapshot + emit the signing roster state.
+   * Called after every mutation of signingCommitments or
+   * signingShares so the popup's progress roster stays live.
+   * No-op when no signingInfo is set (idle ceremonies have nothing
+   * to report). Converts private Maps to plain arrays of peer-ids
+   * for wire transport.
+   */
+  private _emitSigningProgress(): void {
+    if (!this.signingInfo) return;
+    this.onSigningProgress({
+      signingId: this.signingInfo.signing_id,
+      state: this.signingState,
+      selectedSigners: this.signingInfo.selected_signers.slice(),
+      commitmentsReceived: Array.from(this.signingCommitments.keys()),
+      sharesReceived: Array.from(this.signingShares.keys()),
+    });
+  }
+
+  /**
    * Ext-2d-offscreen: load an existing wallet's key share into a
    * fresh FROST instance so it can be used for signing. Populates
    * `this.frostDkg` the same way `initializeDkg` would after finishing
@@ -1864,6 +1903,7 @@ export class WebRTCManager {
 
     this.signingState = SigningState.CommitmentPhase;
     this.onSigningStateUpdate(this.signingState, this.signingInfo);
+    this._emitSigningProgress();
     this._log(
       `Round 1: broadcast our commitment to ${selectedSigners.length - 1} co-signers`,
     );
@@ -2073,6 +2113,7 @@ export class WebRTCManager {
     this._log(
       `Registered commitment from ${fromPeerId} (idx ${senderIndex}). Total: ${this.signingCommitments.size}/${this.signingInfo.selected_signers.length}`,
     );
+    this._emitSigningProgress();
 
     // When we've collected commitments from all selected signers
     // (including our own, which was recorded in initiateSigningCeremony
@@ -2148,6 +2189,7 @@ export class WebRTCManager {
     this._log(
       `Registered share from ${fromPeerId} (idx ${senderIndex}). Total: ${this.signingShares.size}/${this.signingInfo.selected_signers.length}`,
     );
+    this._emitSigningProgress();
 
     this._tryAggregateSignature();
   }
@@ -2266,6 +2308,7 @@ export class WebRTCManager {
     this._log(
       `Generated + broadcast signature share (hex length=${shareHex.length}) to ${this.signingInfo.selected_signers.length - 1} peers`,
     );
+    this._emitSigningProgress();
   }
 
   /**
