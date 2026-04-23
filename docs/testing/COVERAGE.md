@@ -1,7 +1,11 @@
 # Test Coverage Configuration
 
 ## Configuration
-The project uses Bun's built-in test runner with coverage enabled via `bunfig.toml`:
+
+Coverage is enabled via `bunfig.toml` at **`apps/browser-extension/bunfig.toml`**
+(not the repo root — there is no top-level bunfig.toml). This only
+governs the extension's Bun test suite; the Rust test suite under
+`cargo test` has no coverage config in-tree.
 
 ```toml
 [test]
