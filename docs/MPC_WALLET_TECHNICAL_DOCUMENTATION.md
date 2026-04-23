@@ -429,172 +429,105 @@ Each participant Pi:
 
 #### Encryption Scheme
 
-- **Key Derivation**: PBKDF2 with 100,000 iterations
-- **Encryption**: AES-256-GCM
-- **Authentication**: HMAC-SHA256
-- **Storage**: Local encrypted storage per platform
+- **Key Derivation**: PBKDF2-HMAC-SHA256 with 100,000 iterations
+  (constant `PBKDF2_ITERATIONS` in `apps/tui-node/src/keystore/encryption.rs`).
+- **Encryption + Authentication**: AES-256-GCM. GCM provides
+  confidentiality and authenticity in one pass — there is no separate
+  HMAC layer; the GCM auth tag is the MAC.
+- **Storage**: Local filesystem at `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.dat`.
 
 ---
 
 ## Application Modules
 
-### Browser Extension Modules
+### Browser Extension
 
-#### 1. Background Service Worker
+Four runtime contexts (MV3), each rooted under `src/entrypoints/`.
+Full flow diagram + entry-points table lives in CLAUDE.md; this
+section summarizes the layering.
 
-Manages extension lifecycle and message routing:
+#### Background service worker (`src/entrypoints/background/`)
 
-```typescript
-class BackgroundManager {
-  private webSocketManager: WebSocketManager;
-  private stateManager: StateManager;
-  private messageRouter: MessageRouter;
-  
-  async handleMessage(message: ExtensionMessage) {
-    switch(message.type) {
-      case 'CREATE_WALLET':
-        return this.createWallet(message.payload);
-      case 'INIT_DKG':
-        return this.initiateDKG(message.payload);
-      case 'SIGN_TRANSACTION':
-        return this.signTransaction(message.payload);
-    }
-  }
-}
-```
+Orchestrates everything. Real managers:
 
-#### 2. Offscreen Document
+| Class | File | Role |
+|---|---|---|
+| `StateManager` | `stateManager.ts` | Persistent state, cross-context broadcast, signing/DKG state listeners |
+| `SessionManager` | `sessionManager.ts` | `createSigningSession`, `joinDkgSession` |
+| `WebSocketManager` | `webSocketManager.ts` | Signal-server client, `maybeTriggerCeremony`, relay |
+| `OffscreenManager` | `offscreenManager.ts` | Create / tear down offscreen document |
+| `RpcHandler` | `rpcHandler.ts` | dApp EIP-1193 entry point |
+| `KeepaliveController` | (in `index.ts` area) | Pings offscreen during active DKG/signing to prevent MV3 idle-death |
 
-Handles WebRTC and cryptographic operations:
+Dispatch table: `case MESSAGE_TYPES.*` blocks in
+`src/entrypoints/background/messageHandlers.ts`. See the API Reference
+section for the real message types.
 
-```typescript
-class OffscreenManager {
-  private webrtcManager: WebRTCManager;
-  private wasmModule: FrostWasmModule;
-  
-  async performDKG(params: DKGParams) {
-    // Initialize WebRTC connections
-    await this.webrtcManager.connectToPeers(params.peers);
-    
-    // Execute DKG protocol
-    const result = await this.wasmModule.executeDKG({
-      threshold: params.threshold,
-      participants: params.participants
-    });
-    
-    return result;
-  }
-}
-```
+#### Offscreen document (`src/entrypoints/offscreen/`)
 
-#### 3. Content Script Provider
+Long-lived WebRTC + WASM host. Real class: `WebRTCManager`
+(`webrtc.ts`), which holds all peer connections plus FROST state
+(`frostDkg`, `signingInfo`, `signingCommitments` Map, `signingShares` Map).
+WASM entry point: `loadKeystoreForSigning`, `initiateSigningCeremony`,
+`_handleSigningCommitment`, `_handleSignatureShare`,
+`_aggregateSignatureAndBroadcast`. See CLAUDE.md for the signing
+pipeline end-to-end.
 
-Implements EIP-1193 provider:
+#### Content script + injected provider (`src/entrypoints/content/`)
 
-```typescript
-class Web3Provider {
-  async request(args: RequestArguments) {
-    switch(args.method) {
-      case 'eth_requestAccounts':
-        return this.requestAccounts();
-      case 'eth_sendTransaction':
-        return this.sendTransaction(args.params[0]);
-      case 'personal_sign':
-        return this.personalSign(args.params);
-    }
-  }
-}
-```
+Standard EIP-1193 pattern: the content script injects a
+`window.ethereum` object into page context; RPC calls
+(`eth_requestAccounts`, `eth_sendTransaction`, `personal_sign`, etc.)
+cross into the content-script world and then into the background
+service worker via `chrome.runtime.sendMessage`.
 
-### Terminal UI Modules
+### Terminal UI
 
-#### 1. Command Handlers
+`apps/tui-node/` is structured around the Elm architecture in
+`src/elm/` (Model/Update/View via tui-realm) plus the longer-lived
+`src/core/` managers that are shared with native-node. Key modules:
+
+| Path | What it holds |
+|---|---|
+| `src/elm/app.rs` | `ElmApp<C>` entry struct + main loop |
+| `src/elm/model.rs` | `Model` — the single source of UI state |
+| `src/elm/update.rs` | Update fn mapping `Message` → state transition + `Command` emissions |
+| `src/elm/command.rs` | `Command<C>` enum — side effects to execute |
+| `src/elm/components/` | Per-screen tui-realm `Component` impls |
+| `src/elm/provider.rs` | `UIProvider` trait (abstract UI backend) |
+| `src/core/*` | `*Manager` types — business logic reused by native-node |
+| `src/protocal/` | Wire types (`signal.rs`, `dkg.rs`, `signing.rs`, `session_types.rs`) |
+| `src/keystore/` | Encrypted share persistence |
+| `src/offline/` | SD-card air-gap mode |
+
+`UIProvider` is a TRAIT, not a struct:
 
 ```rust
-pub mod handlers {
-    pub async fn handle_create_wallet(
-        state: &mut AppState,
-        params: CreateWalletParams
-    ) -> Result<Wallet> {
-        // Initialize session
-        let session = SessionManager::create_session(
-            params.participants,
-            params.threshold
-        ).await?;
-        
-        // Execute DKG
-        let key_shares = dkg::execute_dkg(session).await?;
-        
-        // Store wallet
-        let wallet = Wallet::new(key_shares);
-        state.wallets.insert(wallet.id.clone(), wallet.clone());
-        
-        Ok(wallet)
-    }
-}
+// src/elm/provider.rs
+pub trait UIProvider: Send + Sync { /* methods */ }
 ```
 
-#### 2. UI Provider
+TUI and native-node implement this interface differently —
+TUI drives it through tui-realm; native-node implements
+`NativeUICallback` (`apps/native-node/src/ui_callback.rs`) to bridge
+onto the Slint event loop.
 
-```rust
-pub struct UIProvider {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-    current_screen: Screen,
-    menu_state: MenuState,
-}
+### Native Desktop
 
-impl UIProvider {
-    pub fn render(&mut self, app: &App) -> Result<()> {
-        self.terminal.draw(|f| {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),  // Header
-                    Constraint::Min(0),     // Content
-                    Constraint::Length(3),  // Status
-                ])
-                .split(f.size());
-            
-            self.render_header(f, chunks[0], app);
-            self.render_content(f, chunks[1], app);
-            self.render_status(f, chunks[2], app);
-        })?;
-        
-        Ok(())
-    }
-}
-```
+`apps/native-node/` re-uses `tui_node::core::*Manager` types as the
+business-logic backend and presents them through a Slint UI. Entry
+points:
 
-### Native Desktop Modules
+| Path | Role |
+|---|---|
+| `src/main.rs` | Tokio runtime + Slint event loop startup |
+| `src/core_adapter.rs` | Bridges `CoreState` ↔ Slint AppState globals |
+| `src/ui_callback.rs` | `NativeUICallback` — posts UI updates onto the Slint loop via `Weak<MainWindow>` + `slint::invoke_from_event_loop` |
+| `ui/main_enhanced.slint` | Actual Slint UI compiled via `build.rs` |
 
-#### 1. Slint UI Components
-
-```rust
-slint::include_modules!();
-
-pub struct NativeApp {
-    ui: MainWindow,
-    state: Arc<Mutex<AppState>>,
-    network: NetworkManager,
-}
-
-impl NativeApp {
-    pub fn run() -> Result<()> {
-        let ui = MainWindow::new()?;
-        
-        // Bind callbacks
-        ui.on_create_wallet({
-            let state = state.clone();
-            move |params| {
-                Self::create_wallet(state.clone(), params)
-            }
-        });
-        
-        ui.run()?;
-        Ok(())
-    }
-}
-```
+The Send-bridge pattern for Slint's `!Send` `MainWindow` is described
+in CLAUDE.md's "Native desktop node" section — future Slint bumps
+should consult that for the gotcha list.
 
 ---
 
