@@ -803,8 +803,9 @@ RUST_LOG=debug cargo run -- --device-id Dev-001
 # Run tests
 cargo test
 
-# Run with specific features
-cargo run --features offline-mode
+# Run in offline mode (air-gapped; toggled at runtime via a CLI flag,
+# not a Cargo feature — see apps/tui-node/docs/guides/offline-mode.md)
+cargo run -- --device-id Dev-001 --offline
 ```
 
 #### 3. Native Desktop Development

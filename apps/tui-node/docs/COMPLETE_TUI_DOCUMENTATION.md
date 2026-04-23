@@ -621,7 +621,7 @@ device_id = "alice-node"
 keystore_path = "~/.mpc-wallet/keystore"
 
 [network]
-websocket_url = "wss://auto-life.tech"
+websocket_url = "wss://xiongchenyu.dpdns.org"
 reconnect_interval = 5000
 max_reconnect_attempts = 10
 

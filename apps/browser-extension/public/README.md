@@ -228,7 +228,7 @@ safelySendOffscreenMessage({
     payload: {
         type: 'init',
         deviceId: 'mpc-2',
-        wsUrl: 'wss://auto-life.tech'
+        wsUrl: 'wss://xiongchenyu.dpdns.org'
     }
 });
 ```
@@ -482,7 +482,7 @@ Popup Error Display:
 The WebSocket client connects to a signaling server for peer discovery and WebRTC signaling:
 
 ```typescript
-const WEBSOCKET_URL = "wss://auto-life.tech";
+const WEBSOCKET_URL = "wss://xiongchenyu.dpdns.org";
 wsClient = new WebSocketClient(WEBSOCKET_URL);
 ```
 

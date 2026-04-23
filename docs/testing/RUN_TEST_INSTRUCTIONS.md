@@ -61,9 +61,10 @@ RUST_LOG=info ./target/debug/mpc-wallet-tui --device-id mpc-3
 ## Signaling
 
 By default the TUI connects to the production signal server
-(`wss://auto-life.tech`). To run against a local signal server
-instead, pass `--signal-server ws://localhost:9000` and start the
-server in a fourth terminal:
+(`wss://xiongchenyu.dpdns.org`, per the `--signal-server` default
+in `apps/tui-node/src/bin/mpc-wallet-tui.rs`). To run against a
+local signal server instead, pass `--signal-server ws://localhost:9000`
+and start the server in a fourth terminal:
 
 ```bash
 cargo run -p webrtc-signal-server

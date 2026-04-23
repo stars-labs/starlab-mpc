@@ -1,7 +1,7 @@
 # End-to-End Test Implementation Plan
 
 ## Overview
-Comprehensive test suite for MPC Wallet using real WebSocket signal server (wss://auto-life.tech)
+Comprehensive test suite for MPC Wallet using real WebSocket signal server (wss://xiongchenyu.dpdns.org)
 
 ## Priority 1: Core Functionality Tests (Week 1)
 
@@ -289,7 +289,7 @@ jobs:
         run: |
           cargo test --test e2e_${{ matrix.test-suite }}
         env:
-          SIGNAL_SERVER: wss://auto-life.tech
+          SIGNAL_SERVER: wss://xiongchenyu.dpdns.org
           TEST_TIMEOUT: 300
 ```
 
