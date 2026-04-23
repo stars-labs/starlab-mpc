@@ -159,7 +159,8 @@ describe("SessionManager.createDkgWallet", () => {
             curve: "secp256k1",
         });
         expect(appState.sessionInfo).not.toBeNull();
-        expect(appState.sessionInfo!.session_id).toBe(res.sessionId);
+        expect(res.sessionId).toBeDefined();
+        expect(appState.sessionInfo!.session_id).toBe(res.sessionId!);
         expect(appState.dkgState).toBe(DkgState.Initializing);
         // The creator's own session should be in invites (so JoinSession
         // view stays consistent across creator vs. joiner) and marked

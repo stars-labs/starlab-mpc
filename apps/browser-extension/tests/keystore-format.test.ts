@@ -163,14 +163,21 @@ describe('Keystore Format Compatibility', () => {
       }
     ];
 
-    invalidKeystores.forEach((keystore, index) => {
+    // Cast to any inside the loop — the invalidKeystores array has
+    // intentionally heterogeneous shapes (each entry omits a
+    // different field to test validation) so the inferred union
+    // type makes every field possibly-undefined. Tests branch on
+    // index so the relevant field is guaranteed present at each
+    // check site.
+    invalidKeystores.forEach((k, index) => {
+      const keystore = k as any;
       const keystoreJson = JSON.stringify(keystore);
       // Check for missing fields - first keystore should fail
       if (index === 0) {
         expect(keystore.identifier).toBeUndefined();
       } else if (index === 1) {
         // Invalid hex should not be all hex digits
-        expect(keystore.key_package.split('').every(c => '0123456789abcdefABCDEF'.includes(c))).toBe(false);
+        expect(keystore.key_package.split('').every((c: string) => '0123456789abcdefABCDEF'.includes(c))).toBe(false);
       } else if (index === 2) {
         // Invalid JSON should throw when parsed
         expect(() => JSON.parse(keystore.key_package)).toThrow();
