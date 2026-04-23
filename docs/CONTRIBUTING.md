@@ -352,17 +352,18 @@ describe('DKG Process', () => {
 ### Running Tests
 
 ```bash
-# All tests
+# All tests (Rust + TypeScript). Excludes mpc-wallet-native which
+# pulls graphics deps unsuitable for headless runs.
 ./scripts/test-all.sh
 
-# Rust tests
-cargo test --workspace
+# Rust tests only. Same --exclude mpc-wallet-native guard.
+cargo test --workspace --lib --tests --exclude mpc-wallet-native
 
-# TypeScript tests
-bun test
+# TypeScript tests only (run from apps/browser-extension).
+cd apps/browser-extension && bun test
 
-# With coverage
-cargo tarpaulin --workspace --out Html
+# With coverage (requires `cargo install cargo-tarpaulin`).
+cargo tarpaulin --workspace --exclude mpc-wallet-native --out Html
 ```
 
 ## Documentation
