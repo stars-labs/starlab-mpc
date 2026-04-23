@@ -7,47 +7,42 @@ description = "Blockchain support for MPC Wallet"
 license = "MIT"
 
 [dependencies]
-# FROST dependencies
-frost-core = { version = "2.2.0", features = ["serde"] }
-frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
-frost-ed25519 = { version = "2.2.0", features = ["serde"] }
+# Error types via #[derive(thiserror::Error)] on BlockchainError.
+thiserror = "2.0.9"
 
-# Bitcoin dependencies
-bitcoin = "0.32.7"
-
-# Ethereum dependencies  
-web3 = "0.19.0"
-ethers-core = { version = "2.0.14", default-features = false }
-ethers-providers = "2.0.14"
-elliptic-curve = "0.13.8"
-k256 = "0.13.4"
+# Hex + base58 encoding used by ethereum.rs / solana.rs / bitcoin.rs for
+# transaction-hash display + signature serialization.
 hex = "0.4.3"
 
-# Solana dependencies
+# serde_json::Value is the metadata type in ParsedTransaction /
+# SignatureData. No direct `serde` use — `serde` is pulled in
+# transitively via serde_json.
+serde_json = "1.0.143"
+
+# Solana SDK is imported as `use solana_sdk::bs58;` in solana.rs, but
+# the bs58::decode/encode methods actually called (.into_vec,
+# .into_string) come from the bs58 crate directly — solana_sdk's
+# re-export is a leaner subset. Both deps therefore stay paired. No
+# other solana-* crate is touched by this library's source; the
+# ethers/web3/k256/spl-token/etc. layer was for the (disabled)
+# examples at examples/{eth_dkg,solana_dkg}.rs.disabled.
 solana-sdk = "4.0.1"
-solana-client = "3.0.1"
-spl-token = "9.0.0"
 bs58 = "0.5.1"
 
-# Common dependencies
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.143"
-tokio = { version = "1.42.0", features = ["full"] }
-async-trait = "0.1.83"
-thiserror = "2.0.9"
-anyhow = "1.0.99"
-tracing = "0.1.41"
+# Hashing for transaction hashes:
+#   sha2 (Sha256) — bitcoin.rs, solana.rs
+#   sha3 (Keccak256) — ethereum.rs
 sha2 = "0.11.0"
 sha3 = "0.11.0"
-rand = "0.10.1"
 
 [lib]
 name = "mpc_wallet_blockchain"
 path = "src/mod.rs"
 
 [dev-dependencies]
-# Dependencies for examples
-tempfile = "3.8"
+# For the disabled reference examples at
+# examples/{eth_dkg,solana_dkg}.rs.disabled. When/if those are
+# reinstated they also need to refresh the bincode (2.0.x) + rlp /
+# ethers-core / solana-sdk deps that were tangled into the API drift
+# that caused them to be disabled — see examples/docs/MESH_SYNC_IMPROVEMENTS.md.
 clap = { version = "4.5.21", features = ["derive"] }
-# (bincode removed — no example references it and upstream 3.0 has a
-# `compile_error!`. Re-add with a 2.0.x pin if a future example needs it.)
