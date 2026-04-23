@@ -1,4 +1,4 @@
-# FROST MPC TUI Wallet - User Guide
+# MPC Wallet TUI — User Guide
 
 ## Table of Contents
 
@@ -7,14 +7,17 @@
 3. [User Interface Overview](#user-interface-overview)
 4. [Creating Your First Wallet](#creating-your-first-wallet)
 5. [Managing Wallets](#managing-wallets)
-6. [Signing Transactions](#signing-transactions)
+6. [Signing Messages](#signing-messages)
 7. [Offline Operations](#offline-operations)
-8. [Advanced Features](#advanced-features)
-9. [Troubleshooting](#troubleshooting)
+8. [Troubleshooting](#troubleshooting)
 
 ## Introduction
 
-The FROST MPC TUI Wallet provides enterprise-grade multi-party computation through an intuitive terminal interface. Unlike traditional CLI tools that require memorizing commands, our TUI offers a complete menu-driven experience accessible to users of all technical levels.
+The MPC Wallet TUI is a terminal-based client for the FROST
+threshold-signature scheme. It's menu-driven (not REPL / typed
+commands), uses Ratatui via the tui-realm Elm-architecture
+framework, and interoperates with the browser extension + native
+desktop app over the same wire protocol and keystore format.
 
 ### Key Concepts
 
@@ -40,29 +43,36 @@ You'll see the main interface:
 │ MPC Wallet TUI v0.1.0 - Device: alice              │
 ├─────────────────────────────────────────────────────┤
 │ Main Menu:                                          │
-│ > Create New Wallet                                 │
-│   Import Wallet                                     │
-│   Join Session                                      │
-│   Settings                                          │
-│   Help                                              │
-│   Exit                                              │
-├─────────────────────────────────────────────────────┤
-│ Status: Connected to signal server                  │
-│ Network: Online | Wallets: 0 | Sessions: 0         │
+│ > 🆕 Create New Wallet                              │
+│   🔗 Join Session                                   │
+│   💼 Manage Wallets      (only when wallets > 0)   │
+│   ✍️  Sign Transaction   (only when wallets > 0)   │
+│   ⚙️  Settings                                      │
+│   🚪 Exit                                           │
 └─────────────────────────────────────────────────────┘
 ```
 
+The real menu item list (see
+`apps/tui-node/src/elm/components/main_menu.rs:55-114`) omits an
+"Import Wallet" entry that earlier drafts of this guide listed —
+wallet import happens via the Manage Wallets screen after creating
+or discovering at least one wallet. There is also no standalone
+"Help" item (no help modal ships, see Keyboard Shortcuts below).
+
 ### Navigation Basics
 
-The interface is designed for keyboard navigation:
+The interface is keyboard-only:
 
-- **Arrow Keys (↑↓)**: Move between menu items
-- **Arrow Keys (←→)**: Switch between tabs/panels
+- **↑ / ↓**: Move between menu items
 - **Enter**: Select the highlighted option
-- **Escape**: Go back or cancel current operation
-- **Tab**: Move to next interactive element
-- **?**: Show context-sensitive help
-- **q**: Quit (with confirmation)
+- **Esc**: Go back or cancel current operation
+- **Tab**: Move focus within a screen (e.g., between input fields)
+- **q**: Quit
+
+Earlier drafts mentioned `←→` for "tab/panel switching" and `?`
+for context-sensitive help. There are no tab panels in the
+current layout (each screen is a single view), and no `?` help
+overlay is wired up (zero hits in source for a help keybinding).
 
 ## User Interface Overview
 
