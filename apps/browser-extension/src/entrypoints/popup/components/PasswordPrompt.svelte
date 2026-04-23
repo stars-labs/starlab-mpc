@@ -51,11 +51,20 @@
             handleCancel();
         }
     }
+
+    // Svelte action — deliberate autofocus for a modal primary input.
+    // Using the HTML `autofocus` attribute triggers a svelte-check a11y
+    // warning (correct in the general case), but on a modal that has
+    // just appeared the focus landing on the password field is the
+    // expected UX, not a surprise.
+    function autofocus(node: HTMLElement) {
+        node.focus();
+    }
 </script>
 
-<div class="password-overlay" on:keydown={handleKeydown}>
+<div class="password-overlay" role="dialog" aria-modal="true" aria-labelledby="password-prompt-title" tabindex="-1" on:keydown={handleKeydown}>
     <div class="password-modal">
-        <h2>{title}</h2>
+        <h2 id="password-prompt-title">{title}</h2>
         <p class="message">{message}</p>
         
         <div class="input-group">
@@ -67,7 +76,7 @@
                     bind:value={password}
                     placeholder="Enter password"
                     autocomplete={confirmMode ? 'new-password' : 'current-password'}
-                    autofocus
+                    use:autofocus
                     disabled={loading}
                 />
                 <button

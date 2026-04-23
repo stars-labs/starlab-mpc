@@ -84,7 +84,13 @@
 </script>
 
 <div class="account-manager">
-    <div class="current-account" on:click={toggleAccountSelector}>
+    <div
+        class="current-account"
+        role="button"
+        tabindex="0"
+        on:click={toggleAccountSelector}
+        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && toggleAccountSelector()}
+    >
         {#if currentAccount}
             <div class="account-info">
                 <div class="account-name">{currentAccount.name}</div>
@@ -105,7 +111,11 @@
         <div class="account-dropdown">
             <div class="dropdown-header">
                 <h3>My Accounts</h3>
-                <button class="icon-button" on:click={() => showCreateAccount = !showCreateAccount}>
+                <button
+                    class="icon-button"
+                    aria-label="Create new account"
+                    on:click={() => showCreateAccount = !showCreateAccount}
+                >
                     <svg width="16" height="16" viewBox="0 0 16 16">
                         <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" fill="none"/>
                     </svg>
@@ -128,16 +138,20 @@
             
             <div class="accounts-list">
                 {#each accounts as account}
-                    <div 
+                    <div
                         class="account-item {account.id === currentAccount?.id ? 'selected' : ''}"
+                        role="button"
+                        tabindex="0"
                         on:click={() => selectAccount(account.id)}
+                        on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectAccount(account.id)}
                     >
                         <div class="account-item-info">
                             <div class="account-item-name">{account.name}</div>
                             <div class="account-item-address">
                                 {formatAddress(account.address)}
-                                <button 
+                                <button
                                     class="copy-button"
+                                    aria-label="Copy address"
                                     on:click|stopPropagation={() => copyAddress(account.address)}
                                 >
                                     <svg width="12" height="12" viewBox="0 0 12 12">

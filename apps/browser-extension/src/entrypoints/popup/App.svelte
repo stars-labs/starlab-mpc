@@ -1675,7 +1675,7 @@
                             rows="3"
                             placeholder={`Message to sign (EIP-191 wrapped for Ethereum, raw UTF-8 for Solana)`}
                             disabled={signing_}
-                        />
+                        ></textarea>
                         {#if signError}
                             <p class="text-xs text-red-600">{signError}</p>
                         {/if}
