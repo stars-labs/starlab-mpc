@@ -177,7 +177,13 @@ class WalletClientService {
     }
 
     public async getBlockNumber(): Promise<number> {
-        return this.publicClient.getBlockNumber();
+        // viem returns bigint to avoid Number precision loss at high
+        // block numbers; wallet-client callers here expect a plain
+        // number (used for display / comparison, not arithmetic
+        // that would overflow). Cast via Number() — current block
+        // numbers sit at ~22M which is well below Number.MAX_SAFE_INTEGER.
+        const n = await this.publicClient.getBlockNumber();
+        return Number(n);
     }
 
     public async requestAccounts(): Promise<string[]> {

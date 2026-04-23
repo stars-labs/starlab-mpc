@@ -365,7 +365,7 @@ class AccountService {
     private async storePendingSession(session: NewAccountSession): Promise<void> {
         try {
             if (typeof chrome !== 'undefined' && chrome.storage) {
-                const key = `pending_session_${session.sessionId}`;
+                const key = `pending_session_${session.session_id}`;
                 await chrome.storage.local.set({ [key]: session });
             }
         } catch (error) {
