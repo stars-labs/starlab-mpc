@@ -511,7 +511,7 @@ service worker via `chrome.runtime.sendMessage`.
 | `src/elm/app.rs` | `ElmApp<C>` entry struct + main loop |
 | `src/elm/model.rs` | `Model` — the single source of UI state |
 | `src/elm/update.rs` | Update fn mapping `Message` → state transition + `Command` emissions |
-| `src/elm/command.rs` | `Command<C>` enum — side effects to execute |
+| `src/elm/command.rs` | `Command` enum — side effects to execute (non-generic; the concrete ciphersuite is threaded through `AppState<C>` which `Command::execute` takes by reference) |
 | `src/elm/components/` | Per-screen tui-realm `Component` impls |
 | `src/elm/provider.rs` | `UIProvider` trait (abstract UI backend) |
 | `src/core/*` | `*Manager` types — business logic reused by native-node |

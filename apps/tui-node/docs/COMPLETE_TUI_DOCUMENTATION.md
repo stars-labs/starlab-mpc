@@ -58,7 +58,7 @@ src/elm/
 ├── model.rs              # Model (pure UI state)
 ├── message.rs            # Message enum — input events
 ├── update.rs             # Update fn — Message → state transition + Commands
-├── command.rs            # Command<C> enum — side-effect tasks
+├── command.rs            # Command enum — side-effect tasks (non-generic; ciphersuite flows through AppState<C>)
 ├── mod.rs
 ├── provider.rs           # UIProvider trait
 ├── ws_runtime.rs         # WebSocket client runtime
@@ -261,7 +261,7 @@ wiring up.
 
 ```
 User Input → tuirealm Event → Component::on → Message → update() →
-             (Model delta) + Vec<Command<C>> → Command::execute →
+             (Model delta) + Option<Command> → Command::execute →
              (async work emitting Messages) → update() → ...
              → Component::view → Ratatui draw
 ```
@@ -491,8 +491,10 @@ supported deployment paths (systemd + launch scripts).
 The code is the authoritative reference — the enum signatures
 below are sketches. For the complete variant lists, read the
 source files directly (the real `Message` enum has ~80+ variants,
-the real `Command<C>` ~60+; listing them all here would duplicate
-the source and drift immediately).
+the real `Command` ~60+; listing them all here would duplicate
+the source and drift immediately). The real `update` signature
+is `pub fn update(model: &mut Model, msg: Message) -> Option<Command>`
+(single optional command, not Vec) per `src/elm/update.rs:33`.
 
 ### Message Types
 
@@ -549,8 +551,8 @@ pub enum Command<C: frost_core::Ciphersuite> {
     SendWs(ClientMsg),
 
     // DKG / signing orchestration
-    TriggerDkgRound1,
-    TriggerDkgRound2,
+    StartDKG { config: WalletConfig },   // session announce
+    StartFrostProtocol,                  // fires once mesh is up
     StartSigning { wallet_id: String, message: String },
     // …etc.
 
@@ -559,7 +561,11 @@ pub enum Command<C: frost_core::Ciphersuite> {
 ```
 
 Note the `<C>` type parameter: every `Command` instance is
-ciphersuite-generic so the same Elm loop drives both the ed25519
+NON-generic. Earlier drafts of this section claimed `Command<C>`
+with a ciphersuite generic; the real enum has no type parameter
+(`pub enum Command` at `src/elm/command.rs:15`). The ciphersuite
+is threaded through `AppState<C>` which `Command::execute` takes
+by reference. This means the same Elm loop drives both the ed25519
 and secp256k1 code paths via monomorphization.
 
 ### UIProvider trait

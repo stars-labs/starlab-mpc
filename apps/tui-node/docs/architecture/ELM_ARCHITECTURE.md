@@ -77,142 +77,123 @@ pub struct UIState {
 
 ### 2. Messages (`src/elm/message.rs`)
 
-Messages represent all possible events in the application:
+Messages represent all possible events in the application. The
+real `Message` enum has ~80+ variants — listing them exhaustively
+here would duplicate source and drift. The sketch below shows the
+shape + grouping; read `src/elm/message.rs` for the canonical list.
 
 ```rust
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Navigation messages
-    Navigate(Screen),
-    NavigateBack,
-    NavigateHome,
-    
-    // Wallet management
-    CreateWallet { config: WalletConfig },
-    SelectWallet { id: WalletId },
-    ListWallets,
-    DeleteWallet { id: WalletId },
-    ExportWallet { id: WalletId },
-    ImportWallet { data: Vec<u8> },
-    
-    // DKG operations
-    InitiateDKG { params: DKGParams },
-    JoinSession { session_id: SessionId },
-    UpdateDKGProgress { round: Round, progress: f32 },
-    DKGComplete { result: DKGResult },
-    
-    // Signing operations
-    InitiateSigning { request: SigningRequest },
-    ApproveSignature { request_id: RequestId },
-    RejectSignature { request_id: RequestId },
-    SigningComplete { signature: Signature },
-    
-    // Network events
-    WebSocketConnected,
-    WebSocketDisconnected,
-    PeerDiscovered { peer: PeerId },
-    PeerDisconnected { peer: PeerId },
-    NetworkMessage { from: PeerId, data: Vec<u8> },
-    
-    // UI events
-    KeyPressed(KeyEvent),
-    FocusChanged { component: ComponentId },
-    InputChanged { value: String },
-    ScrollUp,
-    ScrollDown,
-    
-    // Modal management
-    ShowModal(Modal),
-    CloseModal,
-    ConfirmModal,
-    
-    // Notifications
+    // Navigation
+    PushScreen(Screen),     // NOT `Navigate(Screen)` — earlier drafts
+    PopScreen,              //  used that name; not a real variant
+    GoHome,
+    Initialize,
+
+    // User input (routed from Component::on handlers)
+    SelectItem { index: usize },
+    SelectMode(Mode),
+    SelectCurve(CurveType),
+    ThresholdConfigConfirm,
+    SignTypeChar(char),
+    SignBackspace,
+    SignSubmit,
+    PasswordTypeChar(char),
+    // …many more, one per per-screen component
+
+    // Async-result / network events (emitted by Command::execute)
+    WsConnected,
+    WsDisconnected { reason: String },
+    SessionAvailable { info: SessionInfo },
+    DkgRound1Received { from: String, package: Vec<u8> },
+    DkgKeyGenerated { group_key_hex: String, address: String },
+    SigningComplete { signature: Vec<u8> },
+
+    // Notifications + modals
     ShowNotification { text: String, kind: NotificationKind },
-    ClearNotification { id: NotificationId },
-    
-    // System
-    Quit,
-    Error { message: String },
-    Success { message: String },
+    // …etc.
 }
 ```
+
+Raw `KeyPressed(KeyEvent)` does not appear as a top-level variant
+— tui-realm's own `Component::on(Event<UserEvent>)` translates
+keystrokes into the specific `Message::<Action>` variants per
+screen (see KEYBOARD_HANDLING_GUIDE.md). There is no
+`Message::Quit` wired to `Ctrl+Q`; quit is a system interrupt.
 
 ### 3. Update Function (`src/elm/update.rs`)
 
 The update function is a pure function that takes the current model and a message, returning a new model and optional commands:
 
 ```rust
+// Real signature: src/elm/update.rs:33
 pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
     match msg {
-        Message::Navigate(screen) => {
-            // Push current screen to navigation stack
-            model.navigation_stack.push(model.current_screen.clone());
-            model.current_screen = screen;
-            
-            // Return command to load screen-specific data
+        Message::PushScreen(screen) => {
+            model.push_screen(screen.clone());
             match screen {
-                Screen::WalletList => Some(Command::LoadWallets),
-                Screen::SessionList => Some(Command::LoadSessions),
+                Screen::ManageWallets => Some(Command::LoadWallets),
                 _ => None,
             }
         }
-        
-        Message::NavigateBack => {
-            // Pop from navigation stack
-            if let Some(prev_screen) = model.navigation_stack.pop() {
-                model.current_screen = prev_screen;
-            } else {
-                // If stack is empty, go to main menu
-                model.current_screen = Screen::MainMenu;
-            }
+
+        Message::PopScreen => {
+            model.pop_screen();
             None
         }
-        
-        Message::CreateWallet { config } => {
-            // Update model to show progress
-            model.ui_state.modal = Some(Modal::Progress {
-                title: "Creating Wallet".to_string(),
-                message: "Initializing DKG protocol...".to_string(),
-                progress: 0.0,
-            });
-            
-            // Return command to start DKG
-            Some(Command::StartDKG { config })
+
+        Message::ThresholdConfigConfirm => {
+            // User pressed Enter on the threshold-config screen —
+            // kick off wallet creation. The real handler builds a
+            // WalletConfig from model.wallet_state and emits
+            // Command::StartDKG, which in turn announces the
+            // session on the signal server.
+            Some(Command::StartDKG { config: /* … */ })
         }
-        
-        Message::KeyPressed(key) => {
-            // Global key handling
-            match key.code {
-                KeyCode::Esc => {
-                    // Always go back, never exit
-                    Some(Command::SendMessage(Message::NavigateBack))
-                }
-                KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CTRL) => {
-                    // Ctrl+Q to quit
-                    Some(Command::SendMessage(Message::Quit))
-                }
-                _ => {
-                    // Delegate to focused component
-                    None
-                }
-            }
+
+        Message::MeshReady => {
+            // WebRTC mesh finished forming; participants are all
+            // connected. Fire StartFrostProtocol to run the FROST
+            // part1/part2/part3 ceremony over the mesh.
+            Some(Command::StartFrostProtocol)
         }
-        
-        Message::WebSocketConnected => {
+
+        Message::WsConnected => {
             model.network_state.connected = true;
-            model.network_state.connection_status = ConnectionStatus::Connected;
-            
-            // Show success notification
-            Some(Command::SendMessage(Message::ShowNotification {
-                text: "Connected to network".to_string(),
-                kind: NotificationKind::Success,
-            }))
+            None
         }
-        
-        // ... handle other messages
+
+        // …~80 more match arms
+        _ => None,
     }
 }
 ```
+
+A few points that earlier drafts of this section got wrong:
+
+- `Message::Navigate(Screen)` / `Message::NavigateBack` — not real
+  variant names. Real variants are `PushScreen(Screen)` / `PopScreen`
+  / `GoHome`, and `model.push_screen` / `model.pop_screen` /
+  `model.go_home` are the helper methods on `Model` that mutate
+  the navigation stack (defined at `src/elm/model.rs:57-76`).
+- `Message::KeyPressed(KeyEvent)` with a global `Ctrl+Q → Quit`
+  / `Esc → NavigateBack` match — none of that is in the real
+  update function. Tui-realm dispatches keys to the active
+  component's `on(event)` handler, which emits the appropriate
+  typed Message variant. There is no Ctrl+Q keybinding
+  (consistent with d09bddc's KEYBOARD_NAVIGATION_GUIDE rewrite).
+- `Command::SendMessage(Message::…)` — not a real variant.
+  Commands produce side effects (I/O, WebSocket send, keystore
+  write, DKG round trigger) that eventually emit Messages back
+  through a separate channel, rather than carrying a Message as
+  a payload.
+- `Command::StartDKG` is real, but the follow-on that actually
+  runs the FROST rounds is `Command::StartFrostProtocol` (not
+  `TriggerDkgRound1` as I claimed in an earlier fix to the
+  tech doc's API Reference — retracting that here; the real name
+  is `StartFrostProtocol`, fired once the WebRTC mesh is
+  established).
 
 ### 4. Commands (`src/elm/command.rs`)
 
