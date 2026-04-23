@@ -370,10 +370,20 @@ impl<C: Ciphersuite> OptimizedStateManager<C> {
 
 ## 11. Benchmarking Script
 
+> **Note**: The `benches/` directory and the `criterion` dev-dep were
+> removed (both benches failed to compile against the current crate
+> API; see commit `afb2c49`). To re-introduce benchmarks:
+>
+> 1. Add `criterion = { version = "0.8", features = ["async_tokio", "html_reports"] }` to `[dev-dependencies]` in `apps/tui-node/Cargo.toml`.
+> 2. Add `[[bench]] name = "performance" harness = false` to the same file.
+> 3. Create `apps/tui-node/benches/performance.rs` with the shape below.
+>
+> Note the `tui_node` crate name (not `mpc_wallet_tui` — that was the old name).
+
 ```rust
-// Save as benches/performance.rs
+// Save as apps/tui-node/benches/performance.rs
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use mpc_wallet_tui::elm::app::ElmApp;
+use tui_node::elm::app::ElmApp;
 
 fn benchmark_message_processing(c: &mut Criterion) {
     c.bench_function("process_message", |b| {
