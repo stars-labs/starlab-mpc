@@ -1,5 +1,3 @@
-// use crate::network::websocket; // Unused
-// use crate::protocal::signal::*; // Unused
 use crate::protocal::signal::{WebRTCMessage, WebRTCSignal};
 use crate::utils::appstate_compat::AppState;
 use crate::utils::state::{DkgState, InternalCommand};

@@ -1,14 +1,12 @@
-//! Chrome extension compatibility module
+//! Chrome extension compatibility module.
 //!
-//! This module provides import/export functionality between the CLI keystore
-//! and the Chrome extension keystore formats, enabling seamless interoperability.
+//! Import/export between the TUI's on-disk keystore format and the Chrome
+//! extension's keystore JSON, enabling seamless interoperability.
 
 use super::{KeystoreError, Result, DeviceInfo};
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose};
 use chrono::Utc;
-// use sha2::Sha256;
-// use pbkdf2::pbkdf2_hmac;
 
 /// Key share data format compatible with Chrome extension
 #[derive(Debug, Clone, Serialize, Deserialize)]

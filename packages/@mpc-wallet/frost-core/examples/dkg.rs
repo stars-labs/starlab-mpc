@@ -10,12 +10,6 @@ use frost_ed25519::rand_core::{CryptoRng, OsRng, RngCore};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-// Remove direct rand_core import and instead use traits from frost_core
-// This ensures we use the same version of rand_core that frost is expecting
-// Add serde imports
-// Remove incorrect SerdeCiphersuite import
-// use frost_core::traits::SerdeCiphersuite; // This was causing the error
-
 #[derive(Clone, Debug, ValueEnum)]
 enum Curve {
     Secp256k1,
