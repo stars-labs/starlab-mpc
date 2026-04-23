@@ -488,6 +488,62 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
             }
             break;
 
+        // Ext-2d-offscreen (bootstrap): the `sessionReadyForSigning`
+        // event fires when a signing session has hit its threshold
+        // of joined participants (see webSocketManager.ts
+        // maybeTriggerCeremony). Distinct from `sessionAllAccepted`
+        // (the DKG trigger) because they require different offscreen
+        // code paths: DKG starts key generation, signing starts a
+        // signing ceremony over an already-loaded keystore. Conflating
+        // them would try to regenerate a key share on top of an
+        // existing wallet and corrupt it.
+        //
+        // This handler is the minimal bootstrap: set blockchain +
+        // updateSessionInfo so the WebRTCManager has the signing
+        // session in scope for future WebRTC message routing, log
+        // the event so devtools confirms end-to-end trigger wiring.
+        // Actual FROST signing_commit initiation is a follow-up commit
+        // (Ext-2d-offscreen-round1).
+        case "sessionReadyForSigning":
+            console.log(
+                "🖋️  Offscreen: Received 'sessionReadyForSigning' — threshold signers joined",
+                payload,
+            );
+            if (webRTCManager && payload.sessionInfo) {
+                const blockchain = payload.blockchain || "ethereum";
+                console.log(
+                    `🔗 Offscreen: Signing ceremony blockchain: ${blockchain}, session: ${payload.sessionInfo.session_id}, participants: [${payload.sessionInfo.participants.join(", ")}], threshold: ${payload.sessionInfo.threshold}`,
+                );
+
+                webRTCManager.setBlockchain(blockchain);
+                webRTCManager.updateSessionInfo(payload.sessionInfo);
+
+                // TODO(Ext-2d-offscreen-round1): once WebRTC mesh
+                // is ready, call frostDkg.signing_commit() on the
+                // already-loaded keystore (see globalThis
+                // __importedDkgInstance at line ~354) and broadcast
+                // the commitment to co-signers via WebRTC data
+                // channels. Gate this on same mesh-ready condition
+                // that checkAndTriggerDkg uses for DKG round 1.
+                console.log(
+                    "✅ Offscreen: signing session registered with WebRTCManager. Round 1 initiation is pending follow-up commit.",
+                );
+                sendResponse({
+                    success: true,
+                    message:
+                        "Signing session registered. Round 1 initiation pending.",
+                });
+            } else {
+                console.warn(
+                    "❌ Offscreen: Cannot handle sessionReadyForSigning — WebRTCManager not ready or missing sessionInfo",
+                );
+                sendResponse({
+                    success: false,
+                    error: "WebRTCManager not ready or missing sessionInfo",
+                });
+            }
+            break;
+
         case "acceptSession":
             console.log("Offscreen: Received 'acceptSession' command", payload);
             // This message type should be handled by background script only
