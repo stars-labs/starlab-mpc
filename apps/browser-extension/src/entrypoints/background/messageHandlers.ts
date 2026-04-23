@@ -1203,28 +1203,25 @@ export class PopupMessageHandler {
             }
 
             if (response && response.success && response.sessionInfo) {
-                // Update state with imported session info
-                // Update DKG state directly
-                this.stateManager.appState.dkgState = DkgState.KeystoreImported;
-                
-                // Update session info
-                this.stateManager.appState.sessionInfo = {
-                    session_id: response.sessionInfo.session_id,
-                    proposer_id: response.sessionInfo.device_id,
-                    participants: [response.sessionInfo.device_id], // Single participant for imported keystore
-                    accepted_devices: [response.sessionInfo.device_id],
-                    threshold: response.sessionInfo.threshold,
-                    total: response.sessionInfo.total_participants,
-                    is_proposer: true,
-                    timestamp: Date.now()
-                };
-                
-                // Store address and group public key
-                this.stateManager.appState.dkgAddress = response.address;
-                if (response.group_public_key) {
-                    // Store group public key if available
-                    this.stateManager.appState.groupPublicKey = response.group_public_key;
-                }
+                // Update state via the public mutator rather than
+                // poking the private appState directly. Keeps listener
+                // dispatch + persistence consistent with how the rest
+                // of the app updates state.
+                this.stateManager.updateState({
+                    dkgState: DkgState.KeystoreImported,
+                    sessionInfo: {
+                        session_id: response.sessionInfo.session_id,
+                        proposer_id: response.sessionInfo.device_id,
+                        participants: [response.sessionInfo.device_id],
+                        accepted_devices: [response.sessionInfo.device_id],
+                        threshold: response.sessionInfo.threshold,
+                        total: response.sessionInfo.total_participants,
+                    } as any,
+                    dkgAddress: response.address,
+                    ...(response.group_public_key
+                        ? { dkgGroupPublicKey: response.group_public_key }
+                        : {}),
+                });
                 
                 // Now we need to export the keystore from WASM and save it to KeystoreService
                 console.log("[PopupMessageHandler] Exporting imported keystore for persistence");
@@ -1311,18 +1308,24 @@ export class PopupMessageHandler {
                     state: DkgState.KeystoreImported
                 } as any);
                 
+                const currentState = this.stateManager.getState();
                 this.stateManager.broadcastToPopupPorts({
                     type: "sessionUpdate",
-                    sessionInfo: this.stateManager.appState.sessionInfo,
+                    sessionInfo: currentState.sessionInfo,
                     invites: []
                 } as any);
-                
-                // Store address based on chain
-                if (message.chain === "ethereum") {
-                    this.stateManager.appState.ethereumAddress = response.addresses?.ethereum || response.address;
-                } else if (message.chain === "solana") {
-                    this.stateManager.appState.solanaAddress = response.addresses?.solana || response.address;
-                }
+
+                // Chain-specific address fields aren't on AppState
+                // directly — dkgAddress (the "current chain" address)
+                // is the canonical place. Stash the chain-specific
+                // variant in dkgLastResult for callers that need both.
+                const addressForChain =
+                    message.chain === "ethereum"
+                        ? response.addresses?.ethereum || response.address
+                        : response.addresses?.solana || response.address;
+                this.stateManager.updateState({
+                    dkgAddress: addressForChain,
+                });
                 
                 sendResponse({ success: true, address: response.address });
             } else {
