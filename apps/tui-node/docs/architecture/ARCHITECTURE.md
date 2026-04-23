@@ -543,10 +543,13 @@ pub trait ExternalAPI {
 }
 ```
 
-Note the plain `String` wallet IDs — no `WalletId` newtype exists
-in source. Same for `SessionId`, `PeerId`, etc. (earlier drafts of
-this doc used those invented type names; they don't reflect the
-real string-typed IDs in `src/elm/model.rs`).
+Note the plain `String` wallet IDs — no `WalletId` or `SessionId`
+newtype exists in source; both are plain strings in
+`src/elm/model.rs`. Exception: `PeerId` IS a real type, but it's
+a `u16` alias (`pub type PeerId = u16;` in
+`src/webrtc/mesh_manager.rs:9`) used inside the mesh layer for
+compact peer addressing — distinct from the String `device_id`
+the Elm layer uses for cross-context identity.
 
 ## Development Guidelines
 
