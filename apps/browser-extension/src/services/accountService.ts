@@ -256,14 +256,14 @@ class AccountService {
             const sessionId = `account_${blockchain}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
             
             const newSession: NewAccountSession = {
-                sessionId,
+                session_id: sessionId,
                 name: name || `Account ${existingAccountsCount + 1}`,
                 blockchain,
                 threshold: 2, // Default threshold
-                totalParticipants: 3, // Default participants
+                total_participants: 3, // Default participants
                 participants: [], // Will be filled when session is proposed
                 status: 'proposing',
-                createdAt: Date.now()
+                created_at: Date.now(),
             };
             
             // Store the pending session
@@ -308,7 +308,7 @@ class AccountService {
                         sessionId,
                         source: 'dkg',
                         threshold: pendingSession.threshold,
-                        totalParticipants: pendingSession.totalParticipants
+                        totalParticipants: pendingSession.total_participants,
                     }
                 };
             } else {
