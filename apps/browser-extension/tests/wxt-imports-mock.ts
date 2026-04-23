@@ -58,7 +58,28 @@ export const browser = (global as any).chrome || {
   }
 };
 
+/**
+ * WXT's `defineBackground` wraps the service worker setup function.
+ * At module load (not call) time, `background/index.ts` calls
+ * `defineBackground(async () => {...})` as its default export. In
+ * tests, any transitive import chain that touches background/index.ts
+ * needs this symbol — otherwise bun's module evaluator fails with
+ * "Export named 'defineBackground' not found in module '#imports'".
+ *
+ * Mock implementation: identity-ish — return the setup function
+ * back so `export default defineBackground(...)` becomes
+ * `export default asyncSetupFn`. Safe because tests don't actually
+ * run the background; they import individual classes from it.
+ */
+export const defineBackground = jest.fn(
+  (main: (() => void | Promise<void>) | { main: () => void | Promise<void> }) => {
+    if (typeof main === 'function') return main;
+    return main.main;
+  },
+);
+
 export default {
   browser,
-  storage
+  storage,
+  defineBackground,
 };
