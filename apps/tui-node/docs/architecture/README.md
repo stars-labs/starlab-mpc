@@ -36,8 +36,18 @@ not present here.
    Components in `src/elm/components/`
 2. **Business Logic** (`src/core/`) — `*Manager` types shared
    with native-node
-3. **Network Layer** (`src/webrtc/`, `src/network/`,
-   `src/elm/ws_runtime.rs`) — WebRTC mesh + WS signal-server client
+3. **Network Layer** — WebRTC mesh + WS signal-server client:
+   - `src/network/webrtc.rs` — one of the two real production
+     RTCPeerConnection construction sites
+   - `src/elm/webrtc_signaling.rs` — the other real runtime driver
+     (offer/answer/ICE exchange through the Elm loop)
+   - `src/elm/ws_runtime.rs` — WebSocket client for the signal
+     server
+   - `src/webrtc/` — test-harness library (`WebRTCMeshManager` +
+     `ConnectionMonitor` + `RejoinCoordinator` + `MeshSimulator`)
+     consumed only by `examples/webrtc_mesh_e2e_test.rs`; NOT
+     wired into the production Elm runtime despite its suggestive
+     module name
 4. **Storage Layer** (`src/keystore/`) — encrypted keystore
 5. **Protocol Layer** (`src/protocal/`) — wire types + DKG/signing
    state machines (note: `protocal` is an intentional misspelling)
