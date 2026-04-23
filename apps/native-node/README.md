@@ -24,7 +24,7 @@ automatically.
 | Session create/join     | ✅       | ✅          | ✅          |
 | WebRTC mesh             | ✅       | ✅          | ✅ (core reused) |
 | DKG ceremony            | ✅       | ✅          | ✅ (core reused) |
-| Wallet import/export    | ✅       | ✅          | ⚠ stub — calls back `show_message("coming soon")` |
+| Wallet import/export    | ✅       | ✅          | ✅ wired to `WalletManager` via `rfd` file dialog (password prompt still TODO) |
 | Threshold signing       | ✅       | ✅          | ❌ no signing flow wired |
 | SD-card air-gap mode    | ✅       | ❌          | ⚠ core wired, no file-picker UI |
 | Keystore persistence    | ✅       | ✅          | ⚠ inherits from TUI's `Keystore` but no UI to unlock/lock |
@@ -38,22 +38,28 @@ UI surface isn't hooked up".
 
 ## Next steps (in recommended order)
 
-1. **Wire `import_wallet` / `export_wallet` to `WalletManager`**.
-   The current `core_adapter.rs` stubs them with
-   `show_message("coming soon")`. Needs a file-dialog integration
-   (`rfd` crate) + a password-prompt modal in the Slint UI.
+1. **Add a password-prompt modal** in the Slint UI. `import_wallet`
+   / `export_wallet` currently pass an empty password to
+   `WalletManager`, so encrypted keystores fail silently. The
+   missing piece is UI, not Rust logic.
 
 2. **Add a `SigningManager` to `tui-node::core`** mirroring the
-   browser extension's `webrtc.ts` signing ceremony. Expose it via
-   a new `SigningInfo` type in `tui-node::core` and new
-   `update_signing_*` methods on the `UICallback` trait.
+   browser extension's `webrtc.ts` signing ceremony. `tui-node::
+   protocal::signing` already has the FROST round-1 / round-2 /
+   aggregate logic, but it's wired through the elm `Message` loop
+   on `AppState<C>`; the native-node needs a thinner facade that
+   operates on `CoreState` + emits `UICallback` events.
 
 3. **Extend `main_enhanced.slint`** with a signing modal
    (transaction preview, approve/reject) matching the extension's
-   popup and the TUI's `SignTransactionComponent`.
+   popup and the TUI's `SignTransactionComponent`. Add callbacks
+   `sign_transaction(hex)`, `approve_signing()`, `reject_signing()`
+   plus `update_signing_progress` / `update_signing_complete`
+   methods on `UICallback`.
 
-4. **Delete `CoreAdapter::initialize_demo`** — it seeds fake
-   wallets/sessions at startup and will mislead users.
+4. **Wire SD-card export/import UI** — the core `OfflineManager`
+   already handles the serialization; native-node just needs
+   `rfd::FileDialog` hooks for the round-1 / round-2 artifacts.
 
 ## Known Slint 1.x gotchas (from the rehabilitation pass)
 

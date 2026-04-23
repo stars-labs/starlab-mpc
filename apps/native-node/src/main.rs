@@ -162,15 +162,17 @@ async fn main() -> Result<()> {
         });
     }
     
-    // Initialize with demo data
-    {
-        let adapter = adapter.clone();
-        tokio::spawn(async move {
-            adapter.initialize_demo().await;
-        });
-    }
-    
-    // Run the UI
+    // Run the UI.
+    //
+    // The previous `adapter.initialize_demo()` call that lived here
+    // seeded two fake wallets ("Demo Wallet 1", "Demo Wallet 2") and
+    // two fake sessions every time the app started. That made the
+    // UI look populated during early development but hid the real
+    // empty state from users — if the app appears to have wallets,
+    // a new user doesn't realise they still need to create one. The
+    // real keystore (imported via the file dialog) is the only
+    // source of wallets; the session list is populated when the WS
+    // connects and the signal server broadcasts available sessions.
     window.run()?;
     
     Ok(())
