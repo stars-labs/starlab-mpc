@@ -190,11 +190,13 @@ pub struct Model {
 }
 ```
 
-**Features**:
-- Maximum depth: 10 screens (configurable)
-- Breadcrumb display
-- Quick jump to any level
-- Auto-cleanup of invalid paths
+**Behaviour**:
+- Unbounded stack depth (no configurable max).
+- `Model::push_screen` saves the current screen before transitioning;
+  `Model::pop_screen` restores it on Esc; `Model::go_home` clears
+  the stack and returns to the main menu.
+- No breadcrumb rendering, no jump-to-level UI — earlier drafts
+  promised these but they aren't implemented.
 
 ---
 
@@ -427,57 +429,43 @@ strip target/release/mpc-wallet-tui
 
 #### Platform-Specific
 
-**Linux**:
-```bash
-# Debian/Ubuntu package
-cargo deb
-# RPM package
-cargo rpm build
-```
+**All platforms**: `cargo build --release -p tui-node
+--bin mpc-wallet-tui` produces a single static binary at
+`target/release/mpc-wallet-tui`. Distribute the binary directly —
+there is no installer scaffolding in the repo.
 
-**macOS**:
-```bash
-# Universal binary
-cargo build --release --target aarch64-apple-darwin
-cargo build --release --target x86_64-apple-darwin
-lipo -create target/*/release/mpc-wallet-tui -output mpc-wallet-tui
-```
-
-**Windows**:
-```bash
-# MSI installer
-cargo wix
-```
+Earlier drafts of this section suggested `cargo deb` / `cargo rpm
+build` (Linux) / `lipo` universal binaries (macOS) / `cargo wix`
+(Windows MSI). Verified: no `[package.metadata.deb]` /
+`[package.metadata.wix]` entries exist in either `Cargo.toml`.
+Those commands would fail without first configuring the
+respective tooling — out of scope for this repo today. Same
+absent-packaging finding as the workspace-level deployment
+guide (06334be) and tech-doc Deployment section (f591806).
 
 ### System Requirements
 
-#### Minimum
-- CPU: 1 GHz single-core
-- RAM: 256 MB
-- Storage: 50 MB
-- Terminal: VT100 compatible
-
-#### Recommended
-- CPU: 2 GHz dual-core
-- RAM: 1 GB
-- Storage: 200 MB
-- Terminal: 256-color support
+Not measured. Earlier drafts of this section quoted specific
+specs ("1 GHz single-core, 256 MB RAM, 50 MB storage" minimum;
+"2 GHz dual-core, 1 GB RAM, 200 MB storage" recommended). Those
+numbers had no source. The binary is a single-threaded
+terminal app with an async runtime underneath — modest in
+practice, but the repo doesn't benchmark a specific floor.
 
 ### Environment Variables
 
+Real env vars the TUI consults (grepped from source):
+
 ```bash
-# Logging
-export RUST_LOG=info
-
-# Configuration
-export MPC_WALLET_CONFIG=/path/to/config.toml
-
-# Keystore location
-export MPC_KEYSTORE_PATH=/secure/location
-
-# Network settings
-export MPC_WEBSOCKET_URL=wss://your-server.com
+export HOME=<your home>           # used to derive ~/.frost_keystore
+export RUST_LOG=info              # standard tracing-subscriber filter
+export PERF_MONITORING=1          # opt-in perf_monitor instrumentation
 ```
+
+Earlier drafts listed `MPC_WALLET_CONFIG`, `MPC_KEYSTORE_PATH`,
+`MPC_WEBSOCKET_URL` — none of those are read by the code. The
+signal-server URL is a CLI flag (`--signal-server`); the keystore
+path is fixed at `~/.frost_keystore`; no config file is loaded.
 
 ### Docker Deployment
 
@@ -500,103 +488,126 @@ supported deployment paths (systemd + launch scripts).
 
 ## 10. API Reference
 
+The code is the authoritative reference — the enum signatures
+below are sketches. For the complete variant lists, read the
+source files directly (the real `Message` enum has ~80+ variants,
+the real `Command<C>` ~60+; listing them all here would duplicate
+the source and drift immediately).
+
 ### Message Types
 
 ```rust
+// Real definition: apps/tui-node/src/elm/message.rs
 pub enum Message {
+    // User input events (routed from Component::on)
+    SelectItem { index: usize },
+    SelectMode(Mode),
+    SelectCurve(CurveType),
+    ThresholdConfigConfirm,
+    SignTypeChar(char),
+    SignBackspace,
+    SignSubmit,
+    PasswordTypeChar(char),
+    // …etc.
+
+    // Async-result / network events (emitted by Command::execute)
+    WsConnected,
+    WsDisconnected { reason: String },
+    SessionAvailable { info: SessionInfo },
+    DkgRound1Received { from: String, package: Vec<u8> },
+    DkgComplete,
+    SigningComplete { signature: Vec<u8> },
+    // …etc.
+
     // Navigation
-    Navigate(Screen),
-    NavigateBack,
-    NavigateHome,
-    
-    // Wallet Operations
-    CreateWallet(WalletConfig),
-    DeleteWallet { wallet_id: String },
-    ImportWallet { path: PathBuf },
-    ExportWallet { wallet_id: String, path: PathBuf },
-    
-    // DKG Operations
-    StartDKG { config: DKGConfig },
-    UpdateDKGProgress { round: DKGRound, progress: f32 },
-    DKGComplete { result: DKGResult },
-    
-    // Signing Operations
-    StartSigning { request: SigningRequest },
-    UpdateSigningProgress { progress: f32 },
-    SigningComplete { signature: Signature },
-    
-    // Network Events
-    WebSocketConnected,
-    WebSocketDisconnected,
-    WebRTCPeerConnected { peer_id: String },
-    WebRTCPeerDisconnected { peer_id: String },
-    
-    // UI Events
-    KeyPressed(KeyEvent),
-    ScrollUp,
-    ScrollDown,
-    Refresh,
-    Quit,
+    PushScreen(Screen),
+    PopScreen,
+    GoHome,
+    Initialize,
 }
 ```
+
+Earlier drafts listed invented variants like `Navigate(Screen)`,
+`CreateWallet(WalletConfig)`, `UpdateDKGProgress { round, progress
+}`. The real variant names differ — see the source for the
+canonical set.
 
 ### Command Types
 
 ```rust
-pub enum Command {
-    // Data Operations
-    LoadWallets,
-    LoadSessions,
-    SaveSettings { settings: Settings },
-    
-    // Network Operations
-    ConnectWebSocket { url: String },
-    SendMessage { to: String, data: Vec<u8> },
-    BroadcastMessage { data: Vec<u8> },
-    
-    // Async Operations
-    ExecuteDKG { config: DKGConfig },
-    ExecuteSigning { request: SigningRequest },
-    
-    // System Operations
-    ScheduleTask { delay: Duration, task: Task },
-    None,
+// Real definition: apps/tui-node/src/elm/command.rs
+pub enum Command<C: frost_core::Ciphersuite> {
+    // Keystore
+    InitializeKeystore { path: String, device_id: String },
+    FinalizeWalletFromDkg { password: String, keystore_path: String,
+                            wallet_name: String },
+    UnlockWallet { wallet_id: String, keystore_path: String,
+                   password: String, … },
+
+    // Signal-server WebSocket
+    ConnectWebSocket,
+    SendWs(ClientMsg),
+
+    // DKG / signing orchestration
+    TriggerDkgRound1,
+    TriggerDkgRound2,
+    StartSigning { wallet_id: String, message: String },
+    // …etc.
+
+    NoOp,
 }
 ```
 
-### Component Interface
+Note the `<C>` type parameter: every `Command` instance is
+ciphersuite-generic so the same Elm loop drives both the ed25519
+and secp256k1 code paths via monomorphization.
 
-```rust
-pub trait UIProvider {
-    fn update_screen(&mut self, screen: Screen);
-    fn show_message(&mut self, level: MessageLevel, text: &str);
-    fn update_progress(&mut self, operation: &str, progress: f32);
-    fn get_user_input(&mut self, prompt: &str) -> Option<String>;
-    fn confirm_action(&mut self, message: &str) -> bool;
-}
-```
+### UIProvider trait
+
+The real `UIProvider` trait is at
+`apps/tui-node/src/elm/provider.rs:24` with ~20 async methods for
+pushing state into the UI layer. Earlier drafts showed a
+5-method sketch (`update_screen` / `show_message` /
+`update_progress` / `get_user_input` / `confirm_action`) — none of
+those method names match the real trait. See the authoritative
+definition in source; the extension-doc architecture summary
+(9990b34) also lists the real method set.
 
 ### Keystore API
 
+Real shape from `src/keystore/storage.rs`:
+
 ```rust
 impl Keystore {
-    pub fn new(path: &str, device_id: &str) -> Result<Self>;
-    pub fn create_wallet(&mut self, metadata: WalletMetadata) -> Result<String>;
-    pub fn get_wallet(&self, wallet_id: &str) -> Option<&Wallet>;
-    pub fn list_wallets(&self) -> Vec<&WalletMetadata>;
-    pub fn delete_wallet(&mut self, wallet_id: &str) -> Result<()>;
-    pub fn export_wallet(&self, wallet_id: &str, path: &Path) -> Result<()>;
-    pub fn import_wallet(&mut self, path: &Path) -> Result<String>;
+    pub fn new<P: AsRef<Path>>(base_path: P, device_id: &str) -> io::Result<Self>;
+    pub fn save_wallet(&mut self, metadata: WalletMetadata,
+                       key_share: &[u8], password: &str) -> Result<()>;
+    pub fn load_wallet(&self, wallet_id: &str, password: &str) -> Result<Vec<u8>>;
+    pub fn list_wallets(&self) -> &[WalletMetadata];
+    pub fn remove_wallet(&mut self, wallet_id: &str) -> Result<()>;
 }
 ```
 
+No `get_wallet(&str) -> Option<&Wallet>` — there's no `Wallet`
+type; encrypted key shares stay on disk and are decrypted on demand
+via `load_wallet(password)`. Earlier drafts of this section showed
+a generic wallet-management interface that didn't match the
+actual split-file keystore.
+
 ### FROST Protocol API
 
+This crate does NOT define its own `FrostProtocol` trait —
+DKG and signing primitives come from upstream `frost-core 2.2`
+(plus `frost-ed25519` / `frost-secp256k1`). Earlier drafts
+(and 49360fa caught similar cases) sketched a local trait with
+`start_dkg` / `process_round1` / `process_round2` methods —
+fabricated. The TUI wraps upstream frost-core via
+`src/protocal/dkg.rs` + `src/protocal/dkg_coordinator.rs` +
+`src/protocal/signing.rs`; consult those files for the real
+call surface.
+
 ```rust
-pub trait FrostProtocol {
-    fn start_dkg(config: DKGConfig) -> Result<DKGSession>;
-    fn process_round1(session: &mut DKGSession, messages: Vec<Round1Message>) -> Result<Round2Data>;
-    fn process_round2(session: &mut DKGSession, messages: Vec<Round2Message>) -> Result<KeyShare>;
+// Upstream frost-core, not this crate:
     fn start_signing(key_share: &KeyShare, message: &[u8]) -> Result<SigningSession>;
     fn generate_nonces(session: &mut SigningSession) -> Result<SigningNonces>;
     fn generate_signature_share(session: &SigningSession, nonces: &SigningNonces) -> Result<SignatureShare>;
