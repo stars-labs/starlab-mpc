@@ -1,6 +1,4 @@
-//! Professional Main Menu Component with tui-realm-stdlib
-//!
-//! Enterprise-grade main menu component with advanced styling and visual effects
+//! Main menu screen — root navigation into wallet creation, join, sign, settings.
 
 use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
 use crate::elm::message::Message;

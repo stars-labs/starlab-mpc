@@ -1,6 +1,4 @@
-//! Enhanced Create Wallet Component with tui-realm-stdlib
-//!
-//! Professional-grade UI component for wallet creation using stdlib components
+//! Create Wallet screen — collects wallet name + threshold/total + curve.
 
 use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
 use crate::elm::message::Message;
