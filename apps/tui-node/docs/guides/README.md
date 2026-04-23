@@ -41,4 +41,4 @@ The TUI node provides a terminal-based interface for:
 ## Related Documentation
 
 - For technical architecture, see [architecture docs](../architecture/)
-- For UI/UX flows, see [UI documentation](../ui/)
+- For historical UI/UX wireframes (pre-componentization), see [archive/legacy-ui/](../archive/legacy-ui/)

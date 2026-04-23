@@ -33,4 +33,4 @@ The TUI node is built with:
 ## Related Documentation
 
 - For user guides, see [guides](../guides/)
-- For UI/UX design, see [UI documentation](../ui/)
+- For historical UI/UX wireframes (pre-componentization), see [archive/legacy-ui/](../archive/legacy-ui/)

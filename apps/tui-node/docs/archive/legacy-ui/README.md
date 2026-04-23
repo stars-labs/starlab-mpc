@@ -59,6 +59,6 @@ The TUI node provides a professional, enterprise-grade terminal-based interface 
 
 ## Related Documentation
 
-- For implementation details, see the [architecture docs](../architecture/)
-- For usage instructions, see the [user guides](../guides/)
-- For API documentation, see the [API reference](../api/)
+- For implementation details, see the [architecture docs](../../architecture/)
+- For usage instructions, see the [user guides](../../guides/)
+- For API documentation, see the [API reference](../../api/)
