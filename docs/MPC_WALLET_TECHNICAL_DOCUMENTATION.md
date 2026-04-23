@@ -940,53 +940,42 @@ linuxdeploy --appdir AppDir --executable target/release/mpc-wallet-native
 
 #### Metrics Collection
 
-```rust
-use prometheus::{Counter, Histogram, register_counter, register_histogram};
-
-lazy_static! {
-    static ref DKG_SESSIONS: Counter = register_counter!(
-        "mpc_dkg_sessions_total",
-        "Total number of DKG sessions"
-    ).unwrap();
-    
-    static ref SIGNING_DURATION: Histogram = register_histogram!(
-        "mpc_signing_duration_seconds",
-        "Duration of signing operations"
-    ).unwrap();
-}
-```
+No Prometheus integration ships today — `prometheus` does not appear
+in any workspace `Cargo.toml`, and the signal server exposes no
+`/metrics` endpoint. Operators run off structured logs. Adding a
+`/metrics` route on the self-hosted signal server (and matching
+tracing-prometheus-bridge counters in the clients) is open future
+work.
 
 #### Logging Strategy
 
-```rust
-use tracing::{info, warn, error, debug};
+`tracing` / `tracing-subscriber` are the real logging stack. The
+browser extension, TUI, and signal server all emit structured
+`info!`/`debug!` events. Filter via the `RUST_LOG` env var:
 
-#[tracing::instrument]
-pub async fn execute_dkg(params: DKGParams) -> Result<DKGResult> {
-    info!("Starting DKG session");
-    debug!(?params, "DKG parameters");
-    
-    // Implementation...
-    
-    info!("DKG session completed successfully");
-    Ok(result)
-}
+```bash
+RUST_LOG=tui_node=debug,webrtc=info mpc-wallet-tui --device-id alice
 ```
+
+Most ceremony-relevant logs are at `info`; verbose mesh / FROST
+internals are at `debug` or `trace`.
 
 #### Health Checks
 
-```rust
-async fn health_check() -> impl Responder {
-    let health = json!({
-        "status": "healthy",
-        "version": env!("CARGO_PKG_VERSION"),
-        "uptime": get_uptime(),
-        "connections": get_active_connections(),
-    });
-    
-    HttpResponse::Ok().json(health)
-}
+The self-hosted signal server has no `/health` route handler
+(verified: `apps/signal-server/server/src/` has no route for it).
+Liveness is inferred from whether a TCP/WebSocket upgrade succeeds:
+
+```bash
+wscat -c ws://localhost:9000/
+# or, for the public Cloudflare Worker deployment:
+wscat -c wss://xiongchenyu.dpdns.org/
 ```
+
+Adding an HTTP `/health` endpoint that returns
+`{status, version, uptime, active_connections}` is trivial in the
+standalone server but not in the Worker variant (which exists as
+stateless WS upgrade handling, no HTTP response scaffolding).
 
 ---
 
@@ -1146,113 +1135,49 @@ enum MessageType {
 
 ### Benchmarks
 
-#### DKG Performance
+The repo does not yet ship `criterion` benches — no `benches/`
+directory, no bench dev-dependencies. Earlier drafts of this doc
+contained a specific DKG/signing numbers table (e.g. "DKG 3
+participants: 1.2s / 15MB / 45KB") that had no reproducible source
+and was removed. Contributing `criterion` benches + a reproducible
+methodology is open work; until those exist, the authoritative
+functional coverage is `cargo test --workspace` (≈170 tests) +
+`bun test` in the extension (≈500 tests).
 
-| Participants | Threshold | Time (avg) | Memory | Network |
-|-------------|-----------|------------|---------|---------|
-| 3           | 2         | 1.2s       | 15MB    | 45KB    |
-| 5           | 3         | 2.1s       | 25MB    | 120KB   |
-| 7           | 4         | 3.5s       | 40MB    | 250KB   |
-| 10          | 6         | 5.8s       | 65MB    | 500KB   |
+### Optimization present in code today
 
-#### Signing Performance
+- **Adaptive event loop** (`apps/tui-node/src/elm/adaptive_event_loop.rs`):
+  poll interval ramps 5ms→200ms based on UI activity to keep idle
+  CPU below 1%.
+- **Bounded channels** (`apps/tui-node/src/elm/channel_config.rs`):
+  tokio mpsc channels use explicit capacity limits to prevent memory
+  growth from queue buildup.
+- **Deterministic session derivation** (`src/protocal/session_handler.rs`):
+  session-id is a pure hash of wallet name, so re-generating the
+  same wallet produces the same group key without re-running DKG.
 
-| Operation      | Time (avg) | CPU Usage | Memory |
-|---------------|------------|-----------|---------|
-| ECDSA Sign    | 45ms       | 12%       | 5MB     |
-| EdDSA Sign    | 32ms       | 10%       | 4MB     |
-| Verification  | 15ms       | 8%        | 2MB     |
-
-### Optimization Strategies
-
-#### 1. Connection Pooling
-
-```rust
-pub struct ConnectionPool {
-    connections: Arc<RwLock<HashMap<PeerId, Connection>>>,
-    max_connections: usize,
-}
-
-impl ConnectionPool {
-    pub async fn get_or_create(&self, peer_id: &PeerId) -> Result<Connection> {
-        // Check existing connection
-        if let Some(conn) = self.connections.read().await.get(peer_id) {
-            if conn.is_alive() {
-                return Ok(conn.clone());
-            }
-        }
-        
-        // Create new connection
-        let conn = self.create_connection(peer_id).await?;
-        self.connections.write().await.insert(peer_id.clone(), conn.clone());
-        Ok(conn)
-    }
-}
-```
-
-#### 2. Message Batching
-
-```rust
-pub struct MessageBatcher {
-    buffer: Vec<Message>,
-    max_batch_size: usize,
-    flush_interval: Duration,
-}
-
-impl MessageBatcher {
-    pub async fn send(&mut self, message: Message) {
-        self.buffer.push(message);
-        
-        if self.buffer.len() >= self.max_batch_size {
-            self.flush().await;
-        }
-    }
-    
-    async fn flush(&mut self) {
-        if !self.buffer.is_empty() {
-            let batch = std::mem::take(&mut self.buffer);
-            self.send_batch(batch).await;
-        }
-    }
-}
-```
-
-#### 3. State Caching
-
-```rust
-pub struct StateCache {
-    cache: Arc<RwLock<LruCache<StateKey, StateValue>>>,
-}
-
-impl StateCache {
-    pub async fn get_or_compute<F>(&self, key: StateKey, compute: F) -> StateValue 
-    where
-        F: FnOnce() -> StateValue
-    {
-        if let Some(value) = self.cache.read().await.get(&key) {
-            return value.clone();
-        }
-        
-        let value = compute();
-        self.cache.write().await.put(key, value.clone());
-        value
-    }
-}
-```
+There is **no** connection pool, message batcher, or state cache in
+the code today — earlier drafts of this section sketched these as
+aspirational patterns (`ConnectionPool`, `MessageBatcher`,
+`StateCache`). They were removed because they described Rust types
+that do not exist in the source.
 
 ### Scalability Considerations
 
-#### Horizontal Scaling
+The real cohort-size bottleneck is the WebRTC full-mesh degree
+(n·(n-1)/2 peer connections), not the cryptography. FROST itself is
+generic over `t`/`n`. No hard participant cap is enforced in code,
+but production use has only been exercised at small cohorts (2-of-3,
+3-of-5).
 
-- **Signal Servers**: Deploy multiple instances behind load balancer
-- **STUN/TURN**: Geographic distribution for latency optimization
-- **State Storage**: Distributed cache (Redis) for session state
-
-#### Vertical Scaling
-
-- **Memory**: Increase for larger participant groups
-- **CPU**: Multi-core utilization for parallel operations
-- **Network**: Higher bandwidth for video/audio channels
+- **Signal server**: stateless + session-memory-only, so
+  horizontally scaling it is a matter of running multiple instances
+  behind a load balancer. The Cloudflare Worker variant does this
+  automatically. There is no shared state store (no Redis) to
+  coordinate — if an operator wants multi-instance with session
+  sharing, the state-store layer would need to be added.
+- **STUN/TURN**: clients rely on public STUN only. No TURN infra
+  ships with this repo; symmetric-NAT peers may fail to connect.
 
 ---
 
@@ -1405,10 +1330,16 @@ logs carry machine-grep-able identifiers.
 
 ### C. Security Audits
 
-| Date | Auditor | Scope | Result |
-|------|---------|-------|--------|
-| 2024-Q4 | Internal | FROST implementation | Passed |
-| 2025-Q1 | TBD | Full system audit | Scheduled |
+No third-party security audit has been performed on this codebase.
+Earlier drafts of this appendix listed a "2024-Q4 Internal: FROST
+implementation: Passed" line that had no corresponding audit report
+in the repo — fabricated and removed. Report vulnerabilities via
+[GitHub Security Advisories](https://github.com/hecoinfo/mpc-wallet/security/advisories/new).
+
+The FROST protocol implementation itself comes from the
+[ZCash Foundation's audited `frost-*` crates](https://github.com/ZcashFoundation/frost)
+(v2.2); this workspace's usage of those crates is NOT separately
+audited.
 
 ### D. Performance Tuning
 
