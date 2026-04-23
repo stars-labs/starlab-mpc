@@ -69,6 +69,9 @@ impl MockSDCard {
 
 /// Key share holder after DKG completion
 #[derive(Clone)]
+#[allow(dead_code)] // Example scaffolding: participant_id + is_coordinator aren't
+                    // read in the current demo flow but are intentional structural
+                    // context for an in-production key-share record.
 struct KeyShareHolder {
     participant_id: String,
     is_coordinator: bool,

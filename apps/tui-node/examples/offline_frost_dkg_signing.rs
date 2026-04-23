@@ -325,6 +325,7 @@ impl FrostParticipant {
         commitments
     }
     
+    #[allow(dead_code)] // Referenced below in a block that's not wired up yet.
     fn collect_signing_commitments(&self, signers: &[u16]) -> BTreeMap<Identifier, SigningCommitments> {
         println!("\n[P{}] 📦 Collecting signing commitments", self.id);
         

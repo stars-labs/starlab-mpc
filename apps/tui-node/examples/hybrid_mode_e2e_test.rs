@@ -22,17 +22,21 @@ use tui_node::hybrid::{HybridCoordinator, ParticipantMode};
 use tui_node::hybrid::coordinator::HybridMessage;
 use tui_node::utils::solana_encoder::SolanaHelper;
 
-/// Hybrid participant supporting both curves
+/// Hybrid participant supporting both curves.
+#[allow(dead_code)] // ed25519_key_package + ed25519_pubkey_package are populated
+                    // by the DKG simulation but not currently read by any
+                    // assertion in the test; kept as context for the
+                    // dual-curve participant shape.
 struct HybridParticipant {
     id: u16,
     name: String,
     mode: ParticipantMode,
-    
+
     // Secp256k1 for Ethereum
     secp256k1_identifier: Secp256k1Identifier,
     secp256k1_key_package: Option<Secp256k1KeyPackage>,
     secp256k1_pubkey_package: Option<Secp256k1PublicKeyPackage>,
-    
+
     // Ed25519 for Solana
     ed25519_identifier: Ed25519Identifier,
     ed25519_key_package: Option<Ed25519KeyPackage>,

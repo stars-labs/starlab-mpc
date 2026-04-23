@@ -27,6 +27,9 @@ use frost_secp256k1::{
 use frost_secp256k1::rand_core::OsRng;
 
 /// Participant in the WebRTC mesh test
+#[allow(dead_code)] // connection_monitor is wired up for future expansion
+                    // of the test (per-peer health reporting) but not yet
+                    // read in any assertion.
 struct MeshParticipant {
     id: u16,
     name: String,
