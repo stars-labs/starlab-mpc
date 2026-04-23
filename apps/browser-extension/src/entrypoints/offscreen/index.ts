@@ -276,6 +276,20 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
                     });
                 };
 
+                // Ext-2d-offscreen-rounds: fires when a signing
+                // ceremony produces an aggregated signature —
+                // either we aggregated it ourselves or a co-signer
+                // broadcast it to us. Propagated to background →
+                // popup via `signingComplete` so the UI can render
+                // the final signature + clear the in-progress banner.
+                webRTCManager.onSigningComplete = (payload) => {
+                    console.log("Offscreen: Signing complete:", payload);
+                    sendToBackground({
+                        type: "fromOffscreen",
+                        payload: { type: "signingComplete", ...payload },
+                    });
+                };
+
                 webRTCManager.onWebRTCConnectionUpdate = (deviceId: string, connected: boolean) => {
                     console.log("Offscreen: WebRTC connection update:", deviceId, connected);
 

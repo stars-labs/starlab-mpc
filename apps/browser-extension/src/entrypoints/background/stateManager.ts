@@ -566,6 +566,49 @@ export class StateManager {
                 }
                 break;
 
+            case "signingComplete":
+                // Ext-2d-offscreen-rounds: the FROST signing ceremony
+                // finalized. Stash the signature + metadata in appState
+                // so the popup can render a SignatureComplete banner,
+                // and clear the in-progress session so the user can
+                // start a new ceremony. Kept in in-memory appState only
+                // (same reasoning as pendingKeystoreJson — a SW restart
+                // intentionally zeroes it; signatures are relevant only
+                // to the session where they were produced).
+                {
+                    const info: any = payload;
+                    (this.appState as any).lastSignature = {
+                        signingId: info.signingId,
+                        signature: info.signature,
+                        messageHex: info.messageHex,
+                        blockchain: info.blockchain,
+                        sessionId: info.sessionId,
+                        completedAt: Date.now(),
+                    };
+                    // Clear the active signing session so "+ Sign" is
+                    // available again. The invite is left in
+                    // `appState.invites` for now (it'll age out via
+                    // session_removed from the server or get cleaned
+                    // up on next cold start).
+                    if (
+                        this.appState.sessionInfo?.session_type === "signing" &&
+                        this.appState.sessionInfo?.session_id === info.sessionId
+                    ) {
+                        this.appState.sessionInfo = null;
+                        this.appState.dkgState = DkgState.Idle;
+                    }
+                    console.log(
+                        "[StateManager] Signing complete received:",
+                        (this.appState as any).lastSignature,
+                    );
+                    this.broadcastToPopupPorts({
+                        type: "signingCompleted",
+                        ...info,
+                    } as any);
+                    this.broadcastCurrentState();
+                }
+                break;
+
             case "sessionUpdate":
                 if ('sessionInfo' in payload && 'invites' in payload) {
 //                     console.log("[StateManager] Received session update from offscreen:", payload);

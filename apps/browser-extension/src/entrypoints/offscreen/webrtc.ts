@@ -98,6 +98,25 @@ export class WebRTCManager {
     keystoreJson: string | null;
   }) => void = () => { };
   public onSigningStateUpdate: (state: SigningState, info: SigningInfo | null) => void = () => { };
+  /**
+   * Ext-2d-offscreen-rounds: fires once per ceremony when the final
+   * aggregated signature is available. All signers receive this
+   * (the aggregator after calling `aggregate_signature`, co-signers
+   * when they receive the AggregatedSignature broadcast). Payload
+   * carries enough context for the popup to render a
+   * SignatureComplete screen and for the dApp bridge (future
+   * Ext-4) to resolve its pending personal_sign RPC.
+   */
+  public onSigningComplete: (payload: {
+    signingId: string;
+    signature: string;
+    messageHex: string;
+    blockchain: "ethereum" | "solana";
+    /** The session_id the signing_id was derived from (strips the
+     *  `sign_` prefix). Used by the popup to cross-reference the
+     *  session banner with the final signature. */
+    sessionId: string;
+  }) => void = () => { };
   public onWebRTCConnectionUpdate: (peerId: string, connected: boolean) => void = () => { };
 
   // Add the missing callback property and constructor parameter
@@ -1993,6 +2012,19 @@ export class WebRTCManager {
     }
   }
 
+  /**
+   * Ext-2d-offscreen-rounds: real FROST round-1 commitment handler.
+   * Replaces the pre-existing mock that just stored opaque blobs.
+   *
+   * Per FROST: our OWN commitment was registered inside
+   * signing_commit() on our local instance (side-effect of that call
+   * — nonce paired with commitment, kept internal). Peers' commitments
+   * must be explicitly registered via add_signing_commitment(i, hex)
+   * before sign() can produce a share using them.
+   *
+   * Index convention: FROST participants are 1-indexed. Convert from
+   * peer-id via `participants.indexOf(peerId) + 1`.
+   */
   private _handleSigningCommitment(fromPeerId: string, message: any): void {
     this._log(`Handling signing commitment from ${fromPeerId}`);
 
@@ -2000,18 +2032,68 @@ export class WebRTCManager {
       this._log(`Ignoring signing commitment: no matching signing process`);
       return;
     }
+    if (!this.frostDkg) {
+      this._log(`Cannot process commitment: no FROST instance loaded`);
+      return;
+    }
 
-    this.signingCommitments.set(fromPeerId, message.commitment);
-    this._log(`Received commitment from ${fromPeerId}. Total: ${this.signingCommitments.size}`);
+    const senderIndex =
+      this.signingInfo.participants.indexOf(fromPeerId) + 1;
+    if (senderIndex <= 0) {
+      this._log(
+        `Invalid sender index for ${fromPeerId} (not in participants list)`,
+      );
+      return;
+    }
 
-    // Check if we have all commitments
-    if (this.signingCommitments.size >= this.signingInfo.selected_signers.length) {
-      this._log(`All commitments received. Proceeding to share phase.`);
+    const commitmentHex =
+      typeof message.commitment === "string" ? message.commitment : null;
+    if (!commitmentHex) {
+      this._log(
+        `Invalid commitment format from ${fromPeerId}: expected string, got ${typeof message.commitment}`,
+      );
+      return;
+    }
+
+    if (this.signingCommitments.has(fromPeerId)) {
+      this._log(`Duplicate commitment from ${fromPeerId} — ignoring`);
+      return;
+    }
+
+    try {
+      this.frostDkg.add_signing_commitment(senderIndex, commitmentHex);
+    } catch (e) {
+      this._log(
+        `add_signing_commitment(${senderIndex}, ...) failed: ${this._getErrorMessage(e)}`,
+      );
+      return;
+    }
+
+    this.signingCommitments.set(fromPeerId, commitmentHex);
+    this._log(
+      `Registered commitment from ${fromPeerId} (idx ${senderIndex}). Total: ${this.signingCommitments.size}/${this.signingInfo.selected_signers.length}`,
+    );
+
+    // When we've collected commitments from all selected signers
+    // (including our own, which was recorded in initiateSigningCeremony
+    // or _generateAndSendCommitment), move to the share phase.
+    if (
+      this.signingCommitments.size >= this.signingInfo.selected_signers.length
+    ) {
+      this._log(`All commitments received. Transitioning to share phase.`);
       this._updateSigningState(SigningState.SharePhase, this.signingInfo);
       this._generateAndSendSignatureShare();
     }
   }
 
+  /**
+   * Ext-2d-offscreen-rounds: real FROST round-2 share handler.
+   * Replaces the pre-existing mock that stored opaque blobs.
+   *
+   * Per FROST: our OWN share was registered inside sign() (side-
+   * effect). Peers' shares must be added via
+   * add_signature_share(i, hex).
+   */
   private _handleSignatureShare(fromPeerId: string, message: any): void {
     this._log(`Handling signature share from ${fromPeerId}`);
 
@@ -2019,11 +2101,54 @@ export class WebRTCManager {
       this._log(`Ignoring signature share: no matching signing process`);
       return;
     }
+    if (!this.frostDkg) {
+      this._log(`Cannot process share: no FROST instance loaded`);
+      return;
+    }
 
-    this.signingShares.set(fromPeerId, message.signature_share);
-    this._log(`Received signature share from ${fromPeerId}. Total: ${this.signingShares.size}`);
+    const senderIndex =
+      this.signingInfo.participants.indexOf(fromPeerId) + 1;
+    if (senderIndex <= 0) {
+      this._log(
+        `Invalid sender index for ${fromPeerId} (not in participants list)`,
+      );
+      return;
+    }
 
-    // Try to aggregate if we have all shares
+    // Older mock protocol carried the payload under `signature_share`;
+    // new real-FROST protocol under `share` (matches WASM naming).
+    // Accept either so mid-flight upgrades don't break.
+    const shareHex =
+      (typeof message.share === "string" && message.share) ||
+      (typeof message.signature_share === "string" &&
+        message.signature_share) ||
+      null;
+    if (!shareHex) {
+      this._log(
+        `Invalid share format from ${fromPeerId}: expected string under 'share' or 'signature_share'`,
+      );
+      return;
+    }
+
+    if (this.signingShares.has(fromPeerId)) {
+      this._log(`Duplicate share from ${fromPeerId} — ignoring`);
+      return;
+    }
+
+    try {
+      this.frostDkg.add_signature_share(senderIndex, shareHex);
+    } catch (e) {
+      this._log(
+        `add_signature_share(${senderIndex}, ...) failed: ${this._getErrorMessage(e)}`,
+      );
+      return;
+    }
+
+    this.signingShares.set(fromPeerId, shareHex);
+    this._log(
+      `Registered share from ${fromPeerId} (idx ${senderIndex}). Total: ${this.signingShares.size}/${this.signingInfo.selected_signers.length}`,
+    );
+
     this._tryAggregateSignature();
   }
 
@@ -2035,11 +2160,31 @@ export class WebRTCManager {
       return;
     }
 
-    this.signingInfo.final_signature = message.signature;
+    const signatureHex =
+      typeof message.signature === "string" ? message.signature : null;
+    if (!signatureHex) {
+      this._log(
+        `Invalid aggregated signature format: expected string, got ${typeof message.signature}`,
+      );
+      return;
+    }
+
+    this.signingInfo.final_signature = signatureHex;
     this.signingInfo.step = "complete";
     this._updateSigningState(SigningState.Complete, this.signingInfo);
 
-    this._log(`Signing process ${this.signingInfo.signing_id} completed successfully`);
+    const sessionId = this.signingInfo.signing_id.replace(/^sign_/, "");
+    this.onSigningComplete({
+      signingId: this.signingInfo.signing_id,
+      signature: signatureHex,
+      messageHex: this.signingInfo.transaction_data,
+      blockchain: this.currentBlockchain,
+      sessionId,
+    });
+
+    this._log(
+      `Signing process ${this.signingInfo.signing_id} completed (received aggregated sig from ${fromPeerId})`,
+    );
   }
 
   private _generateAndSendCommitment(): void {
@@ -2071,60 +2216,124 @@ export class WebRTCManager {
     this.signingCommitments.set(this.localPeerId, commitment);
   }
 
+  /**
+   * Ext-2d-offscreen-rounds: real FROST round-2 share generation.
+   * Replaces the mock that emitted `share-${peerId}-${timestamp}`.
+   *
+   * `sign(messageHex)` uses our internally-stored nonce (from
+   * signing_commit), our key package, and the already-registered
+   * commitments from peers (add_signing_commitment calls) to produce
+   * our FROST signature share. Returns hex. Nonces are one-time — a
+   * second sign() call in the same ceremony would error or produce
+   * an invalid share.
+   */
   private _generateAndSendSignatureShare(): void {
     this._log(`Generating and sending signature share`);
 
     if (!this.signingInfo) return;
+    if (!this.frostDkg) {
+      this._log(`Cannot generate share: no FROST instance loaded`);
+      this._updateSigningState(SigningState.Failed, this.signingInfo);
+      return;
+    }
 
-    // Mock signature share generation
-    const signatureShare = {
-      data: `share-${this.localPeerId}-${Date.now()}`,
-      participant: this.localPeerId
-    };
+    const messageHex = this.signingInfo.transaction_data;
+    let shareHex: string;
+    try {
+      shareHex = this.frostDkg.sign(messageHex);
+    } catch (e) {
+      this._log(`sign() failed: ${this._getErrorMessage(e)}`);
+      this._updateSigningState(SigningState.Failed, this.signingInfo);
+      return;
+    }
 
-    // Send share to all selected signers
     const message: WebRTCAppMessage = {
-      webrtc_msg_type: 'SignatureShare' as const,
+      webrtc_msg_type: "SignatureShare" as const,
       signing_id: this.signingInfo.signing_id,
       sender_identifier: this.localPeerId,
-      share: signatureShare
+      share: shareHex,
     };
 
-    this.signingInfo.selected_signers.forEach(peerId => {
+    for (const peerId of this.signingInfo.selected_signers) {
       if (peerId !== this.localPeerId) {
         this.sendWebRTCAppMessage(peerId, message);
       }
-    });
+    }
 
-    // Add our own share
-    this.signingShares.set(this.localPeerId, signatureShare);
+    // Record our own share so _tryAggregateSignature sees the full
+    // set when it runs. Keyed by peer-id to match _handleSignatureShare.
+    this.signingShares.set(this.localPeerId, shareHex);
+    this._log(
+      `Generated + broadcast signature share (hex length=${shareHex.length}) to ${this.signingInfo.selected_signers.length - 1} peers`,
+    );
   }
 
+  /**
+   * Ext-2d-offscreen-rounds: real FROST aggregation. Replaces the
+   * mock `aggregated-sig-${timestamp}`.
+   *
+   * `aggregate_signature(messageHex)` uses all registered shares
+   * (ours + peers' via add_signature_share) and the group public
+   * key to produce the final threshold signature over messageHex.
+   * Only the signer nominated as aggregator (initiator, which for
+   * session-based flows maps to the first selected signer) calls
+   * this — other signers receive the result via AggregatedSignature
+   * broadcast.
+   */
   private _aggregateSignatureAndBroadcast(): void {
     this._log(`Aggregating signature and broadcasting result`);
 
     if (!this.signingInfo) return;
+    if (!this.frostDkg) {
+      this._log(`Cannot aggregate: no FROST instance loaded`);
+      this._updateSigningState(SigningState.Failed, this.signingInfo);
+      return;
+    }
 
-    // Mock signature aggregation
-    const aggregatedSignature = `aggregated-sig-${Date.now()}`;
+    const messageHex = this.signingInfo.transaction_data;
+    let aggregatedHex: string;
+    try {
+      aggregatedHex = this.frostDkg.aggregate_signature(messageHex);
+    } catch (e) {
+      this._log(
+        `aggregate_signature() failed: ${this._getErrorMessage(e)}`,
+      );
+      this._updateSigningState(SigningState.Failed, this.signingInfo);
+      return;
+    }
 
-    // Broadcast aggregated signature
     const message: WebRTCAppMessage = {
-      webrtc_msg_type: 'AggregatedSignature' as const,
+      webrtc_msg_type: "AggregatedSignature" as const,
       signing_id: this.signingInfo.signing_id,
-      signature: aggregatedSignature
+      signature: aggregatedHex,
     };
 
-    this.signingInfo.participants.forEach(peerId => {
+    // Broadcast to ALL participants (not just selected_signers) so
+    // non-signing keyholders also learn the ceremony completed and
+    // what the resulting signature was. Lets them e.g. clear any
+    // pending "waiting for signature" UI state.
+    for (const peerId of this.signingInfo.participants) {
       if (peerId !== this.localPeerId) {
         this.sendWebRTCAppMessage(peerId, message);
       }
-    });
+    }
 
-    // Update our own state
-    this.signingInfo.final_signature = aggregatedSignature;
+    this.signingInfo.final_signature = aggregatedHex;
     this.signingInfo.step = "complete";
     this._updateSigningState(SigningState.Complete, this.signingInfo);
+
+    const sessionId = this.signingInfo.signing_id.replace(/^sign_/, "");
+    this.onSigningComplete({
+      signingId: this.signingInfo.signing_id,
+      signature: aggregatedHex,
+      messageHex,
+      blockchain: this.currentBlockchain,
+      sessionId,
+    });
+
+    this._log(
+      `Aggregation complete: broadcast final signature (hex length=${aggregatedHex.length}) to ${this.signingInfo.participants.length - 1} peers`,
+    );
   }
 
   // Add getDkgStatus method that tests are expecting
