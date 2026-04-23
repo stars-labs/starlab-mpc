@@ -1,5 +1,22 @@
 # End-to-End Test Implementation Plan
 
+## Status: Plan only — not yet implemented
+
+Everything below is a design proposal for future work. No
+`TestRunner` struct exists in the tree (verified via grep —
+zero hits for `struct TestRunner` / `impl TestRunner`), and the
+per-priority checklists that mark items as "DONE" with ✅
+overstate the current state. Treat the rest of this document as
+a starting point for someone who wants to build the harness,
+not as a reference for tests that already exist.
+
+Existing functional coverage that does real MPC flows (without
+a dedicated E2E harness): see the examples at
+`apps/tui-node/examples/hybrid_mode_e2e_test.rs` +
+`webrtc_mesh_e2e_test.rs` + the Bun test suite under
+`apps/browser-extension/tests/entrypoints/background/`. Those are
+the real de facto E2E baselines today.
+
 ## Overview
 Comprehensive test suite for MPC Wallet using real WebSocket signal server (wss://xiongchenyu.dpdns.org)
 
@@ -33,9 +50,10 @@ async fn test_2of2_dkg_with_real_websocket() {
 ```
 
 ### Implementation Tasks:
-1. ✅ Create TestRunner infrastructure (DONE)
-2. ⬜ Add wait_for_mesh_ready() helper
-3. ⬜ Add wait_for_dkg_complete() helper
+1. ⬜ Create `TestRunner` infrastructure (earlier drafts marked
+   this ✅ DONE; the struct doesn't actually exist in source)
+2. ⬜ Add `wait_for_mesh_ready()` helper
+3. ⬜ Add `wait_for_dkg_complete()` helper
 4. ⬜ Implement address verification
 5. ⬜ Add timeout handling
 
