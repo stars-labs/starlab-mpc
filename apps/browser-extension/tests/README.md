@@ -23,13 +23,22 @@ tests/
 ## Running Tests
 
 ```bash
-bun test                    # all tests
-bun test --watch            # watch mode
-bun test:unit               # services + config only
-bun test:integration        # integration tests
-bun test:webrtc             # offscreen webrtc.*.test.ts
-bun test:coverage           # with coverage
+bun test                           # all tests
+bun test --watch                   # watch mode (built-in flag)
+bun run test:watch                 # same, via package.json script
+bun run test:unit                  # services + config only
+bun run test:integration           # integration tests
+bun run test:webrtc                # offscreen webrtc.*.test.ts
+bun run test:coverage              # with coverage
+bun test tests/services/walletClient.test.ts  # a specific file
 ```
+
+Note: `test:unit` / `test:integration` / `test:webrtc` /
+`test:coverage` are scripts defined in the extension's
+`package.json` — invoke with `bun run <script>`, not
+`bun <script>`. Plain `bun test` (no `run`) calls the test
+runner directly, which is why `--watch` also works as a flag
+on `bun test` itself.
 
 ## Test Runner
 
