@@ -234,8 +234,10 @@ mod tests {
 
     #[test]
     fn set_from_model_copies_snapshot() {
-        let mut ws = WalletState::default();
-        ws.last_completed_signature = Some(info_fixture());
+        let ws = WalletState {
+            last_completed_signature: Some(info_fixture()),
+            ..Default::default()
+        };
         let mut c = SignatureCompleteComponent::new();
         c.set_from_model(&ws);
         assert_eq!(
@@ -260,15 +262,17 @@ mod tests {
         use ratatui::Terminal;
         use ratatui::backend::TestBackend;
 
-        let mut ws = WalletState::default();
-        ws.last_completed_signature = Some(CompletedSignatureInfo {
-            request_id: "inline".into(),
-            wallet_id: "w".into(),
-            message: b"hello".to_vec(),
-            signed_hash: Some(vec![0xDEu8; 32]),
-            signature: vec![0xAAu8; 65],
-            verified: true,
-        });
+        let ws = WalletState {
+            last_completed_signature: Some(CompletedSignatureInfo {
+                request_id: "inline".into(),
+                wallet_id: "w".into(),
+                message: b"hello".to_vec(),
+                signed_hash: Some(vec![0xDEu8; 32]),
+                signature: vec![0xAAu8; 65],
+                verified: true,
+            }),
+            ..Default::default()
+        };
 
         let backend = TestBackend::new(120, 20);
         let mut terminal = Terminal::new(backend).expect("TestBackend");

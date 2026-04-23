@@ -218,8 +218,10 @@ mod tests {
 
     #[test]
     fn set_from_model_copies_snapshot() {
-        let mut ws = WalletState::default();
-        ws.last_finalized_wallet = Some(info_fixture());
+        let ws = WalletState {
+            last_finalized_wallet: Some(info_fixture()),
+            ..Default::default()
+        };
         let mut c = WalletCompleteComponent::new();
         c.set_from_model(&ws);
         assert_eq!(c.info.as_ref().map(|i| i.wallet_id.as_str()), Some("wallet-dkg_abcd"));

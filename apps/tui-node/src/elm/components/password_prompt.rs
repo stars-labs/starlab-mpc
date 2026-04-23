@@ -203,11 +203,13 @@ mod tests {
 
     #[test]
     fn set_from_model_copies_lengths_but_not_cleartext() {
-        let mut ws = WalletState::default();
-        ws.password_draft = "secretpw".to_string();
-        ws.confirm_draft = "secretpw1".to_string();
-        ws.password_focus_confirm = true;
-        ws.password_error = Some("bad".to_string());
+        let ws = WalletState {
+            password_draft: "secretpw".to_string(),
+            confirm_draft: "secretpw1".to_string(),
+            password_focus_confirm: true,
+            password_error: Some("bad".to_string()),
+            ..Default::default()
+        };
 
         let mut c = PasswordPromptComponent::new();
         c.set_from_model(&ws);

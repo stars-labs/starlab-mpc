@@ -191,17 +191,19 @@ mod tests {
     #[test]
     fn set_from_model_copies_draft_and_finds_group_key() {
         use crate::keystore::WalletMetadata;
-        let mut ws = WalletState::default();
-        ws.sign_message_draft = "hello world".to_string();
-        ws.wallets = vec![WalletMetadata::new(
-            "wallet-dkg_abcd".to_string(),
-            "mpc-1".to_string(),
-            "secp256k1".to_string(),
-            2,
-            3,
-            1,
-            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
-        )];
+        let ws = WalletState {
+            sign_message_draft: "hello world".to_string(),
+            wallets: vec![WalletMetadata::new(
+                "wallet-dkg_abcd".to_string(),
+                "mpc-1".to_string(),
+                "secp256k1".to_string(),
+                2,
+                3,
+                1,
+                "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+            )],
+            ..Default::default()
+        };
 
         let mut c = SignTransactionComponent::new("wallet-dkg_abcd");
         c.set_from_model(&ws);

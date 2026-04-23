@@ -231,8 +231,10 @@ fn render_wallet_complete(info: Option<tui_node::elm::model::CompletedWalletInfo
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("TestBackend::Terminal");
 
-    let mut ws = WalletState::default();
-    ws.last_finalized_wallet = info;
+    let ws = WalletState {
+        last_finalized_wallet: info,
+        ..Default::default()
+    };
     let mut component = WalletCompleteComponent::new();
     component.set_from_model(&ws);
 
