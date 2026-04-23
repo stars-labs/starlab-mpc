@@ -81,7 +81,12 @@ describe('WebRTCManager DKG Process', () => {
         const manager = new WebRTCManager('a', dummySend);
         manager.sessionInfo = createTestSessionInfo() as any;
 
-        let frostDkgSecp: FrostDkgSecp256k1 | null = null;
+        // Cast to any so assignments inside the expect arrow callback
+        // (line below) are visible to the later reads. TS doesn't
+        // propagate flow-analysis through closure boundaries, so the
+        // post-callback read would otherwise see the initial `null`
+        // type exclusively and narrow the truthy branch to `never`.
+        let frostDkgSecp: any = null;
 
         try {
             // Test Secp256k1 DKG creation
