@@ -1192,6 +1192,41 @@
                         ⚠ Keystore imported - Waiting for peers to enable signing
                     </p>
                 </div>
+            {:else if appState.sessionInfo && appState.dkgState === DkgState.Initializing}
+                <!-- Ext-1c: creator-side waiting-for-joiners banner.
+                     Matches TUI's DKGProgress screen "waiting for
+                     participants" state. Shows the session id (for
+                     copy-paste / debug), participant list with the
+                     creator and currently-joined peers, and the
+                     outstanding count. When a peer joins via
+                     session_available update, their device id appears
+                     in participants and the counter decrements. -->
+                {@const needed = (appState.sessionInfo.total ?? 0) - (appState.sessionInfo.participants?.length ?? 0)}
+                <div class="p-2 bg-blue-50 border border-blue-200 rounded">
+                    <p class="text-sm font-medium text-blue-900 mb-1">
+                        📡 Waiting for joiners to discover this session
+                    </p>
+                    <p class="text-xs text-blue-700 font-mono break-all">
+                        Session: {appState.sessionInfo.session_id}
+                    </p>
+                    <p class="text-xs text-blue-700 mt-1">
+                        Threshold: {appState.sessionInfo.threshold}-of-{appState.sessionInfo.total}
+                        • Curve: {appState.sessionInfo.curve_type ?? "secp256k1"}
+                    </p>
+                    <div class="mt-2">
+                        <span class="text-xs font-semibold text-blue-900">Participants ({appState.sessionInfo.participants?.length ?? 0}/{appState.sessionInfo.total ?? "?"}):</span>
+                        <ul class="text-xs text-blue-800 font-mono ml-3 mt-1">
+                            {#each appState.sessionInfo.participants ?? [] as pid}
+                                <li>{pid === appState.deviceId ? `● ${pid} (you)` : `○ ${pid}`}</li>
+                            {/each}
+                        </ul>
+                    </div>
+                    {#if needed > 0}
+                        <p class="text-xs text-blue-700 mt-2">
+                            Still need {needed} more participant{needed === 1 ? "" : "s"} to reach the total.
+                        </p>
+                    {/if}
+                </div>
             {:else if appState.sessionInfo && appState.dkgState !== DkgState.Idle}
                 <div class="p-2 bg-yellow-50 border border-yellow-200 rounded">
                     <p class="text-sm text-yellow-700">
