@@ -630,15 +630,8 @@ Press `?` at any time for context-sensitive help:
 
 ### Error Codes
 
-| Code | Description | Solution |
-|------|-------------|----------|
-| E001 | Network timeout | Check connection, retry |
-| E002 | Invalid threshold | Threshold must be ≤ participants |
-| E003 | Keystore locked | Unlock with password |
-| E004 | Session expired | Create new session |
-| E005 | Signature invalid | Verify key shares |
-| E006 | Insufficient peers | Wait for more participants |
-| E007 | SD card not found | Check mount point |
-| E008 | Backup corrupted | Use alternate backup |
-| E009 | Version mismatch | Update all clients |
-| E010 | Permission denied | Check file permissions |
+The TUI does not currently surface numeric `E001`-style error codes;
+errors are shown as descriptive messages derived from the
+`DKGError` / `SigningError` / `KeystoreError` variants in
+`src/errors.rs`. Grep the source by error message or error-type name
+when debugging.

@@ -1359,24 +1359,20 @@ curl -s -o /dev/null -w "%{http_code}\n" https://xiongchenyu.dpdns.org/
 echo -n "STUN server: "
 timeout 5 stun stun.l.google.com:19302 && echo "OK" || echo "FAILED"
 
-# Check local ports
-echo "Local ports:"
-netstat -an | grep -E ":(8080|3000|9090)"
-
-# Check WebRTC stats
-echo "WebRTC stats:"
-curl -s http://localhost:3000/api/webrtc/stats | jq
+# Check local signal-server (only relevant when running one yourself —
+# `apps/signal-server/server/src/main.rs` binds 0.0.0.0:9000).
+echo "Local signal-server port:"
+netstat -an | grep -E ":9000"
 ```
 
 ### Error Codes
 
-| Code | Error | Description | Solution |
-|------|-------|-------------|----------|
-| E001 | DKG_TIMEOUT | DKG session timed out | Check network, increase timeout |
-| E002 | INVALID_THRESHOLD | Invalid t-of-n parameters | Ensure 1 ≤ t ≤ n |
-| E003 | PEER_DISCONNECTED | Peer connection lost | Retry connection |
-| E004 | SIGNATURE_INVALID | Signature verification failed | Check key shares |
-| E005 | INSUFFICIENT_SIGNERS | Not enough participants | Wait for more signers |
+The codebase does not currently expose stable numeric error codes
+(`E001` etc.). Errors surface as strongly-typed variants in the Rust
+crates (`DKGError`, `SigningError`, `KeystoreError` in `src/errors.rs`)
+and as descriptive strings in the browser extension. Future work: a
+shared error-code registry across Rust + TypeScript so operator-facing
+logs carry machine-grep-able identifiers.
 
 ---
 

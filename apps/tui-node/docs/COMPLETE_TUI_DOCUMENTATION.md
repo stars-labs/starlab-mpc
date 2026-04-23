@@ -628,16 +628,10 @@ discovers the flags silently do nothing.
 
 ### B. Error Codes
 
-| Code | Description | Recovery |
-|------|-------------|----------|
-| E001 | Network connection failed | Check network, retry |
-| E002 | Invalid keystore format | Re-import or recover |
-| E003 | DKG round timeout | Restart DKG process |
-| E004 | Insufficient participants | Wait for more peers |
-| E005 | Signature verification failed | Retry signing |
-| E006 | Keystore locked | Unlock with password |
-| E007 | Invalid threshold config | Adjust parameters |
-| E008 | WebRTC connection failed | Check firewall/NAT |
+No numeric error-code scheme exists — see `src/errors.rs` for the
+strongly-typed error variants (`DKGError`, `SigningError`,
+`KeystoreError`, `ComponentError`, `CryptoError`). A shared numeric
+registry across Rust + TypeScript is open future work.
 
 ### C. Keyboard Map Reference
 
