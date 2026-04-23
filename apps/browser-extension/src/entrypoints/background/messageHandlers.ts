@@ -1431,11 +1431,13 @@ export class PopupMessageHandler {
             const keystoreManager = KeystoreManager.getInstance();
             await keystoreManager.lock();
             
-            // Clear sensitive state
+            // Clear sensitive state. ethereumAddress/solanaAddress
+            // are typed `string | undefined`, not nullable — use
+            // undefined to match (effect is the same at runtime).
             this.stateManager.updateStateProperty('dkgState', DkgState.Idle);
             this.stateManager.updateStateProperty('sessionInfo', null);
-            this.stateManager.updateStateProperty('ethereumAddress', null);
-            this.stateManager.updateStateProperty('solanaAddress', null);
+            this.stateManager.updateStateProperty('ethereumAddress', undefined);
+            this.stateManager.updateStateProperty('solanaAddress', undefined);
             
             sendResponse({ success: true });
         } catch (error) {
