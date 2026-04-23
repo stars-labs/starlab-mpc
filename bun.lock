@@ -36,10 +36,6 @@
         "wxt": "^0.20.7",
       },
     },
-    "packages/@mpc-wallet/blockchain": {
-      "name": "@mpc-wallet/blockchain",
-      "version": "0.1.0",
-    },
     "packages/@mpc-wallet/core-wasm": {
       "name": "@mpc-wallet/core-wasm",
       "version": "0.1.0",
@@ -143,8 +139,6 @@
     "@jridgewell/sourcemap-codec": ["@jridgewell/sourcemap-codec@1.5.0", "", {}, "sha512-gv3ZRaISU3fjPAgNsriBRqGWQL6quFx04YMPW/zD8XMLsU32mhCCbfbO6KZFLjvYpCZ8zyDEgqsgf+PwPaM7GQ=="],
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.25", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-vNk6aEwybGtawWmy/PzwnGDOjCkLWSD2wqvjGGAgOAwCGWySYXfYoxt00IJkTF+8Lb57DwOb3Aa0o9CApepiYQ=="],
-
-    "@mpc-wallet/blockchain": ["@mpc-wallet/blockchain@workspace:packages/@mpc-wallet/blockchain"],
 
     "@mpc-wallet/browser-extension": ["@mpc-wallet/browser-extension@workspace:apps/browser-extension"],
 
