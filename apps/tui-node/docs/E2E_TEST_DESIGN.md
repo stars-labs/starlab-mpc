@@ -8,25 +8,30 @@ We have designed and implemented a comprehensive end-to-end test system that sim
 
 ### Components
 
-1. **MockSDCard** - Simulated SD card filesystem
+Real components actually exercised by the e2e example
+(`examples/offline_dkg_demo.rs`):
+
+1. **MockSDCard** — simulated SD card filesystem
+   (`examples/offline_dkg_demo.rs:14`)
    - In-memory file storage with Arc<Mutex<HashMap>>
    - Export/import operations with file tracking
    - Round advancement for phase coordination
 
-2. **KeyEventSimulator** - Programmatic UI navigation
-   - Sends key events to TUI components
-   - Simulates user navigation through menus
-   - Handles timing delays for realistic interaction
-
-3. **DKGParticipant** - Individual participant simulation
+2. **DKGParticipant<C>** — real participant state machine
+   (`src/protocal/dkg_coordinator.rs:42`), generic over the FROST
+   ciphersuite `C`
    - Coordinator vs Participant roles
    - Phase-specific actions
    - SD card data exchange
 
-4. **DKGTestOrchestrator** - Test coordination
-   - Manages 3 participants (1 coordinator + 2 participants)
-   - Orchestrates phase transitions
-   - Verifies successful completion
+Earlier drafts of this section also listed a `KeyEventSimulator`
+and a `DKGTestOrchestrator` as real harness components. Neither
+exists — `grep -rn` for those names returns only this doc.
+Keyboard-input coverage is handled by `examples/test_keyboard_events.rs`
+using raw `crossterm::event::KeyEvent` literals, and test
+orchestration is just inline code in `examples/offline_dkg_demo.rs`
+/ `offline_dkg_signing_demo.rs`. There is no named orchestrator
+struct and no dedicated simulator component.
 
 ## Test Flow
 
@@ -333,5 +338,10 @@ This provides a robust foundation for testing the offline DKG implementation and
 ---
 
 *Test Implementation: January 2025*
-*Components: MockSDCard, KeyEventSimulator, DKGParticipant, DKGTestOrchestrator*
-*Coverage: 100% of offline DKG phases*
+*Real components: `MockSDCard` (`examples/offline_dkg_demo.rs:14`),
+`DKGParticipant<C>` (`src/protocal/dkg_coordinator.rs:42`).*
+*`KeyEventSimulator` and `DKGTestOrchestrator` do NOT exist —
+earlier drafts invented them.*
+*No automated coverage tool is configured (no tarpaulin / llvm-cov);
+the earlier "100% of offline DKG phases" figure was fabricated and
+has been removed.*
