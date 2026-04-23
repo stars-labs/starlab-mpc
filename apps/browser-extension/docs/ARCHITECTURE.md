@@ -42,64 +42,92 @@ The MPC Wallet Extension follows a Chrome Extension Manifest V3 architecture wit
 ## Components
 
 ### 1. Background Page (Service Worker)
-**Location:** `/src/entrypoints/background/index.ts`
+**Location:** `src/entrypoints/background/index.ts`
 
 **Responsibilities:**
-- Central message router for all communication
-- WebSocket client management for signaling server
-- Account and network services
+- Central message router for all cross-context communication
+- WebSocket client management for the signaling server
+- Account / keystore / network services
 - Offscreen document lifecycle management
-- RPC request handling for blockchain operations
+- RPC request handling for dApp-facing EIP-1193 traffic
 
-**Key Services:**
-- `AccountService`: Manages wallet accounts and addresses
-- `NetworkService`: Handles blockchain network configurations
-- `WalletClientService`: Provides blockchain client functionality
-- `WebSocketClient`: Manages connection to signaling server
+**Key classes in `src/entrypoints/background/`:**
+- `StateManager` — persistent state + cross-context broadcast
+- `SessionManager` — `proposeSession` / `acceptSession` / DKG
+  & signing session lifecycle
+- `WebSocketManager` — signal-server connection, session relay,
+  ceremony trigger hooks
+- `WebSocketClient` — low-level WS transport under WebSocketManager
+- `OffscreenManager` — create/tear down the offscreen document
+- `RpcHandler` — dApp EIP-1193 entry point
+- `KeepaliveController` — pings offscreen during active ceremonies
+  to keep MV3 from idle-killing it
+
+**Key services in `src/services/`** (default-exported classes,
+consumed across contexts):
+- `AccountService` (`accountService.ts`)
+- `NetworkService` (`networkService.ts`)
+- `WalletClientService` (`walletClient.ts`)
+- `WalletController` (`walletController.ts`)
+- `KeystoreService` / `KeystoreManager`
+  (`keystoreService.ts` / `keystoreManager.ts`)
+- `PermissionService` (`permissionService.ts`)
 
 ### 2. Popup Page (UI)
-**Location:** `/src/entrypoints/popup/App.svelte`
+**Location:** `src/entrypoints/popup/App.svelte` (Svelte 5 legacy
+reactivity, NOT runes — see the top-of-repo `CLAUDE.md`)
 
 **Responsibilities:**
 - User interface for wallet operations
-- Display connection status and peer information
-- Session management UI for MPC operations
-- Crypto operations (signing, address generation)
+- Display connection status + peer list
+- Session management UI for DKG / signing
+- Crypto operations (signing, address display)
 
 **Features:**
 - MPC-based distributed key generation (DKG)
-- Multi-chain support (Ethereum/Solana)
-- Threshold message signing via MPC protocol
-- Real-time peer discovery and session management
-- WebRTC connection status monitoring
+- Multi-chain support (Ethereum / Solana; additional L2s share
+  Ethereum's secp256k1 address)
+- Threshold message signing via FROST
+- Real-time peer discovery + session invite management
+- WebRTC connection-state panel
 
 ### 3. Offscreen Page (WebRTC Handler)
-**Location:** `/src/entrypoints/offscreen/index.ts`
+**Location:** `src/entrypoints/offscreen/index.ts` (routing entry)
++ `src/entrypoints/offscreen/webrtc.ts` (main `WebRTCManager` host).
 
 **Responsibilities:**
-- WebRTC connection management
-- P2P communication handling
-- MPC session coordination
-- DOM-dependent operations
+- WebRTC peer-connection lifecycle + data channels
+- P2P DKG / signing ceremony execution
+- FROST-WASM host (loads `@mpc-wallet/core-wasm` → `frostDkg`)
+- DOM-dependent operations that can't run in the MV3 service
+  worker context
 
-**Key Components:**
-- `WebRTCManager`: Handles peer-to-peer connections
-- Session proposal and acceptance logic
-- Data channel management for MPC communication
-- ICE candidate exchange and connection establishment
+**Key components:**
+- `WebRTCManager` — peer connections + FROST state
+  (`frostDkg`, `signingInfo`, `signingCommitments`,
+  `signingShares`). See CLAUDE.md for the signing pipeline.
 
 ### 4. Content Script (Web Integration)
-**Location:** `/src/entrypoints/content/index.ts`
+**Location:** `src/entrypoints/content/index.ts` (injects the
+provider) + `src/entrypoints/injected/index.ts` (the provider
+itself — runs in page context).
 
 **Responsibilities:**
-- Injects wallet API into web pages
-- Provides `window.ethereum` compatibility
-- Proxies JSON-RPC requests to background script
-- Manages web page wallet interactions
+- Injects an EIP-1193 provider into the page as
+  `window.starlabEthereum` (not `window.ethereum` — the
+  extension coexists with other wallets via EIP-6963 discovery;
+  see `docs/implementation/EIP-6963-IMPLEMENTATION.md`)
+- Proxies JSON-RPC requests (eth_requestAccounts,
+  eth_sendTransaction, personal_sign, etc.) to the background
+  via `chrome.runtime.sendMessage`
 
 ## Message System
 
-The extension uses a comprehensive type-safe message system defined in `/src/types/messages.ts`. Understanding the message flow directions is crucial for proper implementation.
+The extension uses a type-safe message system defined in
+`packages/@mpc-wallet/types/src/messages.ts` (shared workspace
+package — NOT under the extension's own `src/types/`).
+Understanding the message-flow directions is crucial for proper
+implementation.
 
 ### Message Flow Architecture
 
