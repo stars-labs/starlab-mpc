@@ -80,7 +80,7 @@ pub enum Command {
     },
     /// Hot-load an existing wallet: decrypt the keystore file with
     /// `password`, deserialize the `(KeyPackage, PublicKeyPackage)` tuple
-    /// from the blob (see [`encode_keystore_blob`]), and stash both onto
+    /// from the blob (see `encode_keystore_blob`), and stash both onto
     /// `AppState` so the signing protocol layer has what it needs.
     ///
     /// `password` is taken by value — same discipline as

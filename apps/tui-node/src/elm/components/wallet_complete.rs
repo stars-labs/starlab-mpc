@@ -9,6 +9,8 @@
 //! `password_prompt.rs` for the same pattern).
 //!
 //! Layout (top-to-bottom):
+//!
+//! ```text
 //!     ┌──  🎉 Wallet Ready — <wallet_id>  ──────────────┐
 //!     │ Group Verifying Key (<curve>):                 │
 //!     │     <66-char hex, monospace>                   │
@@ -19,6 +21,7 @@
 //!     │                                                │
 //!     │ Enter = Done    Esc = Done    Ctrl-C = Quit    │
 //!     └────────────────────────────────────────────────┘
+//! ```
 
 use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;

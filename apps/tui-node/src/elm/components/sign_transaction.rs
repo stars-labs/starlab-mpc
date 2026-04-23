@@ -8,6 +8,8 @@
 //! Enter through `Message::SignSubmit`.
 //!
 //! Layout:
+//!
+//! ```text
 //!     ┌── 🖊️  Sign with <wallet_id> ────────────┐
 //!     │ Group key: <short>...                 │
 //!     │                                        │
@@ -19,6 +21,7 @@
 //!     │                                        │
 //!     │ Enter = Sign    Esc = Cancel           │
 //!     └────────────────────────────────────────┘
+//! ```
 //!
 //! Phase C scope: message-only field. The KeyPackage is assumed to
 //! already be loaded on AppState — for a fresh-DKG session that's true;

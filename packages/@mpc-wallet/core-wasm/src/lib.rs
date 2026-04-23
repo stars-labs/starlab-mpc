@@ -769,7 +769,7 @@ impl FrostDkgUnified {
     }
 
     /// Generate round 1 packages for both curves.
-    /// Returns JSON: { "ed25519": "<hex>", "secp256k1": "<hex>" }
+    /// Returns JSON: `{ "ed25519": "<hex>", "secp256k1": "<hex>" }`
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let package = self.dkg.generate_round1()?;
         serde_json::to_string(&package)
@@ -791,7 +791,7 @@ impl FrostDkgUnified {
     }
 
     /// Generate round 2 packages for both curves.
-    /// Returns JSON: { "ed25519": { <participant_index>: "<hex>", ... }, "secp256k1": { ... } }
+    /// Returns JSON: `{ "ed25519": { <participant_index>: "<hex>", ... }, "secp256k1": { ... } }`
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
         let packages = self.dkg.generate_round2()?;
         serde_json::to_string(&packages)

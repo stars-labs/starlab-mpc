@@ -195,7 +195,7 @@ pub struct WalletState {
     /// CancelSigningRequest clears it and dismisses the modal. The
     /// window is one render frame typically, but storing on Model
     /// (rather than inside Message::Confirm's boxed payload) avoids
-    /// threading Vec<u8> through the modal plumbing.
+    /// threading `Vec<u8>` through the modal plumbing.
     pub pending_sign_preview: Option<PendingSignPreview>,
     /// Device ids of co-signers whose FROST round-1 commitment has
     /// landed on this node. Used by the SigningProgress screen to
