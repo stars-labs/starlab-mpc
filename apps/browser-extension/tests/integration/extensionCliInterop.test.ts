@@ -110,7 +110,7 @@ describe('Extension-CLI Keystore Interoperability', () => {
             
             // Verify import
             const wallets = extensionKeystore.getWallets();
-            const importedWallet = wallets.find(w => w.id === 'imported-cli-eth');
+            const importedWallet = wallets.find((w: any) => w.id === 'imported-cli-eth');
             
             expect(importedWallet).toBeDefined();
             expect(importedWallet?.blockchain).toBe('ethereum');
@@ -161,7 +161,7 @@ describe('Extension-CLI Keystore Interoperability', () => {
             });
             
             const wallets = extensionKeystore.getWallets();
-            const importedWallet = wallets.find(w => w.id === 'imported-cli-sol');
+            const importedWallet = wallets.find((w: any) => w.id === 'imported-cli-sol');
             
             expect(importedWallet).toBeDefined();
             expect(importedWallet?.blockchain).toBe('solana');
@@ -366,7 +366,7 @@ describe('Extension-CLI Keystore Interoperability', () => {
             
             // Verify participants list is preserved
             const wallets = extensionKeystore.getWallets();
-            const wallet = wallets.find(w => w.id === 'session-test');
+            const wallet = wallets.find((w: any) => w.id === 'session-test');
             expect(wallet?.sessionId).toBe(sessionId);
         });
     });
@@ -410,16 +410,16 @@ describe('Extension-CLI Keystore Interoperability', () => {
             
             // Verify both imports - filter for the specific wallets we just added
             const wallets = extensionKeystore.getWallets();
-            const ourWallets = wallets.filter(w => w.id.startsWith('wallet-device-'));
+            const ourWallets = wallets.filter((w: any) => w.id.startsWith('wallet-device-'));
             expect(ourWallets).toHaveLength(3);
             
             // All should have same session ID and address
-            const sessionWallets = wallets.filter(w => w.sessionId === sessionId);
+            const sessionWallets = wallets.filter((w: any) => w.sessionId === sessionId);
             expect(sessionWallets).toHaveLength(3);
-            expect(sessionWallets.every(w => w.address === '0xSHARED_ADDRESS')).toBe(true);
+            expect(sessionWallets.every((w: any) => w.address === '0xSHARED_ADDRESS')).toBe(true);
             
             // But different device origins
-            const deviceIds = sessionWallets.map(w => w.id);
+            const deviceIds = sessionWallets.map((w: any) => w.id);
             expect(deviceIds).toContain('wallet-device-1');
             expect(deviceIds).toContain('wallet-device-2');
             expect(deviceIds).toContain('wallet-device-3');
