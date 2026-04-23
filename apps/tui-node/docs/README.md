@@ -21,17 +21,20 @@ The MPC Wallet Terminal UI (TUI) Node is a professional-grade terminal applicati
 - **Offline Mode**: Air-gapped operations for maximum security
 - **Encrypted Keystore**: Password-protected local key storage
 
-### Enterprise Features
-- **Session Management**: Persistent sessions with automatic reconnection
-- **Audit Logging**: Complete activity and transaction history
-- **Multi-Wallet Support**: Manage multiple wallets and accounts
-- **Import/Export**: Compatible with browser extension and other implementations
-- **Performance Optimization**: Connection pooling and message batching
+### Additional Features
+- **WebSocket Reconnect**: Signal-server connection is re-established
+  automatically after drops; mid-ceremony resumption depends on the
+  peers still holding their in-memory FROST state.
+- **Multi-Wallet Support**: Manage multiple wallets per device. Each
+  wallet is partitioned by curve (ed25519 / secp256k1) under the
+  device_id in `~/.frost_keystore/`.
+- **Import/Export**: Keystore round-trips with the browser extension
+  are test-covered (same PBKDF2 + AES-256-GCM format).
 
 ## Quick Start
 
 ### Prerequisites
-- Rust 1.70+ toolchain
+- Rust 1.85+ (workspace is edition 2024; see root `Cargo.toml`)
 - Linux, macOS, or Windows
 - Terminal with UTF-8 support
 
