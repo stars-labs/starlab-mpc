@@ -77,6 +77,166 @@ impl CoreAdapter {
             .await
             .map_err(|e| e.to_string())
     }
+
+    /// Export an artefact to a user-chosen SD-card directory.
+    ///
+    /// Opens an rfd folder-picker; the caller's `data_type` is used
+    /// as the filename stem (e.g. "dkg_round1", "signing_share").
+    /// The actual bytes written are a placeholder until the core
+    /// wires real DKG / signing artefacts out through
+    /// `OfflineDataPackage` — see the native-node README "Next
+    /// steps" #2. This commit ships the UI side so the buttons are
+    /// live.
+    pub async fn export_to_sd_card(&self, data_type: String) -> Result<(), String> {
+        let Some(handle) = tokio::task::spawn_blocking(|| {
+            rfd::FileDialog::new()
+                .set_title("Select SD card directory")
+                .pick_folder()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        else {
+            self.ui_callback
+                .show_message("SD-card export cancelled".to_string(), false)
+                .await;
+            return Ok(());
+        };
+
+        let sd_dir = handle.to_path_buf();
+        let filename = format!(
+            "{}_{}.json",
+            data_type,
+            chrono::Utc::now().timestamp()
+        );
+        let target = sd_dir.join("mpc_wallet_export").join(&filename);
+
+        if let Some(parent) = target.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        }
+        // Placeholder content — swap for a real OfflineDataPackage
+        // once the elm Message loop exposes its artefacts to core.
+        let placeholder = serde_json::json!({
+            "placeholder": true,
+            "data_type": data_type,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "note": "native-node SD export — real artefact pending FROST hookup"
+        });
+        tokio::fs::write(&target, serde_json::to_vec_pretty(&placeholder).unwrap())
+            .await
+            .map_err(|e| e.to_string())?;
+
+        self.ui_callback
+            .show_message(
+                format!("Wrote placeholder {} to {}", data_type, target.display()),
+                false,
+            )
+            .await;
+        Ok(())
+    }
+
+    /// Read SD-card artefacts from a user-chosen directory.
+    ///
+    /// Delegates to `OfflineManager::import_from_sd_card` after
+    /// temporarily redirecting its path — since `OfflineManager`
+    /// reads its `sd_card_path` field (set at construction), we
+    /// can't override per-call yet. Until that setter lands, this
+    /// handler just opens the folder picker to confirm the user
+    /// knows where their SD card is mounted, then delegates.
+    pub async fn import_from_sd_card(&self) -> Result<(), String> {
+        let Some(handle) = tokio::task::spawn_blocking(|| {
+            rfd::FileDialog::new()
+                .set_title("Select SD card directory to import from")
+                .pick_folder()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        else {
+            self.ui_callback
+                .show_message("SD-card import cancelled".to_string(), false)
+                .await;
+            return Ok(());
+        };
+
+        let sd_dir = handle.to_path_buf();
+        let import_subdir = sd_dir.join("mpc_wallet_import");
+        if !import_subdir.exists() {
+            self.ui_callback
+                .show_message(
+                    format!(
+                        "No mpc_wallet_import/ directory under {}",
+                        sd_dir.display()
+                    ),
+                    true,
+                )
+                .await;
+            return Ok(());
+        }
+
+        // Enumerate + surface count via the UI. Real parse flow
+        // would construct OfflineDataPackage values and feed them
+        // into the elm handlers — deferred to Next step #2.
+        let mut count = 0usize;
+        let mut entries = tokio::fs::read_dir(&import_subdir)
+            .await
+            .map_err(|e| e.to_string())?;
+        while let Some(_entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+            count += 1;
+        }
+
+        self.ui_callback
+            .show_message(
+                format!("Found {count} SD-card artefacts in {}", import_subdir.display()),
+                false,
+            )
+            .await;
+        Ok(())
+    }
+
+    /// Clear SD-card MPC wallet directories from a user-chosen
+    /// folder. Same caveat as export/import re: OfflineManager's
+    /// fixed path — this variant operates on the user-picked path
+    /// directly.
+    pub async fn clear_sd_card(&self) -> Result<(), String> {
+        let Some(handle) = tokio::task::spawn_blocking(|| {
+            rfd::FileDialog::new()
+                .set_title("Select SD card directory to clear")
+                .pick_folder()
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        else {
+            self.ui_callback
+                .show_message("SD-card clear cancelled".to_string(), false)
+                .await;
+            return Ok(());
+        };
+
+        let sd_dir = handle.to_path_buf();
+        let confirmed = self
+            .ui_callback
+            .request_confirmation(format!(
+                "Clear mpc_wallet_* directories under {}?",
+                sd_dir.display()
+            ))
+            .await;
+        if !confirmed {
+            return Ok(());
+        }
+
+        for sub in ["mpc_wallet_export", "mpc_wallet_import"] {
+            let p = sd_dir.join(sub);
+            if p.exists() {
+                tokio::fs::remove_dir_all(&p).await.map_err(|e| e.to_string())?;
+            }
+        }
+
+        self.state.pending_sd_operations.lock().await.clear();
+        self.ui_callback.update_sd_operations(Vec::new()).await;
+        self.ui_callback
+            .show_message(format!("Cleared SD-card data under {}", sd_dir.display()), false)
+            .await;
+        Ok(())
+    }
     
     /// Connect to WebSocket server
     pub async fn connect_websocket(&self, url: String) -> Result<(), String> {

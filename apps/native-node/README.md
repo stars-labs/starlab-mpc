@@ -26,7 +26,7 @@ automatically.
 | DKG ceremony            | ✅       | ✅          | ✅ (core reused) |
 | Wallet import/export    | ✅       | ✅          | ✅ `rfd` file dialog + Settings password field (for encrypted keystores) |
 | Threshold signing       | ✅       | ✅          | ⚠ full approve/reject modal + SigningManager in `tui-node::core`; signature is a placeholder until FROST rounds plug into `protocal::signing` |
-| SD-card air-gap mode    | ✅       | ❌          | ⚠ core wired, no file-picker UI |
+| SD-card air-gap mode    | ✅       | ❌          | ⚠ `rfd` folder-picker wired for export/import/clear; emits placeholder JSON artefacts until FROST hookup lands |
 | Keystore persistence    | ✅       | ✅          | ⚠ inherits from TUI's `Keystore` but no UI to unlock/lock |
 | EIP-1193 dApp injection | ❌       | ✅          | ❌ (desktop app — no in-browser context) |
 

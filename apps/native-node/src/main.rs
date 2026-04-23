@@ -208,6 +208,47 @@ async fn main() -> Result<()> {
         });
     }
 
+    // SD-card operations. All three open an rfd folder picker so
+    // the user points at whatever mount-point their SD card has
+    // (the default /media/sdcard in OfflineManager doesn't cover
+    // macOS or Windows).
+    {
+        let adapter = adapter.clone();
+        window.on_export_to_sd_card(move |data_type| {
+            let adapter = adapter.clone();
+            let data_type = data_type.to_string();
+            tokio::spawn(async move {
+                if let Err(e) = adapter.export_to_sd_card(data_type).await {
+                    println!("Failed to export to SD card: {}", e);
+                }
+            });
+        });
+    }
+
+    {
+        let adapter = adapter.clone();
+        window.on_import_from_sd_card(move || {
+            let adapter = adapter.clone();
+            tokio::spawn(async move {
+                if let Err(e) = adapter.import_from_sd_card().await {
+                    println!("Failed to import from SD card: {}", e);
+                }
+            });
+        });
+    }
+
+    {
+        let adapter = adapter.clone();
+        window.on_clear_sd_card(move || {
+            let adapter = adapter.clone();
+            tokio::spawn(async move {
+                if let Err(e) = adapter.clear_sd_card().await {
+                    println!("Failed to clear SD card: {}", e);
+                }
+            });
+        });
+    }
+
     // Run the UI.
     //
     // The previous `adapter.initialize_demo()` call that lived here

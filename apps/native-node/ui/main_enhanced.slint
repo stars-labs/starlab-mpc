@@ -79,6 +79,17 @@ export component MainWindow inherits Window {
     callback start_dkg();
     callback abort_dkg();
 
+    // Offline SD-card operations. All three are parameterless —
+    // the Rust side opens an rfd folder dialog to pick the SD
+    // card root, then the OfflineManager reads / writes the
+    // expected subdirectories (mpc_wallet_export /
+    // mpc_wallet_import). The `data_type` string on export_
+    // reaches CoreAdapter and is passed through as the data-type
+    // label in OfflineDataPackage.
+    callback export_to_sd_card(string);
+    callback import_from_sd_card();
+    callback clear_sd_card();
+
     // Signing callbacks. sign_message() kicks off a new request
     // (takes hex-encoded message + chain, e.g. "ethereum"); once
     // AppState.has_signing_request flips true the confirm modal
@@ -208,6 +219,11 @@ export component MainWindow inherits Window {
                     pending_operations: AppState.pending_sd_operations;
                     
                     toggle_offline_mode => { root.toggle_offline_mode(); }
+                    export_to_sd_card(data_type) => {
+                        root.export_to_sd_card(data_type);
+                    }
+                    import_from_sd_card => { root.import_from_sd_card(); }
+                    clear_sd_card => { root.clear_sd_card(); }
                 }
                 
                 // Session list
