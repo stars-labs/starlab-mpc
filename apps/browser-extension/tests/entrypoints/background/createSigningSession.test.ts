@@ -24,6 +24,8 @@ function makeSessionManager() {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
     const announces: Array<Record<string, unknown>> = [];
     const openSentinel = (WebSocket as any)?.OPEN;

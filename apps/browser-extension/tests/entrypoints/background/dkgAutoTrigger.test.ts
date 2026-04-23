@@ -43,6 +43,8 @@ function makeManager(opts?: {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
     const broadcast = jest.fn();
     const sentToOffscreen: Array<{ msg: any; desc: string }> = [];

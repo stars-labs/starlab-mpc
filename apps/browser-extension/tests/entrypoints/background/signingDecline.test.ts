@@ -39,6 +39,8 @@ function makeWsManager(opts?: {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
     const broadcasts: Array<Record<string, unknown>> = [];
     const broadcast = jest.fn((msg: any) => {

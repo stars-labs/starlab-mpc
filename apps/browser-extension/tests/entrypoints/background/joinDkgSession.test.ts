@@ -68,6 +68,8 @@ function makeSessionManager(opts?: {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
     const sentUpdates: Array<{ sessionId: string; deviceId: string }> = [];
     const announces: Array<Record<string, unknown>> = [];

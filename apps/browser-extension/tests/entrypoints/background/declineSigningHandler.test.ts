@@ -55,6 +55,8 @@ function makeHandler(opts?: {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
 
     const relayCalls: Array<{ to: string; data: any }> = [];

@@ -35,6 +35,8 @@ function makeAppState(): AppState {
         dkgState: DkgState.Idle,
         webrtcConnections: {},
         blockchain: "ethereum",
+        totalParticipants: 3,
+        threshold: 2,
     };
 }
 
