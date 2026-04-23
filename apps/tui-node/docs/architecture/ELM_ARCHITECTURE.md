@@ -49,25 +49,29 @@ pub struct Model {
     pub pending_operations: Vec<Operation>,
     
     // User context
-    pub selected_wallet: Option<WalletId>,
+    pub selected_wallet: Option<String>,   // Wallet ID as plain String;
+                                           // no newtype WalletId exists
     pub device_id: String,
 }
 
 pub struct WalletState {
-    pub wallets: Vec<Wallet>,
+    pub wallets: Vec<WalletMetadata>,      // NOT Vec<Wallet> — no
+                                           // `Wallet` type exists
     pub keystore_initialized: bool,
     pub keystore_path: String,
+    pub keystore: Option<Arc<Keystore>>,
+    // …plus password/DKG/signing draft fields, see source
 }
 
 pub struct NetworkState {
     pub connected: bool,
-    pub peers: Vec<PeerId>,
+    pub peers: Vec<String>,                // Device IDs as strings
     pub websocket_url: String,
     pub connection_status: ConnectionStatus,
 }
 
 pub struct UIState {
-    pub focus: ComponentId,
+    pub focus: ComponentId,                // Real enum at model.rs:476
     pub modal: Option<Modal>,
     pub notifications: Vec<Notification>,
     pub input_buffer: String,
@@ -205,11 +209,11 @@ pub enum Command {
     // Data loading
     LoadWallets,
     LoadSessions,
-    LoadWalletDetails { id: WalletId },
-    
+    LoadWalletDetails { wallet_id: String },
+
     // Network operations
-    ConnectWebSocket { url: String },
-    SendNetworkMessage { to: PeerId, data: Vec<u8> },
+    ConnectWebSocket,                        // Uses the configured signal-server URL
+    SendNetworkMessage { to: String, data: Vec<u8> },
     BroadcastMessage { data: Vec<u8> },
     
     // Cryptographic operations
@@ -390,16 +394,19 @@ for COMPLETE_TUI_DOCUMENTATION.md).
 Valid screen transitions are enforced through the type system:
 
 ```rust
+// See src/elm/model.rs for the real enum — IDs are plain Strings
+// throughout, NOT newtype WalletId / SessionId wrappers (neither
+// type exists in source).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
     Welcome,
     MainMenu,
     CreateWallet(CreateWalletState),
     ManageWallets,
-    WalletDetail { id: WalletId },
+    WalletDetail { wallet_id: String },
     JoinSession,
-    SessionDetail { id: SessionId },
-    SignTransaction { wallet_id: WalletId },
+    SessionDetail { session_id: String },
+    SignTransaction { wallet_id: String },
     Settings,
 }
 

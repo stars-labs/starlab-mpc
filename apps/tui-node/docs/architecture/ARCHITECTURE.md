@@ -485,9 +485,20 @@ Real opportunities for perf work:
 
 ## Extension Points
 
-### Plugin System (Future)
+This section sketches FUTURE extension surfaces. None of the
+traits / types below exist in current source — they're design
+proposals listed here so future contributors have a starting
+point rather than having to rederive the shape. For what
+actually ships, see the Module Organization section earlier in
+this doc + the parent [`./README.md`](./README.md).
+
+### Plugin System (proposal)
+
+A potential `WalletPlugin` trait could let third parties add new
+chains without modifying core crates:
 
 ```rust
+// PROPOSAL — not implemented
 pub trait WalletPlugin {
     fn name(&self) -> &str;
     fn supported_chains(&self) -> Vec<Blockchain>;
@@ -496,33 +507,46 @@ pub trait WalletPlugin {
 }
 ```
 
-### Custom UI Themes
+Today, adding a chain requires hand-editing
+`packages/@mpc-wallet/blockchain/src/*.rs` (see 5fd8378 for the
+multi-L2 support precedent).
+
+### Custom UI Themes (proposal)
+
+No theming layer exists. Colors and borders are hardcoded in the
+per-screen components (e.g. `main_menu.rs` uses `Color::Cyan` for
+high-priority items). A `Theme { colors, borders, symbols }`
+struct is a reasonable design but not in source.
+
+### Protocol Extensions (proposal)
+
+Hypothetical work, none underway:
+
+- Additional curves beyond ed25519 / secp256k1 (would need
+  `FrostCurve` impl in `packages/@mpc-wallet/frost-core`)
+- Custom threshold schemes (FROST share refresh, accountable
+  threshold signatures, etc.)
+- Hardware-wallet co-signing
+
+### Integration APIs (proposal)
+
+No REST API exists. The TUI is a local binary that talks to a
+signal server over WebSocket; there's no HTTP surface for
+external automation. A possible future API trait:
 
 ```rust
-pub struct Theme {
-    pub colors: ColorScheme,
-    pub borders: BorderStyle,
-    pub symbols: SymbolSet,
-}
-```
-
-### Protocol Extensions
-
-- Support for additional curves
-- Custom threshold schemes
-- Multi-signature protocols
-- Hardware wallet integration
-
-### Integration APIs
-
-```rust
-// REST API for external integration
+// PROPOSAL — not implemented
 pub trait ExternalAPI {
-    fn create_wallet(&self, params: WalletParams) -> Result<WalletId>;
-    fn sign_transaction(&self, wallet: WalletId, tx: Transaction) -> Result<Signature>;
-    fn get_wallet_info(&self, wallet: WalletId) -> Result<WalletInfo>;
+    fn create_wallet(&self, params: WalletParams) -> Result<String /* wallet_id */>;
+    fn sign_transaction(&self, wallet_id: &str, tx: Transaction) -> Result<Signature>;
+    fn get_wallet_info(&self, wallet_id: &str) -> Result<WalletInfo>;
 }
 ```
+
+Note the plain `String` wallet IDs — no `WalletId` newtype exists
+in source. Same for `SessionId`, `PeerId`, etc. (earlier drafts of
+this doc used those invented type names; they don't reflect the
+real string-typed IDs in `src/elm/model.rs`).
 
 ## Development Guidelines
 
