@@ -376,36 +376,48 @@ export class WebSocketManager {
             this.stateManager.updateInvites(invites);
         }
 
-        // Ext-1c auto-trigger: a session update that brings
-        // participants.length up to total means all N-of-N are
-        // joined — time to kick off the WebRTC mesh + FROST DKG
-        // ceremony. The offscreen already knows how to handle a
-        // `sessionAllAccepted` message (handler at
-        // `offscreen/index.ts:437` already does setBlockchain +
-        // updateSessionInfo + checkAndTriggerDkg). We just need to
-        // fire the trigger message at the right moment.
+        // Ext-1c + Ext-2d auto-trigger: a session update that brings
+        // participants.length up to the "ready" threshold means we
+        // can kick off the WebRTC mesh + FROST ceremony.
         //
-        // Gate conditions:
+        // Gate differs by session_type:
+        //   - DKG (default): exactly N-of-N joined (`=== total`).
+        //   - Signing: at least threshold signers joined (`>= threshold`).
+        //     FROST signing only needs threshold cosigners, not total;
+        //     waiting for all N would stall if a non-signing
+        //     participant is offline. Matches TUI's signing flow
+        //     (53c2f16) where mesh setup fires as peers join up to
+        //     threshold.
+        //
+        // Common gate conditions (both ceremonies):
         //   1. This session is OUR active session (we're the
         //      creator OR we previously joined). Avoids triggering
-        //      DKG for sessions we haven't committed to.
+        //      for sessions we haven't committed to.
         //   2. We're listed as a participant (belt-and-suspenders
         //      given #1).
-        //   3. `participants.length === total` exactly — this is
-        //      the transition, not any full or past-full value
-        //      (server re-broadcasts could retrigger otherwise).
-        this.maybeTriggerDkgCeremony(parsed);
+        //   3. Dedup by session_id in `dkgTriggerFiredFor` (same
+        //      field reused for signing; one trigger per session).
+        this.maybeTriggerCeremony(parsed);
     }
 
     /**
-     * Fire `sessionAllAccepted` to offscreen if this session update
-     * brings us to the "ready to start DKG" threshold. Idempotent:
-     * a repeated same-value broadcast shouldn't re-fire (offscreen's
-     * own `checkAndTriggerDkg` guards against dkgState !== Idle, but
-     * we also dedup here to save the round trip). The dedup is
-     * per-session-id in `dkgTriggerFiredFor`.
+     * Fire the appropriate "ready to start" event to offscreen when
+     * a session reaches its ceremony-kickoff threshold. Idempotent
+     * per-session-id via `dkgTriggerFiredFor` (the name dates from
+     * when only DKG was supported — still accurate as a "we've
+     * fired the ceremony trigger for this session" marker).
+     *
+     *   - DKG (session_type "dkg" or absent): wait for all N.
+     *     Fires `sessionAllAccepted` — offscreen then does
+     *     setBlockchain + updateSessionInfo + checkAndTriggerDkg
+     *     (starts FROST DKG round 1).
+     *   - Signing (session_type "signing"): wait for threshold.
+     *     Fires `sessionReadyForSigning` — offscreen will load the
+     *     keystore for `wallet_id`, set up mesh, and kick off FROST
+     *     signing round 1. (Offscreen handler landed separately in
+     *     the offscreen-signing wiring.)
      */
-    private maybeTriggerDkgCeremony(session: SessionInfo): void {
+    private maybeTriggerCeremony(session: SessionInfo): void {
         const mySessionId = this.appState.sessionInfo?.session_id;
         if (!mySessionId || mySessionId !== session.session_id) {
             return; // Not our session.
@@ -414,20 +426,31 @@ export class WebSocketManager {
         if (!deviceId || !session.participants.includes(deviceId)) {
             return; // We're not a listed participant.
         }
-        if (session.participants.length !== session.total) {
-            return; // Not yet full.
-        }
         if (this.dkgTriggerFiredFor === session.session_id) {
             return; // Already fired for this exact session.
         }
+
+        const sessionType = session.session_type ?? "dkg";
+        const joined = session.participants.length;
+
+        // Gate by session type — signing threshold vs DKG total.
+        if (sessionType === "signing") {
+            if (joined < session.threshold) {
+                return; // Not enough signers yet.
+            }
+        } else {
+            if (joined !== session.total) {
+                return; // DKG needs all N.
+            }
+        }
+
         this.dkgTriggerFiredFor = session.session_id;
 
-        // The existing sessionAllAccepted handler expects
-        // `accepted_devices` to contain every participant (it uses
-        // that for the "all accepted" check). TUI's wire format
-        // doesn't carry this field — `parseSessionInfoFromWire`
-        // synthesizes `[]`. Fill it in here: for the TUI-compat
-        // flow, being in `participants` IS being accepted.
+        // The offscreen handlers expect `accepted_devices` to be
+        // populated (used for "all accepted" checks). TUI's wire
+        // format doesn't carry this — `parseSessionInfoFromWire`
+        // synthesizes `[]`. In the TUI-compat flow, being in
+        // `participants` IS being accepted — fill it in here.
         const sessionWithAccepted: SessionInfo = {
             ...session,
             accepted_devices: [...session.participants],
@@ -437,6 +460,21 @@ export class WebSocketManager {
             (session.curve_type ?? "secp256k1") === "ed25519"
                 ? "solana"
                 : "ethereum";
+
+        if (sessionType === "signing") {
+            console.log(
+                `[WebSocketManager] 🖋️  Signing threshold reached (${joined}/${session.threshold}) for session ${session.session_id} — triggering signing ceremony (${blockchain})`,
+            );
+            void this.sendToOffscreen(
+                {
+                    type: "sessionReadyForSigning",
+                    sessionInfo: sessionWithAccepted,
+                    blockchain,
+                } as any,
+                `sessionReadyForSigning(${session.session_id})`,
+            );
+            return;
+        }
 
         console.log(
             `[WebSocketManager] 🎉 All ${session.total} participants joined session ${session.session_id} — triggering DKG (${blockchain})`,
