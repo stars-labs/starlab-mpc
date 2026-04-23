@@ -70,6 +70,12 @@ test-results/
 *.temp
 .cache/
 
+# Claude Code session runtime state (lockfiles, caches). Team
+# settings at .claude/settings.json are still tracked; only the
+# transient per-session artefacts are ignored.
+.claude/scheduled_tasks.lock
+.claude/*.log
+
 # Extension build artifacts
 public/index.js
 public/index_bg.wasm
