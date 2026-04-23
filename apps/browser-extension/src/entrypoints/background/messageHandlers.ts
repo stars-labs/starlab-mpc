@@ -505,26 +505,46 @@ export class PopupMessageHandler {
         sendResponse(result);
     }
     
-    private async handleApproveMessageSignature(message: any, sendResponse: (response: any) => void): Promise<void> {
-        if (!message.requestId || typeof message.approved !== 'boolean') {
+    private async handleApproveMessageSignature(
+        message: any,
+        sendResponse: (response: any) => void,
+    ): Promise<void> {
+        if (!message.requestId || typeof message.approved !== "boolean") {
             sendResponse({ success: false, error: "Invalid approval message" });
             return;
         }
-        
-        console.log(`[PopupMessageHandler] Signature approval for ${message.requestId}: ${message.approved}`);
-        
-        if (!message.approved) {
-            // User rejected the signature
-            // Find the pending signature in RPC handler and reject it
-            if (this.rpcHandler.handleSignatureError) {
-                this.rpcHandler.handleSignatureError(message.requestId, "User rejected signature request");
-            }
-            sendResponse({ success: true });
+
+        console.log(
+            `[PopupMessageHandler] Signature approval for ${message.requestId}: ${message.approved}`,
+        );
+
+        // Ext-4-confirm: if this requestId corresponds to a pending
+        // dApp request in RpcHandler, route through
+        // approveDappSignature — it creates the FROST session on
+        // approval or rejects the pending promise on deny. Falls
+        // back to the legacy "just reject on deny" path for
+        // requestIds the RpcHandler doesn't recognize (in case
+        // we still have stale callers of the old approve flow).
+        if (
+            typeof (this.rpcHandler as any).approveDappSignature === "function"
+        ) {
+            const result = await (this.rpcHandler as any).approveDappSignature(
+                message.requestId,
+                message.approved,
+            );
+            sendResponse(result);
             return;
         }
-        
-        // User approved - the signature will be processed by the offscreen document
-        // which is already handling the MPC signing flow
+
+        // Legacy fallback:
+        if (!message.approved) {
+            if (this.rpcHandler.handleSignatureError) {
+                this.rpcHandler.handleSignatureError(
+                    message.requestId,
+                    "User rejected signature request",
+                );
+            }
+        }
         sendResponse({ success: true });
     }
 

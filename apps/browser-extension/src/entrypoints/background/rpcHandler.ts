@@ -41,6 +41,31 @@ export class RpcHandler {
      */
     private pendingSignatures: Map<string, { resolve: (value: string) => void; reject: (reason?: any) => void }> = new Map();
     /**
+     * Ext-4-confirm: dApp sign requests awaiting user approval in
+     * the popup. Keyed by the placeholder id we assigned when the
+     * RPC arrived (before any session exists). On approval, we
+     * create the real session and re-key the pending promise
+     * above to the actual session id; on rejection, we just reject
+     * the pending promise and clean up.
+     *
+     * Kept distinct from pendingSignatures because a request can
+     * live here indefinitely (while the popup is closed) without
+     * a FROST ceremony running — aborting via reject() on timeout
+     * is the only cleanup trigger.
+     */
+    private pendingDappRequests: Map<string, {
+        walletId: string;
+        walletName: string;
+        groupPublicKey: string;
+        blockchain: "ethereum" | "solana";
+        threshold: number;
+        total: number;
+        messageHex: string;
+        originalMessage: string;
+        address: string;
+        origin: string;
+    }> = new Map();
+    /**
      * Ext-4: injected so RPC calls (e.g. personal_sign from a dApp)
      * can create the same TUI-compatible signing session the popup
      * does. Kept optional so stateless RPC calls that don't need
@@ -398,44 +423,160 @@ export class RpcHandler {
             ).join('');
         }
 
-        const result = await this.sessionManager.createSigningSession({
+        // Ext-4-confirm: DO NOT announce the session yet. A dApp
+        // RPC arriving at the extension MUST gate on explicit user
+        // approval before any signing session hits the signal
+        // server — otherwise a malicious dApp could trigger
+        // notifications / offscreen wake on all co-signer devices
+        // just by calling personal_sign. Stash the context, show
+        // the request in the popup, and only call createSigningSession
+        // when the user clicks Approve (approveDappSignature below).
+        const requestId = `dapp_req_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        this.pendingDappRequests.set(requestId, {
             walletId: (wallet as any).id,
             walletName: (wallet as any).name ?? (wallet as any).id,
             groupPublicKey,
             blockchain,
             threshold,
             total,
-            signingMessageHex: messageHex,
+            messageHex,
+            originalMessage: message,
+            address,
+            origin: this.origin || 'Unknown',
         });
-        if (!result.success || !result.sessionId) {
-            throw new Error(result.error ?? 'Failed to create signing session');
-        }
 
-        const sessionId = result.sessionId;
         // Surface the request in the popup so users see the dApp
-        // origin requesting the signature. Reuses the existing
-        // SignatureRequest UI shape.
+        // origin before approving. SignatureRequest.svelte already
+        // renders this shape + dispatches `approveMessageSignature`
+        // when the user picks Sign or Reject.
         chrome.runtime.sendMessage({
             type: 'signatureRequest',
-            signingId: sessionId,
+            signingId: requestId,
             message,
             origin: this.origin || 'Unknown',
             fromAddress: address,
         });
 
-        // Promise that stateManager's signingComplete handler will
-        // resolve when the FROST ceremony produces the aggregated
-        // signature. 5-min timeout so abandoned ceremonies don't
-        // leak promises.
+        // Fire a desktop notification so users know to open the
+        // popup. Without this, a signature request arriving while
+        // the popup is closed is silent — the dApp would spin
+        // until timeout with no user-facing signal.
+        if (typeof chrome !== 'undefined' && chrome.notifications) {
+            try {
+                chrome.notifications.create(`mpc-dapp-sig:${requestId}`, {
+                    type: 'basic',
+                    iconUrl: 'icon/128.png',
+                    title: 'Signature requested',
+                    message: `${this.origin || 'A dApp'} wants you to sign a message with ${address.slice(0, 6)}…${address.slice(-4)}`,
+                    priority: 2,
+                    requireInteraction: true,
+                });
+            } catch (e) {
+                console.warn('[RpcHandler] Failed to create notification:', e);
+            }
+        }
+
+        // Promise resolves (from handleSignatureComplete) when the
+        // FROST ceremony that the popup kicks off on approval
+        // produces the aggregated signature. On rejection, the
+        // popup's handler calls handleSignatureError which rejects
+        // this promise. 5-min timeout catches abandoned requests
+        // (user ignored popup + never approved).
         return new Promise<string>((resolve, reject) => {
-            this.pendingSignatures.set(sessionId, { resolve, reject });
+            this.pendingSignatures.set(requestId, { resolve, reject });
             setTimeout(() => {
-                if (this.pendingSignatures.has(sessionId)) {
-                    this.pendingSignatures.delete(sessionId);
+                if (this.pendingSignatures.has(requestId)) {
+                    this.pendingSignatures.delete(requestId);
+                    this.pendingDappRequests.delete(requestId);
                     reject(new Error('Signature request timed out'));
                 }
             }, 300_000);
         });
+    }
+
+    /**
+     * Ext-4-confirm: called from messageHandlers.handleApproveMessageSignature
+     * after the user clicks Sign/Reject in the popup's SignatureRequest
+     * component. This is where the actual createSigningSession call
+     * happens — deferred from handleSignMessageRequest so users get
+     * to review origin + message first.
+     *
+     * On approve:
+     *   - Pull stashed context from pendingDappRequests.
+     *   - Call sessionManager.createSigningSession (real announce).
+     *   - Re-key the pending promise from the placeholder requestId
+     *     to the actual session_id, so when stateManager.signingComplete
+     *     later fires with that session_id, handleSignatureComplete
+     *     finds the right pending entry.
+     *
+     * On reject:
+     *   - Reject the pending promise with "User rejected".
+     *   - Clean up pendingDappRequests.
+     */
+    async approveDappSignature(
+        requestId: string,
+        approved: boolean,
+    ): Promise<{ success: boolean; error?: string; sessionId?: string }> {
+        const context = this.pendingDappRequests.get(requestId);
+        if (!context) {
+            return {
+                success: false,
+                error: `No pending dApp signature request ${requestId}`,
+            };
+        }
+        this.pendingDappRequests.delete(requestId);
+        // Cancel any pending notification — user engaged with the
+        // popup, no need to keep the OS banner up.
+        if (typeof chrome !== 'undefined' && chrome.notifications) {
+            try {
+                chrome.notifications.clear(`mpc-dapp-sig:${requestId}`);
+            } catch {
+                /* non-fatal */
+            }
+        }
+
+        if (!approved) {
+            this.handleSignatureError(requestId, 'User rejected signature request');
+            return { success: true };
+        }
+
+        if (!this.sessionManager) {
+            this.handleSignatureError(
+                requestId,
+                'SessionManager not initialized',
+            );
+            return { success: false, error: 'SessionManager not initialized' };
+        }
+
+        const result = await this.sessionManager.createSigningSession({
+            walletId: context.walletId,
+            walletName: context.walletName,
+            groupPublicKey: context.groupPublicKey,
+            blockchain: context.blockchain,
+            threshold: context.threshold,
+            total: context.total,
+            signingMessageHex: context.messageHex,
+        });
+        if (!result.success || !result.sessionId) {
+            this.handleSignatureError(
+                requestId,
+                result.error ?? 'Failed to create signing session',
+            );
+            return {
+                success: false,
+                error: result.error ?? 'Failed to create signing session',
+            };
+        }
+
+        // Re-key the pending promise from the placeholder requestId
+        // to the actual session id. signingComplete from stateManager
+        // will arrive with the session id, not the requestId.
+        const pending = this.pendingSignatures.get(requestId);
+        if (pending) {
+            this.pendingSignatures.delete(requestId);
+            this.pendingSignatures.set(result.sessionId, pending);
+        }
+        return { success: true, sessionId: result.sessionId };
     }
 
     /**
