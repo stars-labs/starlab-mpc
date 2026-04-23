@@ -1208,10 +1208,11 @@
         sessionId: string,
         deviceId: string,
     ): boolean | undefined {
-        if (!appState.sessionAcceptanceStatus[sessionId]) {
+        const statusMap = appState.sessionAcceptanceStatus ?? {};
+        if (!statusMap[sessionId]) {
             return undefined;
         }
-        return appState.sessionAcceptanceStatus[sessionId][deviceId];
+        return statusMap[sessionId][deviceId];
     }
 
     // Handle signature request completion

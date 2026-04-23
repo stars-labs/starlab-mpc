@@ -37,6 +37,7 @@ export class MessageHandler {
 
         // Update the entire app state from background
         newState = {
+          ...appState,
           deviceId: message.deviceId || "",
           connecteddevices: [...(message.connecteddevices || [])],
           wsConnected: message.wsConnected || false,

@@ -18,6 +18,15 @@ export interface AppState {
   wsConnected: boolean;
   /** Last WebSocket error; cleared when connection re-establishes. */
   wsError?: string;
+  /**
+   * Per-session per-device acceptance status. Outer key is
+   * session_id, inner key is device_id; values are booleans for
+   * "this device has accepted this session invite". Popup renders
+   * this as the session-progress roster before DKG starts.
+   * Optional because some AppState literals in tests predate this
+   * field; callers should `?? {}` or nullish-guard before indexing.
+   */
+  sessionAcceptanceStatus?: Record<string, Record<string, boolean>>;
   sessionInfo: SessionInfo | null;
   invites: SessionInfo[];
   meshStatus: MeshStatus;
