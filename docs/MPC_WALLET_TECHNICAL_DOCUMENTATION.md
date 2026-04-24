@@ -998,16 +998,31 @@ work.
 
 #### Logging Strategy
 
-`tracing` / `tracing-subscriber` are the real logging stack. The
-browser extension, TUI, and signal server all emit structured
-`info!`/`debug!` events. Filter via the `RUST_LOG` env var:
+Two separate logging stacks — the Rust side and the TypeScript
+extension don't share infrastructure:
 
-```bash
-RUST_LOG=tui_node=debug,webrtc=info mpc-wallet-tui --device-id alice
-```
+- **Rust side** (TUI + signal-server + native-node): `tracing` /
+  `tracing-subscriber` emit structured `info!`/`debug!`/`trace!`
+  events. Filter via the `RUST_LOG` env var:
 
-Most ceremony-relevant logs are at `info`; verbose mesh / FROST
-internals are at `debug` or `trace`.
+  ```bash
+  RUST_LOG=tui_node=debug,webrtc=info mpc-wallet-tui --device-id alice
+  ```
+
+  Most ceremony-relevant logs are at `info`; verbose mesh / FROST
+  internals are at `debug` or `trace`.
+
+- **Browser extension** (TypeScript): plain `console.log` /
+  `console.error` / `console.warn` — no structured tracing
+  facade. View output via the browser DevTools for each extension
+  context (popup / background / offscreen). Earlier drafts of
+  this section claimed the extension also emits
+  `tracing`-structured events; not true — `grep -rn 'tracing::'
+  apps/browser-extension/src` returns zero hits, whereas
+  `console.log` has 338+ call sites in the background scripts
+  alone. Porting the extension to a structured tracing facade
+  (pino / winston / the `tracing` crate via WASM bindings) is
+  open future work.
 
 #### Health Checks
 
