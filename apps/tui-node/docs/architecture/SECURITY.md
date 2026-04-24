@@ -134,17 +134,38 @@ The FROST (Flexible Round-Optimized Schnorr Threshold) protocol provides:
 
 ### Key Generation Security
 
+The illustrative snippet earlier in this section showed a generic
+`Scalar::random(&mut rng)` + `VerifiableSecretSharing::commit(...)`
+API that is NOT what this workspace uses. The real DKG API comes
+from the upstream ZCash `frost-core 2.2` crates:
+
 ```rust
-// Secure random number generation
-use rand_core::OsRng; // Cryptographically secure RNG
+// Real FROST DKG round 1 (see frost-core::keys::dkg::part1 docs)
+use frost_core::keys::dkg::{part1, part2, part3};
+use rand_core::OsRng;
 
-// Key generation with proper entropy
-let mut rng = OsRng;
-let secret_share = Scalar::random(&mut rng);
-
-// Commitment generation with binding
-let commitment = VerifiableSecretSharing::commit(&secret_share);
+// Round 1 — each participant generates their secret polynomial +
+// per-peer commitments + proof-of-knowledge in one call.
+let (round1_secret, round1_package) = part1(
+    /* participant identifier */,
+    max_signers,
+    min_signers,
+    &mut OsRng,
+)?;
+// round1_package is broadcast; round1_secret stays local.
 ```
+
+The secret polynomial and commitments are internal to the
+frost-core implementation — this workspace never handles raw
+`Scalar` values directly (they're gated behind
+`pub(crate)` constructors per the "frost-core internal types"
+note in the top-of-repo CLAUDE.md). RNG seeding flows through
+`rand_core::OsRng` + `rand_chacha::ChaCha20Rng` per
+`packages/@mpc-wallet/frost-core/src/root_secret.rs`.
+
+Earlier drafts of this section showed hand-rolled
+`Scalar::random` / `VerifiableSecretSharing::commit` calls; those
+APIs aren't used anywhere in this codebase.
 
 ### Cryptographic Parameters
 
