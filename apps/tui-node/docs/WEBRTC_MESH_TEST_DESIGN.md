@@ -190,19 +190,55 @@ struct ConnectionQuality {
 ```
 
 ### 3. Rejoin Coordinator
+
+Real struct + impl at `apps/tui-node/src/webrtc/rejoin_coordinator.rs`.
+Note: all the internal HashMaps are `Arc<Mutex<...>>`-wrapped
+(not bare HashMaps as earlier sketches implied), and all the
+mutating methods take `&self` (not `&mut self`) because the
+interior mutability lives behind the mutex guards:
+
 ```rust
-struct RejoinCoordinator {
-    pending_rejoins: HashMap<PeerId, RejoinRequest>,
-    session_state: SessionState,
-    message_buffer: MessageBuffer,
+// struct RejoinCoordinator (:103)
+pub struct RejoinCoordinator {
+    pub session_id: String,
+    pub expected_participants: Vec<PeerId>,
+    pub threshold: usize,
+    pub pending_rejoins: Arc<Mutex<HashMap<PeerId, RejoinRequest>>>,
+    pub authenticated_peers: Arc<Mutex<HashMap<PeerId, String>>>,
+    pub message_buffer: Arc<Mutex<MessageBuffer>>,
+    pub current_round: Arc<Mutex<u8>>,
+    // ... plus a few more history/stat fields
 }
 
+// impl RejoinCoordinator — real public methods (line numbers in comments):
 impl RejoinCoordinator {
-    async fn handle_rejoin_request(&mut self, request: RejoinRequest);
-    async fn sync_participant(&mut self, peer: PeerId);
-    async fn validate_rejoin(&self, peer: PeerId) -> bool;
+    pub fn new(session_id: String,
+               participants: Vec<PeerId>,
+               threshold: usize) -> Self;                 // :127
+
+    pub async fn handle_rejoin_request(&self,
+        request: RejoinRequest) -> RejoinResponse;        // :147
+
+    pub async fn validate_rejoin(&self,
+        request: &RejoinRequest) -> bool;                 // :196
+
+    pub async fn sync_participant(&self, peer_id: PeerId); // :235
+
+    pub fn record_message(&self, from: PeerId, round: u8,
+                          msg_type: &str, data: Vec<u8>); // :248
+    pub fn advance_round(&self);                          // :286
+    pub fn get_rejoin_stats(&self) -> RejoinStats;        // :305
 }
 ```
+
+Earlier sketches had three signature errors:
+
+  - `handle_rejoin_request(&mut self, ...)` — real is `&self`
+    (and returns `RejoinResponse`, not `()`).
+  - `sync_participant(&mut self, peer: PeerId)` — real is `&self,
+    peer_id: PeerId`.
+  - `validate_rejoin(&self, peer: PeerId) -> bool` — real takes
+    `request: &RejoinRequest`, not a bare PeerId.
 
 ## Test Metrics
 
