@@ -237,7 +237,7 @@ A Manifest V3 Chrome/Firefox extension providing Web3 wallet functionality.
 ┌─────────────────────────────────────────────────────┐
 │                    Web Page                          │
 │                                                      │
-│  dApp ◄──────── window.ethereum ────────►│          │
+│  dApp ◄─── window.starlabEthereum ──────►│          │
 └─────────────────────────────────────────────────────┘
                            │
                     Content Script
