@@ -150,19 +150,32 @@ Legacy wallets with stored blockchain info are automatically supported:
 ## API Usage
 
 ```rust
-// Creating a wallet (blockchain info ignored)
+// Creating a wallet — simplified view; blockchain info ignored.
+// Real signature has 13 params, verified at
+// src/keystore/storage.rs:175-189:
+//   create_wallet(&mut self, name, curve_type, _blockchain,
+//     _public_address, threshold, total_participants,
+//     group_public_key, key_share_data, password, tags,
+//     description, participant_index)
+// Two of those (`_blockchain`, `_public_address`) are explicitly
+// ignored parameters kept for back-compat with older callers;
+// `tags: Vec<String>` and `description: Option<String>` are
+// metadata extras that this doc's illustrative snippet omits
+// for clarity. Pass `vec![]` and `None` if you don't need them.
 keystore.create_wallet(
     name,
     curve_type,
     threshold,
-    total,
+    total_participants,       // real param name (not 'total')
     group_public_key,
     key_share_data,
     password,
     participant_index
 )
 
-// Getting addresses (derived on-demand)
+// Getting addresses (derived on-demand — verified method
+// locations: derive_ethereum_address at models.rs:357,
+// derive_solana_address at :368, get_blockchain_addresses at :378)
 let metadata = keystore.get_wallet(wallet_id);
 let eth_address = metadata.derive_ethereum_address();
 let sol_address = metadata.derive_solana_address();
