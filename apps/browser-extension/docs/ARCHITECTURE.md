@@ -376,18 +376,56 @@ chrome.runtime.sendMessage({
 
 ### Message Constants
 
+`MESSAGE_TYPES` is defined at
+`packages/@mpc-wallet/types/src/messages.ts:303`. Illustrative
+subset below — see source for the ~35 real entries:
+
 ```typescript
 export const MESSAGE_TYPES = {
+    // Core state + discovery
     GET_STATE: "getState",
-    LIST_devices: "listdevices",
+    LIST_DEVICES: "listDevices",
+    GET_WEBRTC_STATE: "getWebRTCState",
+    GET_WEBRTC_STATUS: "getWebRTCStatus",
+    GET_ETHEREUM_ADDRESS: "getEthereumAddress",
+    GET_SOLANA_ADDRESS: "getSolanaAddress",
+    SET_BLOCKCHAIN: "setBlockchain",
+
+    // Sessions (legacy + TUI-compatible)
     PROPOSE_SESSION: "proposeSession",
     ACCEPT_SESSION: "acceptSession",
+    CREATE_DKG_WALLET: "createDkgWallet",       // TUI-compat announce
+    JOIN_DKG_SESSION: "joinDkgSession",
+    SAVE_DKG_WALLET: "saveDkgWallet",
+    CREATE_SIGNING_SESSION: "createSigningSession",
+    DECLINE_SIGNING_SESSION: "declineSigningSession",
+
+    // Signing lifecycle
+    REQUEST_SIGNING: "requestSigning",
+    ACCEPT_SIGNING: "acceptSigning",
+    SIGNING_COMPLETE: "signingComplete",
+    SIGNING_ERROR: "signingError",
+
+    // Keystore
+    UNLOCK_KEYSTORE: "unlockKeystore",
+    LOCK_KEYSTORE: "lockKeystore",
+    CREATE_KEYSTORE: "createKeystore",
+    GET_KEYSTORE_STATUS: "getKeystoreStatus",
+    SWITCH_WALLET: "switchWallet",
+    MIGRATE_KEYSTORES: "migrateKeystores",
+
+    // Messaging plumbing
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",
     CREATE_OFFSCREEN: "createOffscreen",
     GET_OFFSCREEN_STATUS: "getOffscreenStatus",
-    
+    SEND_DIRECT_MESSAGE: "sendDirectMessage",
+    WEBRTC_STATUS_UPDATE: "webrtcStatusUpdate",
+    SESSION_UPDATE: "sessionUpdate",
+    PEER_CONNECTION_STATUS_UPDATE: "peerConnectionStatusUpdate",
+    DATA_CHANNEL_STATUS_UPDATE: "dataChannelStatusUpdate",
+
     // Legacy support
     ACCOUNT_MANAGEMENT: "ACCOUNT_MANAGEMENT",
     NETWORK_MANAGEMENT: "NETWORK_MANAGEMENT",
@@ -395,20 +433,55 @@ export const MESSAGE_TYPES = {
 } as const;
 ```
 
+Earlier drafts of this block had:
+
+- `LIST_devices: "listdevices"` (lowercase) — real is
+  `LIST_DEVICES: "listDevices"` (both SCREAMING_SNAKE key and
+  proper camelCase value).
+- A 9-entry subset that omitted all DKG / signing / keystore
+  entries. The real enum has ~35 entries; fleshed out above.
+
 ### Message Validation Helpers
 
-```typescript
-// Runtime message validation functions
-export function validateMessage(msg: unknown): msg is BackgroundMessage;
-export function validateSessionProposal(msg: BackgroundMessage): boolean;
-export function validateSessionAcceptance(msg: BackgroundMessage): boolean;
+Defined at `packages/@mpc-wallet/types/src/messages.ts:262-301`.
+All accept `PopupToBackgroundMessage` as input (NOT the legacy
+`BackgroundMessage` alias), and the type-predicate helpers use
+`msg is ...` signatures rather than plain `boolean`:
 
-// Message type checking
-export function isRpcMessage(msg: BackgroundMessage): boolean;
-export function isAccountManagement(msg: BackgroundMessage): boolean;
-export function isNetworkManagement(msg: BackgroundMessage): boolean;
-export function isUIRequest(msg: BackgroundMessage): boolean;
+```typescript
+// Structural validators (type guards):
+export function validateMessage(msg: unknown): msg is PopupToBackgroundMessage;
+export function validateSessionProposal(
+    msg: PopupToBackgroundMessage
+): msg is PopupToBackgroundMessage & {
+    session_id: string; total: number; threshold: number;
+    participants: string[]
+};
+export function validateSessionAcceptance(
+    msg: PopupToBackgroundMessage
+): msg is PopupToBackgroundMessage & {
+    session_id: string; accepted: boolean;
+    blockchain?: "ethereum" | "solana"
+};
+
+// Message-type checkers:
+export function isRpcMessage(
+    msg: PopupToBackgroundMessage
+): msg is PopupToBackgroundMessage & { payload: JsonRpcRequest };
+export function isAccountManagement(msg: PopupToBackgroundMessage): boolean;
+export function isNetworkManagement(msg: PopupToBackgroundMessage): boolean;
+export function isUIRequest(
+    msg: PopupToBackgroundMessage
+): msg is PopupToBackgroundMessage & {
+    payload: { method: string; params: unknown[] }
+};
 ```
+
+Earlier drafts typed these against `BackgroundMessage` (the
+deprecated alias) and showed plain `boolean` returns for the
+type-guard variants. The real source uses
+`PopupToBackgroundMessage` + `msg is ...` type predicates so the
+call site gets narrowed types for free.
 
 ## Message Flow Patterns
 
