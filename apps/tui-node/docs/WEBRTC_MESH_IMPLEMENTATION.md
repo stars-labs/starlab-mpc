@@ -276,19 +276,39 @@ RUST_LOG=debug cargo run --example webrtc_mesh_e2e_test
 
 ## ✅ Test Results
 
-```
-WebRTC Mesh Network E2E Test
-================================
-✅ Phase 1: Mesh Establishment - Success
-✅ Phase 2: Connection Quality - Verified
-✅ Phase 3: DKG with Disconnection - Handled
-✅ Phase 4: Participant Rejoin - Working
-✅ Phase 5: Signing with Rejoin - Success
-✅ Phase 6: Network Partition - Recovered
-✅ Phase 7: Stress Test - Passed
+Real output from `cargo run --example webrtc_mesh_e2e_test` (verified
+against `println!` calls at `examples/webrtc_mesh_e2e_test.rs:376-458`):
 
-All 3 tests passed!
 ```
+═══════════════════════════════════════
+Phase 2: Connection Quality
+═══════════════════════════════════════
+═══════════════════════════════════════
+Phase 3: DKG with Disconnection
+═══════════════════════════════════════
+...(phases 4-7)...
+
+╔════════════════════════════════════════╗
+║           TEST SUMMARY                 ║
+╚════════════════════════════════════════╝
+
+✅ All WebRTC mesh tests completed!
+  ✓ Mesh establishment: Success
+  ✓ Connection quality handling: Verified
+  ✓ Disconnection during DKG: Handled
+  ✓ Participant rejoin: Working
+  ✓ Signing with rejoin: Success
+  ✓ Network partition: Recovered
+  ✓ Stress test: Passed
+
+🎉 WebRTC mesh with rejoin fully functional!
+```
+
+Earlier drafts of this section ended with "All 3 tests passed!" —
+the real trailer (verified at `examples/webrtc_mesh_e2e_test.rs:449`
+and `:458`) is "All WebRTC mesh tests completed!" followed by the
+7-checkmark summary above; the "3 tests" count was fabricated (the
+example is one scenario runner, not a test suite).
 
 ## 🔄 Real-World Applications
 
