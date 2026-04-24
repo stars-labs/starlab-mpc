@@ -179,14 +179,30 @@ Earlier drafts of this tree:
 ### Visual Components
 
 #### Progress Indicators
-- **DKG Progress**: Multi-stage progress with participant status
-- **Signing Progress**: Real-time signature generation tracking
-- **Network Operations**: Connection status with retry indicators
+- **DKG Progress** (`dkg_progress.rs`): Multi-phase progress
+  showing which FROST round is running + per-participant ready
+  state. Renders as a `Gauge` + participant list. Used for both
+  DKG and signing ceremonies (same component; label text
+  switches).
+- **Signing Progress**: same `dkg_progress.rs` component
+  re-purposed — shows commitment / share / aggregate phase and
+  which selected signers have replied.
+- **Network Operations**: connection-state badges surface inside
+  Join Session + the top status bar.
 
 #### Status Elements
-- **Connection Status**: Visual WebSocket/WebRTC indicators
-- **Wallet Status**: Balance, last activity, security level
-- **Session Status**: Participant count, threshold, readiness
+- **Connection Status**: WebSocket connected / WebRTC peer count
+  indicators in the top status bar (`app.rs` renders into the
+  title area).
+- **Wallet Status**: real surfaced fields are `wallet_id /
+  curve_type / threshold / total / participants list / derived
+  addresses`. Earlier drafts of this bullet listed
+  "Balance, last activity, security level" — none of those are
+  surfaced. The TUI does not query on-chain balances, does not
+  track last-used/last-activity timestamps, and has no
+  "security level" indicator.
+- **Session Status**: participant count, threshold, readiness
+  (accepted_devices list length vs session.total).
 
 ---
 
