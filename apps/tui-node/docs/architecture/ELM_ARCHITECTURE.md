@@ -96,8 +96,10 @@ pub struct UIState {
 ### 2. Messages (`src/elm/message.rs`)
 
 Messages represent all possible events in the application. The
-real `Message` enum has ~80+ variants — listing them exhaustively
-here would duplicate source and drift. The sketch below shows the
+real `Message` enum has ~120 variants — 117 today via
+`sed -n '12,281p' src/elm/message.rs | grep -oE '^    [A-Z][a-zA-Z_0-9]+' | sort -u | wc -l`.
+Earlier drafts said `~80+`; off as the enum grew. Listing
+them exhaustively here would duplicate source and drift. The sketch below shows the
 shape + grouping; read `src/elm/message.rs` for the canonical list.
 
 ```rust
@@ -205,7 +207,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             None
         }
 
-        // …~80 more match arms
+        // …plus many more match arms to cover the ~120 real
+        //   Message variants (sketch shows ~6)
         _ => None,
     }
 }
@@ -278,7 +281,8 @@ pub enum Command {
     ExportWallet { wallet_id: String, path: PathBuf }, // command.rs:38
     ImportWallet { path: PathBuf },           // command.rs:39
 
-    // …~60 more variants
+    // …plus ~27 more variants to reach 36 total (real Command
+    //   enum count at command.rs:15-131; sketch shows ~9)
 }
 
 impl Command {

@@ -645,8 +645,11 @@ supported deployment paths (systemd + launch scripts).
 
 The code is the authoritative reference — the enum signatures
 below are sketches. For the complete variant lists, read the
-source files directly (the real `Message` enum has ~80+ variants,
-the real `Command` ~60+; listing them all here would duplicate
+source files directly (the real `Message` enum has ~120 variants
+— 117 via `sed -n '12,281p' src/elm/message.rs | grep -oE '^    [A-Z][a-zA-Z_0-9]+' | sort -u | wc -l` —
+and `Command` has ~36. Earlier drafts said `~80+` / `~60+`
+respectively; off as both enums grew. Listing them all here
+would duplicate
 the source and drift immediately). The real `update` signature
 is `pub fn update(model: &mut Model, msg: Message) -> Option<Command>`
 (single optional command, not Vec) per `src/elm/update.rs:33`.
@@ -739,7 +742,8 @@ pub enum Command {
                                                // multiple commands
                                                // emitted by one update tick
 
-    // …~60 more variants
+    // …plus ~27 more variants to reach 36 total
+    //   (see § API Reference opener for the count-refresh grep)
 }
 
 impl Command {
@@ -799,8 +803,11 @@ type.
 ### UIProvider trait
 
 The real `UIProvider` trait is at
-`apps/tui-node/src/elm/provider.rs:24` with ~20 async methods for
-pushing state into the UI layer. Earlier drafts showed a
+`apps/tui-node/src/elm/provider.rs:24` with 24 async methods for
+pushing state into the UI layer (earlier drafts said `~20`, off
+by four — refresh count via
+`sed -n '24,68p' src/elm/provider.rs | grep -cE '^\s+(async\s+)?fn [a-z_]+'`).
+Earlier drafts showed a
 5-method sketch (`update_screen` / `show_message` /
 `update_progress` / `get_user_input` / `confirm_action`) — none of
 those method names match the real trait. See the authoritative
