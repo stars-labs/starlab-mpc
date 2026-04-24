@@ -161,10 +161,23 @@ Ethereum-keystore-V3 compatibility — this is a bespoke format.
 
 #### 5.2 Security Assertions
 - ❌ Cannot sign with only 1 participant (below threshold)
-- ❌ Cannot load keystore with wrong password
-- ❌ Cannot modify keystore without detection
-- ✅ Can sign with any 2 participants
-- ✅ All signatures are deterministic for same message
+- ❌ Cannot load keystore with wrong password (PBKDF2 / Argon2id
+  key derivation + GCM auth-tag mismatch rejects decryption)
+- ❌ Cannot modify keystore without detection (AES-256-GCM auth
+  tag fails on mutated ciphertext)
+- ✅ Can sign with any valid t-of-n subset (e.g. any 2 of 3)
+- ✅ Every signature verifies against the group public key via
+  `frost-core::VerifyingKey::verify`
+
+Earlier drafts of the last bullet claimed "All signatures are
+deterministic for same message" — that's **wrong** for FROST.
+Each signing ceremony generates fresh hiding + binding nonces
+(`SigningNonces::new`), so signing the same message twice
+produces different signature bytes. Both will verify against the
+same group public key (that's the guarantee), but the bytes
+themselves are NOT reproducible. This is a deliberate FROST
+design property — deterministic signatures leak secret-share
+information under certain adversary models.
 
 ## Test Workflow
 
