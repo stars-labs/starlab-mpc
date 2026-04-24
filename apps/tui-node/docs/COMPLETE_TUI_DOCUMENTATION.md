@@ -456,7 +456,8 @@ fabrications this section inherited. In brief:
 
 - **At rest**: AES-256-GCM + PBKDF2-HMAC-SHA256, 100_000 iterations,
   SALT_LEN = 16 bytes (not 32), NONCE_LEN = 12 bytes. Authoritative
-  constants in `src/keystore/encryption.rs:20-21`.
+  constants in `src/keystore/encryption.rs:19-20` (SALT + NONCE;
+  KEY_LEN = 32 at :21, PBKDF2_ITERATIONS at :25).
 - **Memory zeroization**: only
   `packages/@mpc-wallet/frost-core/src/root_secret.rs` zeros on
   drop, via a manual `self.0.fill(0)` in its `Drop` impl
