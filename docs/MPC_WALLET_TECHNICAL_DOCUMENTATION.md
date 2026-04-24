@@ -298,9 +298,11 @@ vary with `wallet_count`:
 
 - **Always**: `🆕 Create New Wallet`, `🔗 Join Session`, `⚙️ Settings`,
   `🚪 Exit`
-- **Added once `wallet_count > 0`**: `💼 Manage Wallets` (plus DKG-
-  progress and signing flows which live inside sub-screens, not as
-  top-level menu items).
+- **Added once `wallet_count > 0`**: `💼 Manage Wallets` AND
+  `✍️ Sign Transaction` (two items, not one — earlier drafts of
+  this bullet dropped Sign Transaction). DKG-progress surfaces live
+  inside sub-screens; `Sign Transaction` is the top-level entry
+  point into the signing flow.
 
 Earlier drafts printed a numbered-hotkey layout
 (`[1] Wallet / [2] DKG / [3] Sign / [4] Session / [5] Network /

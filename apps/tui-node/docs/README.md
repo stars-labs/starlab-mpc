@@ -80,9 +80,11 @@ state:
 
 - **Always shown**: `Create New Wallet`, `Join Session`,
   `Settings`, `Exit`
-- **Added when `wallet_count > 0`**: `Manage Wallets`; DKG-progress
-  and signing surfaces live inside sub-screens rather than the
-  top-level menu.
+- **Added when `wallet_count > 0`**: `Manage Wallets` and
+  `Sign Transaction` — both appear only once at least one wallet
+  exists in the keystore. DKG-progress surfaces live inside
+  sub-screens; `Sign Transaction` is the top-level entry point
+  into the signing flow.
 
 Earlier drafts of this section printed a `[1] Wallet / [2] DKG /
 [3] Sign / [4] Session / [5] Network / [6] Settings / [Q] Quit`
