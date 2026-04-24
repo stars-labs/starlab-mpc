@@ -558,7 +558,14 @@ Background Script
     │
     ├─► Send acceptance via WebSocket to other participants
     │
-    ├─► Forward to offscreen: { type: 'fromBackground', payload: { type: 'sessionUpdate', ... } }
+    ├─► Forward to offscreen: { type: 'fromBackground',
+    │     payload: { type: 'sessionAccepted', sessionInfo,
+    │                currentdeviceId, blockchain? } }
+    │     (messages.ts:93 — real variant; earlier drafts said
+    │      'sessionUpdate', which only exists on the inbound
+    │      OffscreenToBackgroundMessage + BackgroundToPopupMessage
+    │      unions, NOT on the outbound BackgroundToOffscreenMessage
+    │      at :87)
     │
     ▼
 Offscreen Document
