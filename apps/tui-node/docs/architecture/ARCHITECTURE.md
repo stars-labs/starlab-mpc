@@ -705,11 +705,25 @@ consolidated story.
 
 ### Testing Strategy
 
-1. **Unit Tests**: Individual component testing
-2. **Integration Tests**: Multi-component interaction
-3. **Protocol Tests**: FROST protocol compliance
-4. **UI Tests**: Terminal UI behavior
-5. **Security Tests**: Penetration testing scenarios
+1. **Unit Tests**: Individual component testing — ✅ real,
+   via inline `#[cfg(test)]` modules + `cargo test --lib`.
+2. **Integration Tests**: Multi-component interaction — ✅ real,
+   `apps/tui-node/tests/update_transitions.rs` (88 tests over
+   the Elm update function) + `component_rendering.rs` (13 tests
+   over ratatui render output).
+3. **Protocol Tests**: FROST protocol compliance — ⚠ upstream.
+   The FROST primitives themselves are tested in the ZCash
+   `frost-core 2.2` crate; this workspace doesn't duplicate
+   those tests. Integration-style DKG/signing coverage comes
+   through the `examples/` binaries rather than a dedicated
+   protocol-test harness here.
+4. **UI Tests**: Terminal UI behavior — ✅ real, via
+   `tests/component_rendering.rs` using
+   `ratatui::backend::TestBackend` snapshot assertions.
+5. **Security Tests**: Penetration testing scenarios — ❌ no
+   such harness ships (zero `pen_test` / `fuzz` / `proptest`
+   dev-deps). Earlier drafts listed this as if implemented.
+   Future work; no committed timeline.
 
 ### Future Enhancements
 
