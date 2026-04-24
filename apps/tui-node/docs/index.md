@@ -52,16 +52,21 @@ cargo run --bin mpc-wallet-tui -p tui-node -- --device-id alice
 
 Keyboard basics:
 
-| Keys  | Action                |
-|-------|-----------------------|
-| ↑ / ↓ | Navigate menu items   |
-| Enter | Select / confirm      |
-| Esc   | Go back / cancel      |
-| Tab   | Move focus within a screen |
+| Keys              | Action                     |
+|-------------------|----------------------------|
+| ↑ / ↓             | Navigate menu items        |
+| Enter             | Select / confirm           |
+| Esc               | Go back / cancel           |
+| Tab               | Move focus within a screen |
+| Ctrl+Q / Ctrl+C   | Quit                       |
+| Ctrl+R            | Refresh                    |
+| Ctrl+H            | Navigate to home (main menu) |
 
 The full key map per screen is in [`KEYBOARD_NAVIGATION_GUIDE.md`](./KEYBOARD_NAVIGATION_GUIDE.md).
 There is no global help key (`?`) — the shortcut listed in earlier
-drafts of this page was not actually implemented.
+drafts of this page was not actually implemented. The four Ctrl
+globals above are handled in `src/elm/app.rs:851-866` before
+per-component dispatch.
 
 ## Feature overview
 
