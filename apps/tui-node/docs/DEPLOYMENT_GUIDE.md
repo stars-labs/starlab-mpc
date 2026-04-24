@@ -218,6 +218,9 @@ provision accordingly.
   exposes). WebRTC traffic is peer-to-peer after signaling, so
   the signal server doesn't proxy media/data.
 - Keystore files under `~/.frost_keystore/<device_id>/` are
-  PBKDF2-HMAC-SHA256 (100k) + AES-256-GCM encrypted. The
-  password is what gates them — don't store the password next
-  to the `.dat` file.
+  PBKDF2-HMAC-SHA256 (100k) + AES-256-GCM encrypted `.json`
+  files (`<wallet_id>.json`, `WalletFile` envelope at
+  `apps/tui-node/src/keystore/models.rs:438-453`; earlier drafts
+  of this line said `.dat` — that's a legacy / pre-WalletFile
+  format not shipped today). The password is what gates them —
+  don't store the password next to the keystore file.
