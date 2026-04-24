@@ -508,14 +508,29 @@ sibling doc has the more detailed per-screen walkthrough.
 ### Operational Guidelines
 
 1. **Session Management**
-   - Close completed sessions promptly
-   - Review participant lists before starting
-   - Set appropriate session timeouts
+   - Close completed sessions promptly (creator disconnecting
+     removes the session from the signal server's registry)
+   - Review participant lists before starting — the session
+     `participants` list is persisted into `WalletMetadata` and
+     used for cold-start rejoin
+   - Earlier drafts suggested "Set appropriate session timeouts" —
+     there is no session-timeout mechanism (see SECURITY.md and
+     ARCHITECTURE.md); sessions persist until the creator disconnects.
 
-2. **Transaction Verification**
-   - Always double-check addresses
-   - Verify amounts and gas settings
-   - Use test transactions for new setups
+2. **Signing Verification**
+   - Double-check the hex message bytes you paste into the Sign
+     Message screen — the TUI signs raw bytes as-given (EIP-191
+     personal_sign shape); if you wanted to sign an Ethereum
+     transaction, you must RLP-encode + keccak256-hash it
+     externally first and hand the resulting hex to the TUI
+   - After the ceremony, verify the signature against the wallet's
+     group public key via `frost-core::VerifyingKey::verify` (or
+     `ecrecover` for secp256k1 + EIP-191 shape)
+   - Earlier drafts said "Verify amounts and gas settings" and
+     "Use test transactions" — the TUI does NOT decode or display
+     transaction amount / gas / to-address fields (it only sees
+     bytes); those checks happen in whatever tool constructs the
+     transaction before handoff
 
 3. **Backup Strategy**
    - Backup after every wallet creation
