@@ -307,6 +307,16 @@ The offline DKG process enables key generation without network connectivity, usi
 >   - Button rows like `[Enable Offline Mode] [Cancel]` —
 >     ratatui components don't render button widgets; navigation
 >     is keyboard-driven (arrow keys + Enter + Esc).
+>   - "Format: JSON (signed)" lines in the per-round artefact
+>     descriptions — there is no application-level per-file
+>     signature layer on offline bundles (same retraction as
+>     OFFLINE_DKG_GUIDE.md § Data Formats); integrity comes from
+>     the physical chain of custody of the SD cards plus
+>     frost-core's cryptographic rejection of malformed
+>     commitment/share bytes during `part2` / `part3`.
+>   - Specific file-size figures like "2.3 KB" — illustrative
+>     only; real sizes depend on ciphersuite + participant
+>     count and aren't published anywhere authoritatively.
 >
 > The narrative flow (mode decision → parameter exchange →
 > round 1 commitments → round 2 shares → local finalize) is
