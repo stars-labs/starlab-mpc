@@ -618,17 +618,33 @@ The MPC Wallet uses WebRTC for direct peer-to-peer communication:
 1. **Signaling Phase**
    - Peers exchange SDP offers/answers via signal server
    - ICE candidates are gathered and exchanged
-   - STUN/TURN servers assist with NAT traversal
+   - STUN/TURN servers assist with NAT traversal (extension ships
+     with Google public STUN; TUI ships with empty ICE servers —
+     see § Scalability notes below for the consequences)
 
 2. **Data Channel Creation**
-   - Encrypted data channels established
-   - Message ordering and reliability configured
-   - Heartbeat mechanism for connection health
+   - DTLS-SRTP-encrypted data channels established
+   - Ordered + reliable delivery by default (the webrtc crate's
+     standard settings)
+   - Session-level `ChannelOpen` event fires once the channel is
+     live, driving the mesh-readiness accounting
 
-3. **Protocol Negotiation**
-   - Version compatibility check
-   - Supported features exchange
-   - Session parameters agreement
+There is **no application-level heartbeat** on the production
+WebRTC path (`src/network/webrtc.rs` + `src/elm/webrtc_signaling.rs`).
+Connection liveness is inferred from DTLS-SRTP keepalives + the
+`webrtc` crate's own ICE connection-state callbacks. The
+test-harness library at `src/webrtc/connection_monitor.rs` DOES
+implement a per-peer `Heartbeat` struct, but that library isn't
+wired into the runtime — it's consumed only by
+`examples/webrtc_mesh_e2e_test.rs`.
+
+There is **no protocol-negotiation step**. Earlier drafts of this
+section listed "Version compatibility check / Supported features
+exchange / Session parameters agreement" as a post-connection
+phase; no such handshake exists. Session parameters are fixed at
+AnnounceSession time; version compatibility is managed by
+matching the `frost-core 2.2` dependency across all clients
+(hand-coordinated, not wire-negotiated).
 
 ### Signal Server Architecture
 
