@@ -130,8 +130,9 @@ Once a direct WebRTC connection is established, nodes exchange application-level
 >     so the tag value is the **PascalCase** variant name, and
 >     variant fields serialize **flat** as sibling properties
 >     (NO `"payload"` wrapper).
->   - `WebSocketMessage` — `signal.rs:87` tagged
->     `#[serde(tag = "websocket_msg_type")]`, same PascalCase +
+>   - `WebSocketMessage` — `signal.rs:88` tagged
+>     `#[serde(tag = "websocket_msg_type")]` (attribute sits one
+>     line above the enum at :87), same PascalCase +
 >     flat-fields rule.
 >
 > A real `DkgRound1Package` message over the data channel has the
