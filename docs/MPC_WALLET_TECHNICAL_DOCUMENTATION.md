@@ -1077,10 +1077,13 @@ for the full dispatch table). Key ones:
 | `RELAY` | Background: forward a WebSocket relay payload |
 | `FROM_OFFSCREEN` / `OFFSCREEN_READY` | Wrappers for background↔offscreen cross-context messages |
 
-dApp-facing calls arrive as EIP-1193 RPC through the injected content
-script (`window.ethereum.request(...)`), NOT as `sendMessage` types.
-See `CLAUDE.md` § "Browser extension: threshold signing architecture"
-for the end-to-end flow from `personal_sign` to aggregate signature.
+dApp-facing calls arrive as EIP-1193 RPC through the injected
+content script (`window.starlabEthereum.request(...)` — NOT
+`window.ethereum`; the extension coexists with other wallets via
+EIP-6963 discovery, see `injected/index.ts:599-604`), NOT as
+`chrome.runtime.sendMessage` types. See `CLAUDE.md` § "Browser
+extension: threshold signing architecture" for the end-to-end
+flow from `personal_sign` to aggregate signature.
 
 ### Terminal UI CLI Arguments
 
