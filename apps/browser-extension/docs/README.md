@@ -211,7 +211,9 @@ differ from earlier drafts:
 // Earlier drafts of this doc showed:
 //   type: 'CREATE_WALLET', payload: { name, threshold, participants }
 // Real type: CREATE_DKG_WALLET (see MESSAGE_TYPES enum in
-// packages/@mpc-wallet/types/src/messages.ts:303)
+// packages/@mpc-wallet/types/src/messages.ts:314 — earlier drafts
+// of this note cited :303, which was stale; the block has grown
+// as MESSAGE_TYPES entries accumulated)
 
 chrome.runtime.sendMessage({
   type: "CREATE_DKG_WALLET",  // real MESSAGE_TYPES.CREATE_DKG_WALLET
@@ -247,10 +249,12 @@ Reference section (fixed in c9417e5).
 ## Resources
 
 - [Main Project Documentation](../../../docs/README.md)
-- [**ARCHITECTURE.md**](ARCHITECTURE.md) — 700-line deep technical
-  reference: 4-context runtime architecture (popup / background SW /
-  offscreen / content), message system + flow patterns, WebSocket
-  + WebRTC implementation details, API reference, error recovery.
+- [**ARCHITECTURE.md**](ARCHITECTURE.md) — ~1000-line deep
+  technical reference (verified `wc -l`, earlier drafts said
+  700 before this sweep expanded it): 4-context runtime
+  architecture (popup / background SW / offscreen / content),
+  message system + flow patterns, WebSocket + WebRTC
+  implementation details, API reference, error recovery.
 - [UI Documentation](ui/)
 - [Chrome Extension Docs](https://developer.chrome.com/docs/extensions/mv3/)
 - [WXT Framework](https://wxt.dev/)
