@@ -68,8 +68,12 @@ mv pkg/ generated/
 ### 2. Post-Process LCOV Reports
 Filter the generated `coverage/lcov.info` file:
 ```bash
-# Remove unwanted files from LCOV report
-grep -v "SF:.*pkg/mpc_wallet.js" coverage/lcov.info > coverage/filtered.info
+# Remove unwanted files from LCOV report.
+# Real wasm-pack output filename is mpc_wallet_core_wasm.js under
+# packages/@mpc-wallet/core-wasm/pkg/ — earlier drafts of this
+# command used the pre-monorepo 'mpc_wallet.js' name which no
+# longer exists.
+grep -v "SF:.*pkg/mpc_wallet_core_wasm.js" coverage/lcov.info > coverage/filtered.info
 grep -v "SF:.*test-utils.ts" coverage/filtered.info > coverage/final.info
 ```
 
