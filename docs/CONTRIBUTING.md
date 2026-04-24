@@ -380,13 +380,28 @@ transition assertions) + `component_rendering.rs` (ratatui
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+
+    // UICallback has no public No-Op type in the workspace —
+    // each test module writes a minimal stub. See the pattern at
+    // `apps/tui-node/src/core/signing_manager.rs:184-...` for a
+    // full NoopUi example with every method stubbed out.
+    struct NoopUi;
+    #[async_trait]
+    impl UICallback for NoopUi {
+        // ... stub every method (show_message, update_connection_status,
+        // update_wallets, etc.); returning () or default values
+    }
 
     #[tokio::test]
     async fn create_wallet_registers_address() {
         let state = Arc::new(CoreState::default());
-        let cb = Arc::new(NoOpUICallback);
+        let cb = Arc::new(NoopUi);
         let mgr = WalletManager::new(state, cb);
 
+        // Real signature: create_wallet(name: String, threshold: u16,
+        //                               participants: Vec<String>)
+        //                 -> CoreResult<WalletInfo>
         let info = mgr.create_wallet(
             "test".to_string(),
             2,
@@ -396,6 +411,14 @@ mod tests {
     }
 }
 ```
+
+Earlier drafts of this example used `NoOpUICallback` as if it were
+a public no-op type; no such type exists. The real convention is
+an inline `struct NoopUi; impl UICallback for NoopUi { ... }` per
+test module (see `src/core/signing_manager.rs:184` for a reference
+implementation). `NoOpUIProvider` at `src/elm/provider.rs:71` IS
+real but implements the *different* `UIProvider` trait — don't
+confuse them.
 
 #### Integration Tests (TypeScript / Bun)
 
