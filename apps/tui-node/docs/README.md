@@ -10,7 +10,14 @@ The MPC Wallet Terminal UI (TUI) Node is a keyboard-driven terminal application 
 - [Architecture](architecture/) - System design, state management, network protocols
 - [User Guide](guides/) - Complete user manual and tutorials
 - [Protocol](protocol/) - WebRTC signaling and keystore session protocols
-- [UI Design](ui/) - Interface wireframes and navigation flows
+
+Earlier drafts of this section also linked to `ui/` for
+"Interface wireframes and navigation flows" — that directory
+does not exist under `apps/tui-node/docs/` (verified via `ls`;
+only the legacy wireframes under `archive/legacy-ui/` remain).
+The UI is keyboard-driven and documented inline via the
+[`KEYBOARD_NAVIGATION_GUIDE.md`](./KEYBOARD_NAVIGATION_GUIDE.md)
++ per-component source under `src/elm/components/`.
 
 ## Features
 
@@ -201,7 +208,7 @@ definitions.
 
 ### Environment Variables
 
-Only two env vars are consulted:
+Three env vars are consulted:
 
 | Variable           | Effect                                       |
 |--------------------|----------------------------------------------|
@@ -213,34 +220,50 @@ Only two env vars are consulted:
 
 ### Offline Mode
 
-For air-gapped operations:
+For air-gapped operations, launch with `--offline` and navigate
+via arrow keys + Enter:
 
 ```bash
-# Generate offline session
 mpc-wallet-tui --offline --device-id Device-001
-
-# Export session data
-[4] Session → Export to File → session_001.json
-
-# Transfer via secure medium (USB, QR code)
-# Import on other device
-[4] Session → Import from File → session_001.json
 ```
+
+The menu structure — no numeric hotkeys — is:
+
+  Main Menu → Create New Wallet (select Offline mode)
+            OR Join Session (enter a session id distributed out of band)
+
+Per-round Export / Import buttons are surfaced by each offline
+ceremony screen; bundles are JSON envelopes per `OfflineData`
+(`src/offline/types.rs:12`). Earlier drafts of this section
+showed `[4] Session → Export to File` — no numeric hotkeys
+exist; the § Main Screen Layout scope note above enumerates
+the real menu items.
 
 ### Multi-Wallet Management
 
-- Support for multiple wallets per device
-- Easy switching between wallets
-- Hierarchical deterministic (HD) wallet support
-- Import/export keystore functionality
+- Multiple wallets per device, partitioned by curve
+  (`ed25519` / `secp256k1`) under the device_id.
+- HD key derivation via BIP-44-style additive scalar offsets
+  (`frost-core::hd_derivation`), so child keys share the DKG
+  group without extra rounds.
+- Import/export via the Manage Wallets screen uses the
+  `WalletFile` JSON envelope — round-trip with the browser
+  extension is covered by the interop tests under
+  `apps/browser-extension/tests/`.
 
-### Performance Optimization
+### Performance notes (aspirational vs actual)
 
-The TUI includes several optimizations:
-- Connection pooling for WebRTC
-- Message batching for efficiency
-- State caching to reduce computation
-- Lazy loading of wallet data
+Earlier drafts of this section promised "Connection pooling for
+WebRTC", "Message batching", "State caching", and "Lazy loading
+of wallet data". `grep` for the corresponding symbols
+(`ConnectionPool`, `connection_pool`, `message_batch`,
+`state_cache`, `lazy_load`) in `apps/tui-node/src/` returns
+zero hits — none shipped.
+
+What IS real: WebRTC peer connections are held in a per-peer
+`HashMap` so repeat messages reuse the same DataChannel, and
+`tokio::mpsc` channels absorb bursty signal-server traffic.
+That's the whole performance story today.
 
 ## Troubleshooting
 
@@ -263,9 +286,16 @@ RUST_LOG=debug mpc-wallet-tui --device-id Device-001
 - Review logs for timeout issues
 
 #### Performance Issues
-- Reduce UI refresh rate in config
-- Disable animations for slow terminals
-- Check system resources (CPU, memory)
+- No config file exists — earlier drafts suggested "reduce UI
+  refresh rate in config" and "disable animations", neither of
+  which is a supported setting. The Ratatui render path is
+  event-driven (no timer-based refresh loop) and there are no
+  animations.
+- Check system resources (CPU, memory).
+- For WebRTC mesh performance: full-mesh degree is `n·(n-1)/2`
+  peer connections, so keep cohorts small or pair with a
+  TURN server (no TURN ships — see OFFLINE_DKG_GUIDE.md
+  for the absent-infra list).
 
 ## Security Considerations
 
@@ -280,8 +310,11 @@ RUST_LOG=debug mpc-wallet-tui --device-id Device-001
 - [Architecture Documentation](architecture/)
 - [User Guide](guides/USER_GUIDE.md)
 - [Protocol Specification](protocol/)
-- [UI Wireframes](ui/)
 - [Main Project Docs](../../../docs/)
+
+(Earlier drafts listed a `[UI Wireframes](ui/)` link — that
+directory does not exist; the UI is documented inline in the
+keyboard guides.)
 
 ## Support
 
