@@ -335,26 +335,39 @@ User Input → tuirealm Event → Component::on → Message → update() →
 
 ### Model Structure
 
+Real struct at `src/elm/model.rs:14-36`:
+
 ```rust
 pub struct Model {
     // Core State
     pub wallet_state: WalletState,
     pub network_state: NetworkState,
     pub ui_state: UIState,
-    
+
     // Navigation
     pub navigation_stack: Vec<Screen>,
     pub current_screen: Screen,
-    
+
     // Session Management
     pub active_session: Option<SessionInfo>,
     pub pending_operations: Vec<Operation>,
-    
+    pub session_invites: Vec<SessionInfo>,  // discovered-but-not-joined
+                                            // sessions from
+                                            // session_available broadcasts
+
     // User Context
     pub selected_wallet: Option<String>,
     pub device_id: String,
+
+    // Application metadata
+    pub app_version: String,                // set from CARGO_PKG_VERSION
+    pub last_saved: Option<DateTime<Utc>>,  // keystore-write tracking
 }
 ```
+
+Earlier drafts of this sketch dropped `session_invites`,
+`app_version`, `last_saved` — all three are real fields as of
+the current source.
 
 ### State Updates
 
