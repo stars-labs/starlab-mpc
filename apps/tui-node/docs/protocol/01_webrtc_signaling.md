@@ -125,7 +125,7 @@ Once a direct WebRTC connection is established, nodes exchange application-level
 > shape. **That is NOT the real on-wire format** — the examples
 > are stylistic, not literal. The real enums are:
 >
->   - `WebRTCMessage<C>` — `apps/tui-node/src/protocal/signal.rs:199`
+>   - `WebRTCMessage<C>` — `apps/tui-node/src/protocal/signal.rs:204`
 >     tagged `#[serde(tag = "webrtc_msg_type")]`, NO `rename_all`,
 >     so the tag value is the **PascalCase** variant name, and
 >     variant fields serialize **flat** as sibling properties
@@ -216,12 +216,12 @@ Indicates a device has established connections to all other participants.
 ### 3. Distributed Key Generation (DKG)
 
 Authoritative enum: `WebRTCMessage<C>` in
-`apps/tui-node/src/protocal/signal.rs:199`. The enum is tagged
+`apps/tui-node/src/protocal/signal.rs:204`. The enum is tagged
 `#[serde(tag = "webrtc_msg_type")]` with no `rename_all`, so on
 the wire the discriminator value is the **PascalCase** variant
 name (`DkgRound1Package`, not `dkg_round1_package`). Earlier
 drafts of this note claimed snake_case; verify against
-`signal.rs:199` + the TS mirror at
+`signal.rs:204` + the TS mirror at
 `packages/@mpc-wallet/types/src/webrtc.ts:26`.
 
 ```json
