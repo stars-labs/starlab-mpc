@@ -371,16 +371,28 @@ the current source.
 
 ### State Updates
 
-#### Pure Updates
-- Model transformations
-- No side effects
-- Deterministic results
+The `update(&mut Model, Message) -> Option<Command>` function is
+the only legitimate site that mutates Model. It's not pure in the
+strict functional sense — it takes `&mut Model` and mutates in
+place rather than returning a new Model — but it IS deterministic
++ side-effect-free beyond the Model mutation itself (no I/O, no
+network, no filesystem writes). All external interactions flow
+through the returned `Option<Command>`, which is executed
+asynchronously by the runtime (see Command::execute).
 
-#### Commands (Side Effects)
-- Network operations
-- File I/O
-- Async operations
-- External system calls
+#### Update function responsibilities
+- Synchronous Model mutation via `&mut Model`
+- Emit exactly one `Option<Command>` (use `Command::Batch(Vec<Command>)`
+  when multiple side effects are needed in a single update tick)
+- Deterministic given `(previous Model, incoming Message)` — no
+  implicit I/O reads
+
+#### Commands handle side effects
+- Network operations (WebSocket send, WebRTC peer connections)
+- Filesystem I/O (keystore write/read)
+- FROST protocol round execution (delegates through InternalCommand<C>)
+- Spawning async tasks that eventually feed new Messages back
+  into the queue
 
 ### State Persistence
 
@@ -395,9 +407,13 @@ persistence:
   retraction as f4fc866 for other docs). Written on DKG
   completion, re-read on startup (scan the keystore directory +
   cache metadata; the encrypted share only decrypts on unlock).
-- **Signal-server log**: append-only `tracing` output at
+- **TUI tracing log**: append-only `tracing` output from the TUI
+  itself (not the signal server) at the path passed to
   `--log-location` (default
-  `~/.frost_keystore/logs/mpc-wallet.log`).
+  `~/.frost_keystore/logs/mpc-wallet.log`). Earlier drafts
+  labelled this the "signal-server log" — it's not; the signal
+  server is a separate process with its own stderr. This is the
+  local TUI binary's structured-log file.
 
 No auto-save loop, no checkpoint-based crash recovery — earlier
 drafts of this section promised "Auto-save every 30 seconds" +
