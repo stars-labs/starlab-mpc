@@ -255,27 +255,28 @@ Commands represent side effects that need to be executed:
 #[derive(Debug, Clone)]
 pub enum Command {
     // Data loading
-    LoadWallets,
-    LoadSessions,
-    LoadWalletDetails { wallet_id: String },
+    LoadWallets,                              // command.rs:17
+    LoadSessions,                             // command.rs:18
+    LoadWalletDetails { wallet_id: String },  // command.rs:19
 
-    // Network operations
-    ConnectWebSocket,                        // Uses the configured signal-server URL
-    SendNetworkMessage { to: String, data: Vec<u8> },
-    BroadcastMessage { data: Vec<u8> },
-    
-    // Cryptographic operations
-    StartDKG { config: WalletConfig },
+    // Network operations (real variant is ReconnectWebSocket —
+    // there's intentionally no ConnectWebSocket, see the comment at
+    // command.rs:23)
+    ReconnectWebSocket,                       // command.rs:26
+    SendNetworkMessage { to: String, data: Vec<u8> },   // :28
+    BroadcastMessage { data: Vec<u8> },       // command.rs:29
+
     // DKG / signing operations
-    StartDKG { config: WalletConfig },    // session announce
-    StartFrostProtocol,                   // run FROST part1/part2/part3
-    StartSigning { request: SigningRequest },
+    StartDKG { config: WalletConfig },        // command.rs:46 — session announce
+    StartFrostProtocol,                       // command.rs:53 — run FROST
+                                              // part1/part2/part3 once mesh ready
+    StartSigning { request: SigningRequest }, // command.rs:97
 
     // Storage operations
-    SaveWallet { wallet_data: Vec<u8> },  // encrypted blob
-    DeleteWallet { wallet_id: String },
-    ExportWallet { wallet_id: String, path: PathBuf },
-    ImportWallet { path: PathBuf },
+    SaveWallet { wallet_data: Vec<u8> },      // command.rs:36 — encrypted blob
+    DeleteWallet { wallet_id: String },       // command.rs:37
+    ExportWallet { wallet_id: String, path: PathBuf }, // command.rs:38
+    ImportWallet { path: PathBuf },           // command.rs:39
 
     // …~60 more variants
 }
@@ -304,11 +305,19 @@ impl Command {
 
 Earlier drafts of this section listed `Command::SendMessage(Message)`,
 `Command::Quit`, `Command::None` — none are real variants. Commands
-don't carry Messages as payloads; the Option return from `update`
-either has a side-effect Command or doesn't. Quit isn't a Command
-either (terminate via system interrupt; see KEYBOARD_NAVIGATION_GUIDE).
-`SaveWallet` takes `wallet_data: Vec<u8>` not a `Wallet` struct (there
-is no such type; encrypted shares stay as bytes until unlock).
+don't carry Messages as payloads; the `Option<Command>` return
+from `update` either has a side-effect Command or doesn't. Quit
+is handled at the **Message level** (`Message::Quit` at
+`message.rs:263`, triggered by Ctrl+Q / Ctrl+C globals in
+`app.rs:851-857`), not as a Command — the Elm loop sees the
+Quit message and breaks out. An earlier retraction here claimed
+"quit is a system interrupt" — wrong; quit flows through the
+normal Elm update cycle.
+
+`SaveWallet` takes `wallet_data: Vec<u8>` not a `Wallet` struct
+(there is no such type; encrypted shares stay as bytes until
+unlock). Earlier drafts also had two duplicate `StartDKG` entries
+in the Command enum sketch — removed.
 
 ## Component Architecture
 
