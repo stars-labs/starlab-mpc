@@ -8,6 +8,22 @@ This document outlines the comprehensive E2E test for keystore functionality, in
 - Signature verification
 - Security validation
 
+> **Scope note**: Phases 3–4 below describe **transaction signing**
+> (ETH transfer with to/value/gas fields, ERC20 transfer function-
+> selector encoding). The TUI as shipped signs **messages**
+> (EIP-191 `personal_sign` shape over user-supplied bytes) — it does
+> NOT build Ethereum transactions or decode function selectors. See
+> `apps/tui-node/docs/guides/USER_GUIDE.md` § Signing Messages →
+> Scope and the "Phase C scope: message-only field" comment at
+> `src/elm/components/sign_transaction.rs` for the honest picture.
+> Treat the transaction-shaped examples below as aspirational test
+> targets — the real signature produced by the TUI is over the
+> transaction's serialized bytes (you have to serialize the
+> transaction externally and hand the bytes to the TUI as a hex
+> message). Phase 5 (signature verification) + Phases 1–2 (keystore
+> save/load, unlock, decrypt) ARE real and test-covered — those
+> phases exercise the shipped keystore path.
+
 ## Test Scenarios
 
 ### 🔐 Phase 1: Wallet Creation and Persistence
