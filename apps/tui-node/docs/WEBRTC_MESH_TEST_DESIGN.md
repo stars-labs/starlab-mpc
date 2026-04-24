@@ -155,23 +155,56 @@ Bob (P2)━━━Charlie (P3)
 ## Implementation Components
 
 ### 1. WebRTC Mesh Manager
+
+Real struct at `apps/tui-node/src/webrtc/mesh_manager.rs:136`
+with 6 fields — HashMaps live under `Arc<Mutex<...>>` per the
+interior-mutability pattern (same as `ConnectionMonitor` +
+`RejoinCoordinator` below). Real method list at :153-319
+includes four send-path methods (`send_message`,
+`broadcast_message`, `simulate_network_failure`,
+`get_mesh_stats`) that earlier sketches omitted.
+
 ```rust
-struct WebRTCMeshManager {
-    local_peer: PeerId,
-    connections: HashMap<PeerId, RTCPeerConnection>,
-    data_channels: HashMap<PeerId, RTCDataChannel>,
-    connection_states: HashMap<PeerId, ConnectionState>,
-    mesh_topology: MeshTopology,
+// struct WebRTCMeshManager (:136)
+pub struct WebRTCMeshManager {
+    pub local_peer: PeerId,
+    pub connections: Arc<Mutex<HashMap<PeerId, RTCPeerConnection>>>,
+    pub data_channels: Arc<Mutex<HashMap<PeerId, RTCDataChannel>>>,
+    pub connection_states: Arc<Mutex<HashMap<PeerId, ConnectionState>>>,
+    pub mesh_topology: Arc<Mutex<MeshTopology>>,
+    pub message_buffer: Arc<Mutex<HashMap<PeerId, Vec<Vec<u8>>>>>,
 }
 
+// impl WebRTCMeshManager — real public methods (line numbers in comments):
 impl WebRTCMeshManager {
-    async fn establish_mesh(&mut self) -> Result<()>;
-    async fn handle_peer_disconnect(&mut self, peer: PeerId);
-    async fn handle_peer_rejoin(&mut self, peer: PeerId);
-    fn get_connected_peers(&self) -> Vec<PeerId>;
-    fn is_threshold_met(&self) -> bool;
+    pub fn new(local_peer: PeerId,
+               total_peers: usize,
+               threshold: usize) -> Self;                       // :153
+    pub async fn establish_mesh(&mut self,
+        peers: Vec<PeerId>) -> Result<(), String>;              // :165
+    pub async fn handle_peer_disconnect(&mut self,
+        peer: PeerId);                                          // :228
+    pub async fn handle_peer_rejoin(&mut self,
+        peer: PeerId) -> Result<(), String>;                    // :242
+    pub fn get_connected_peers(&self) -> Vec<PeerId>;           // :262
+    pub fn is_threshold_met(&self) -> bool;                     // :271
+    pub fn send_message(&self, to: PeerId,
+        message: Vec<u8>) -> Result<(), String>;                // :276
+    pub fn broadcast_message(&self,
+        message: Vec<u8>) -> Result<(), String>;                // :296
+    pub fn simulate_network_failure(&mut self);                 // :307
+    pub fn get_mesh_stats(&self) -> MeshStats;                  // :319
 }
 ```
+
+Earlier sketches of this block had three classes of drift:
+
+  - Bare `HashMap<PeerId, RTCPeerConnection>` fields without
+    `Arc<Mutex<...>>` wrapping.
+  - Missing the `message_buffer` field and the four send-path
+    methods.
+  - `establish_mesh(&mut self) -> Result<()>` (no `peers` arg,
+    no `String` error type).
 
 ### 2. Connection Monitor
 
