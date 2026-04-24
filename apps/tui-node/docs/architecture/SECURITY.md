@@ -254,8 +254,11 @@ Internal framing of the ciphertext produced by
 
 Earlier drafts of this section claimed a 32-byte salt and a
 leading `Version (4 bytes)` field — neither is true (verified
-against `encryption.rs:20-21` for the constants and `:99` for
-the write format).
+against `encryption.rs:19-20` for the `SALT_LEN` / `NONCE_LEN`
+constants and `:99-102` for the salt ∥ nonce ∥ ciphertext
+concatenation in `encrypt_data_with_method`. Earlier draft of
+THIS retraction cited `:20-21`, which actually covers
+`NONCE_LEN` + `KEY_LEN` — close but wrong).
 
 **On-disk shape**: the framed ciphertext above is NOT written to
 its own `.dat` file — it's base64-encoded and embedded inside the
