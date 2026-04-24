@@ -67,10 +67,13 @@ The interface is keyboard-only:
 - **Enter**: Select the highlighted option
 - **Esc**: Go back or cancel current operation
 - **Tab**: Move focus within a screen (e.g., between input fields)
-- **q**: Quit
+- **Ctrl+Q** / **Ctrl+C**: Quit (see § Appendix → Keyboard
+  Shortcuts for all four Ctrl globals). Earlier drafts of this
+  bullet listed plain lowercase `q` as a quit key — that's NOT
+  wired up; the `Ctrl` modifier is required.
 
-Earlier drafts mentioned `←→` for "tab/panel switching" and `?`
-for context-sensitive help. There are no tab panels in the
+Earlier drafts also mentioned `←→` for "tab/panel switching" and
+`?` for context-sensitive help. There are no tab panels in the
 current layout (each screen is a single view), and no `?` help
 overlay is wired up (zero hits in source for a help keybinding).
 
