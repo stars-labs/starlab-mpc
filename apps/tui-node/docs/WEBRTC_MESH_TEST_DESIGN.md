@@ -384,24 +384,44 @@ Rejoin time: 2.3s average / Message latency: 15ms p50, 45ms p95 /
 Reliability: 99.5% uptime`). All fabricated — removed. Adding real
 performance harness + publishing these stats is open future work.
 
-## Security Considerations
+## Security Considerations (aspirational)
 
-### Authentication
+> **Scope note**: none of the bullets below are implemented in
+> the `src/webrtc/` test-harness library today. Same class of
+> wishlist retraction as WEBRTC_MESH_IMPLEMENTATION.md §
+> Security Considerations (aspirational). Real authentication
+> is the 10-char token length check in `authenticate_peer`
+> (`rejoin_coordinator.rs:222`); real confidentiality is DTLS
+> negotiated by the `webrtc` crate. No MAC / sequence numbers /
+> replay protection / Merkle trees / consensus logic / rollback
+> at the application layer. This section is a hardening wishlist,
+> not a feature description.
+
+### Authentication (aspirational)
 - Peer identity verification
 - Session token validation
 - Prevent man-in-the-middle
 
-### Message Integrity
+### Message Integrity (aspirational)
 - Message authentication codes
 - Sequence numbers
 - Replay attack prevention
 
-### State Consistency
+### State Consistency (aspirational)
 - Merkle tree for state verification
 - Consensus on rejoin
 - Rollback mechanisms
 
-## Success Criteria
+## Success Criteria (design targets, not measurements)
+
+The numeric targets below are design-intent goals for when
+someone wires up a real performance harness. No benchmark
+ships today (no `criterion` crate, no `examples/*_bench.rs`).
+Same "no measurement harness" finding as WEBRTC_MESH_IMPLEMENTATION.md
+§ Performance Targets — earlier drafts of this doc had an
+additional "Performance" trailer with concrete figures
+(`Mesh establishment: 145ms average / Rejoin time: 2.3s
+average / ...`) that was fabricated and removed in a7fd783.
 
 1. **Mesh Establishment**: < 1 second for 3 participants
 2. **Disconnection Detection**: < 5 seconds
