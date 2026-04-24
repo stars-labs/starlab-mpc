@@ -151,31 +151,65 @@ Popup ◄──────────► Background ◄───────�
 ### Core Message Types and Flow Directions
 
 #### 1. Popup → Background Messages
-**File:** `packages/@mpc-wallet/types/src/messages.ts` (shared workspace package, not under the extension's own `src/`) — real type name is `PopupToBackgroundMessage` (the alias `BackgroundMessage` shown below is `@deprecated`; both resolve to the same union)
+**File:** `packages/@mpc-wallet/types/src/messages.ts:53` (shared
+workspace package, not under the extension's own `src/`) — real
+type name is `PopupToBackgroundMessage` (the alias
+`BackgroundMessage` at line 226 is `@deprecated`; both resolve to
+the same union). The illustrative sketch below is a subset —
+consult source for the complete variant list.
 
 ```typescript
 // User initiates actions from popup UI
-export type BackgroundMessage = BaseMessage & (
+export type PopupToBackgroundMessage = BaseMessage & (
     // Core wallet operations
-    | { type: 'getState' }                    // Request current app state
-    | { type: 'listdevices' }                   // Request peer discovery
-    
+    | { type: 'getState' }
+    | { type: 'listdevices' }
+    | { type: 'sendDirectMessage'; todeviceId: string; message: string }
+    | { type: 'getWebRTCStatus' }
+    | { type: 'getEthereumAddress' }
+    | { type: 'getSolanaAddress' }
+    | { type: 'setBlockchain'; blockchain: "ethereum" | "solana" }
+
     // Session management
-    | { type: 'proposeSession'; session_id: string; total: number; threshold: number; participants: string[] }
-    | { type: 'acceptSession'; session_id: string; accepted: boolean }
+    | { type: 'proposeSession'; session_id: string; total: number;
+        threshold: number; participants: string[] }
+    | { type: 'acceptSession'; session_id: string; accepted: boolean;
+        blockchain?: "ethereum" | "solana" }
+
+    // MPC signing operations
+    | { type: 'requestSigning'; signingId: string;
+        transactionData: string; requiredSigners: number }
+    | { type: 'acceptSigning'; signingId: string; accepted: boolean }
+    | { type: 'requestMessageSignature'; message: string;
+        fromAddress: string; origin: string }
+    | { type: 'approveMessageSignature'; requestId: string;
+        approved: boolean }
 
     // Management operations
-    | { type: 'createOffscreen' }             // Request offscreen creation
-    | { type: 'getOffscreenStatus' }          // Check offscreen status
-    | { type: 'offscreenReady' }              // Signal offscreen is ready
+    | { type: 'createOffscreen' }
+    | { type: 'getOffscreenStatus' }
+    | { type: 'offscreenReady' }
 
     // Communication
     | { type: 'relay'; to: string; data: WebSocketMessagePayload }
-    | { type: 'fromOffscreen'; payload: OffscreenMessage }
+    | { type: 'fromOffscreen'; payload: OffscreenToBackgroundMessage }
 
-    // RPC operations (for blockchain interactions)
-    | { type: string; payload: JsonRpcRequest; action?: string; method?: string; params?: unknown[] }
+    // RPC operations (dApp JSON-RPC entry)
+    | { type: string; payload: JsonRpcRequest; action?: string;
+        method?: string; params?: unknown[] }
 );
+```
+
+Earlier drafts of this sketch:
+
+- Omitted the seven signing / address-lookup / blockchain-setter
+  variants above (`requestSigning`, `acceptSigning`,
+  `requestMessageSignature`, `approveMessageSignature`,
+  `sendDirectMessage`, `getWebRTCStatus`, `getEthereumAddress`,
+  `getSolanaAddress`, `setBlockchain`). All real.
+- Missed the optional `blockchain?` field on `acceptSession`.
+- Typed the `fromOffscreen.payload` as `OffscreenMessage`; real
+  type is `OffscreenToBackgroundMessage`.
 
 // Example usage in popup:
 chrome.runtime.sendMessage({ 
