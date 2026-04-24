@@ -454,17 +454,36 @@ serialized shape is the `WalletFile` struct
   "algorithm": "AES-256-GCM-Argon2id",
   "data": "<base64 ciphertext of the FROST key-share blob>",
   "metadata": {
-    "wallet_id": "...",
+    "session_id": "<wallet identifier, aliased as `wallet_id` for backcompat>",
+    "device_id": "<this node's DKG participant device_id>",
     "curve_type": "secp256k1",
     "threshold": 2,
     "total_participants": 3,
-    "group_public_key": "hex",
-    "created_at": <unix-timestamp-u64>,
-    "devices": [ /* DeviceInfo list */ ],
-    "blockchains": [ /* BlockchainInfo list */ ]
+    "participant_index": 2,
+    "group_public_key": "<serialized FROST VerifyingKey hex>",
+    "participants": ["alice-laptop", "bob-desktop", "charlie-phone"],
+    "created_at": "2025-06-27T12:00:00Z",
+    "last_modified": "2025-06-27T12:00:00Z"
   }
 }
 ```
+
+Metadata is serialized from the `WalletMetadata` struct at
+`apps/tui-node/src/keystore/models.rs:222-273`. Notable details:
+
+- `session_id` is the real field name; `wallet_id` is a
+  `#[serde(alias)]` for backward-compat reads.
+- `created_at` / `last_modified` are **ISO-8601 strings** (type
+  `String` in source), not unix-timestamp integers — earlier
+  drafts of this section claimed `u64` timestamps.
+- `participants: Vec<String>` carries the DKG cohort's device_ids,
+  used for cold-start signing reconstruction when AppState.session
+  is empty post-restart.
+- Legacy `device_name: Option<String>` (deprecated, use `device_id`)
+  and `blockchains: Vec<BlockchainInfo>` (deprecated, "derive
+  from group_public_key") fields exist but are
+  `#[serde(skip_serializing_if = "...::is_none"/"Vec::is_empty")]`
+  — they appear only on older on-disk wallets, not fresh writes.
 
 Earlier drafts of this section showed a `{ "wallets": [{ id,
 name, blockchain, public_key, address, key_shares: { encrypted,
