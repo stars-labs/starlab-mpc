@@ -1149,8 +1149,11 @@ contained a specific DKG/signing numbers table (e.g. "DKG 3
 participants: 1.2s / 15MB / 45KB") that had no reproducible source
 and was removed. Contributing `criterion` benches + a reproducible
 methodology is open work; until those exist, the authoritative
-functional coverage is `cargo test --workspace` (≈170 tests) +
-`bun test` in the extension (≈500 tests).
+functional coverage is `cargo test --workspace` (~180 tests —
+184 `#[test]` / `#[tokio::test]` annotations as of this writing;
+refresh with `grep -c '#\[test\]\|#\[tokio::test\]' $(find . -name
+'*.rs' | grep -v target)`) + `bun test` in the extension
+(500+ tests; exact count drifts as suites land on main).
 
 ### Optimization present in code today
 
