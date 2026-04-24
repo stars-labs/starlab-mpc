@@ -30,11 +30,14 @@ automatically.
 | Keystore persistence    | ✅       | ✅          | ⚠ inherits from TUI's `Keystore` but no UI to unlock/lock |
 | EIP-1193 dApp injection | ❌       | ✅          | ❌ (desktop app — no in-browser context) |
 
-`tui-node/src/core/` already exposes `WalletManager`,
-`SessionManager`, `DkgManager`, `OfflineManager`,
-`ConnectionManager`, and `CoreState`. Feature gaps above are
-mostly "the callback path into the core exists but the desktop
-UI surface isn't hooked up".
+`tui-node/src/core/` exposes `WalletManager`, `SessionManager`,
+`DkgManager`, `SigningManager`, `OfflineManager`,
+`ConnectionManager`, and `CoreState` (seven public items total;
+earlier drafts of this sentence listed six, dropping
+`SigningManager` — the real `core/signing_manager.rs` has been
+shipping since the native-node rehabilitation pass). Feature
+gaps above are mostly "the callback path into the core exists
+but the desktop UI surface isn't hooked up".
 
 ## Next steps (in recommended order)
 
@@ -51,11 +54,15 @@ UI surface isn't hooked up".
    functions via an internal channel. See the TODO at the top
    of `src/core/signing_manager.rs`.
 
-2. **Wire SD-card export/import UI** — the core `OfflineManager`
-   already handles the serialization; native-node just needs
-   `rfd::FileDialog::pick_folder` hooks + callback signatures
-   to route the round-1 / round-2 artifacts to the user-chosen
-   SD card path.
+2. **Wire SD-card export/import to real FROST artefacts.** The
+   `rfd::FileDialog::pick_folder` hooks + `OfflineManager`
+   export/import/clear API surface are already wired end-to-end
+   (see status-table row 6), but the artefacts written are
+   placeholder JSON — they'll carry real FROST round-1 / round-2
+   / signature-share bytes once step #1 above (SigningManager
+   FROST hookup) lands. Earlier drafts of this step said the
+   folder-picker still needed hooking up; it doesn't. The gap is
+   content, not plumbing.
 
 3. **Password-prompt UX polish.** The Settings tab has a
    persistent password field that feeds `import_wallet` /
