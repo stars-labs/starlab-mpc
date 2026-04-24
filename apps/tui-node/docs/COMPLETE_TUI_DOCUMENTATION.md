@@ -695,8 +695,9 @@ to understand the flow:
 pub enum Command {
     // Keystore
     InitializeKeystore { path: String, device_id: String },
-    FinalizeWalletFromDkg { password: String, keystore_path: String,
-                            wallet_name: String },
+    FinalizeWalletFromDkg { password: String,
+                            keystore_path: String,
+                            wallet_name: String },              // command.rs:76
     UnlockWallet { wallet_id: String,
                    password: String,
                    keystore_path: String },              // command.rs:90 —
