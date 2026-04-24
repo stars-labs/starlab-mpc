@@ -48,25 +48,43 @@ format is the `WalletFile` struct defined in
   "algorithm": "AES-256-GCM-Argon2id",
   "data": "<base64-encoded ciphertext of the FROST key-share blob>",
   "metadata": {
-    "wallet_id": "...",
+    "session_id": "<wallet identifier, aliased as `wallet_id`>",
+    "device_id": "<this node's DKG device_id>",
     "curve_type": "secp256k1",
-    "group_public_key": "hex",
     "threshold": 2,
     "total_participants": 3,
-    "blockchains": [ { "blockchain": "ethereum", "address": "0x…" } ],
-    "created_at": <unix-timestamp-u64>
+    "participant_index": 2,
+    "group_public_key": "<serialized FROST VerifyingKey hex>",
+    "participants": ["alice-laptop", "bob-desktop", "charlie-phone"],
+    "created_at": "2025-06-27T12:00:00Z",
+    "last_modified": "2025-06-27T12:00:00Z"
   }
 }
 ```
 
 The wrapper fields are `version` / `encrypted` / `algorithm` /
 `data` / `metadata`; inside `metadata` sits the serialized
-`WalletMetadata` (`src/keystore/models.rs:222`). Earlier drafts
-of this doc showed the metadata fields (wallet_id, curve_type,
-group_public_key, ...) hoisted to the top level of the JSON, with
-a separate `.dat` blob carrying the ciphertext. That layout is
-wrong — the real serializer writes the whole thing as one
-embedded JSON document.
+`WalletMetadata` (`src/keystore/models.rs:222-273`). Earlier drafts
+of this doc showed the metadata fields hoisted to the top level
+of the JSON with a separate `.dat` blob carrying the ciphertext —
+that layout never shipped; the real serializer writes everything
+as one embedded JSON document. Also earlier drafts used the
+deprecated field names (`wallet_id` at top level; `blockchains`
+array as primary; `created_at` as a unix-timestamp integer). Real
+field semantics:
+
+- `session_id` is the canonical field; `wallet_id` is a
+  `#[serde(alias)]` for backward-compat reads only.
+- `created_at` + `last_modified` are ISO-8601 strings (type
+  `String`), not u64 timestamps.
+- `participants: Vec<String>` holds the DKG cohort's device_ids;
+  used for cold-start signing reconstruction.
+- Legacy `blockchains: Vec<BlockchainInfo>` + `device_name?`
+  exist with `#[serde(skip_serializing_if = ...)]` guards so
+  fresh writes omit them — they appear only on older on-disk
+  wallets. Address derivation uses `group_public_key` + `curve_type`
+  directly (see `WalletMetadata::derive_ethereum_address` /
+  `derive_solana_address`).
 
 The ciphertext inside `data` decrypts with password + either
 PBKDF2-HMAC-SHA256 (`PBKDF2_ITERATIONS = 100_000`, constant at

@@ -74,23 +74,44 @@ the `<wallet_id>.json` path.
   "data": "<base64 ciphertext — salt+nonce+ct+tag framing is
            internal to encrypt_data_with_method, NOT visible here>",
   "metadata": {
-    "wallet_id": "company-wallet-2of3",
+    "session_id": "company-wallet-2of3",
+    "device_id": "alice-laptop",
     "curve_type": "secp256k1",
     "threshold": 2,
     "total_participants": 3,
+    "participant_index": 1,
     "group_public_key": "frost_public_key_hex",
-    "devices": [ { /* DeviceInfo per participant */ } ],
-    "blockchains": [ /* BlockchainInfo list */ ],
-    "created_at": <unix-timestamp-u64>
+    "participants": ["alice-laptop", "bob-desktop", "charlie-phone"],
+    "created_at": "2025-06-27T12:00:00Z",
+    "last_modified": "2025-06-27T12:00:00Z"
   }
 }
 ```
 
 Real metadata field names come from `WalletMetadata` at
-`src/keystore/models.rs:222`. Note that `created_at` is a
-unix-timestamp `u64`, not an ISO-8601 string (an earlier draft
-showed the latter). Device list is `devices: Vec<DeviceInfo>`, not
-a flat `participants: Vec<String>`.
+`src/keystore/models.rs:222-273`. Notable details (verified
+against source — earlier drafts of THIS note had the inversions
+backwards):
+
+- Canonical field is `session_id`; `wallet_id` is a
+  `#[serde(alias)]` for backward-compat reads only.
+- `created_at` + `last_modified` are ISO-8601 **strings**, NOT
+  `u64` unix-timestamps. An earlier retraction here claimed the
+  reverse — wrong; the struct field is `pub created_at: String`
+  and the `///` doc comment says "ISO 8601 timestamp".
+- Participant roster is `participants: Vec<String>` of
+  device_ids, NOT a `devices: Vec<DeviceInfo>` array. An earlier
+  retraction here claimed `devices: Vec<DeviceInfo>` is real —
+  also wrong; the `DeviceInfo` struct is used elsewhere
+  (in the unrelated `WalletInfo` struct at models.rs:56) but
+  `WalletMetadata` embedded inside `WalletFile` uses
+  `Vec<String>`.
+- Legacy `device_name?` + `blockchains` fields exist with
+  `#[serde(skip_serializing_if = ...)]` guards and don't appear
+  on fresh writes; address derivation uses
+  `group_public_key + curve_type` directly via
+  `WalletMetadata::derive_ethereum_address` /
+  `derive_solana_address`.
 
 ## Benefits of This Approach
 
