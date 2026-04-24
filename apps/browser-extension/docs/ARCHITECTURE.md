@@ -312,14 +312,18 @@ export type BackgroundToOffscreenWrapper = {
 };
 
 // Example usage in background:
-safelySendOffscreenMessage({
+// Real function is sendToOffscreen() (see webSocketManager.ts:36 where
+// it's injected as a dependency). Signature:
+//   sendToOffscreen(message: OffscreenMessage, description: string)
+//     -> Promise<{ success: boolean; error?: string }>
+sendToOffscreen({
     type: 'fromBackground',
     payload: {
         type: 'init',
         deviceId: 'mpc-2',
         wsUrl: 'wss://xiongchenyu.dpdns.org'
     }
-});
+}, 'init offscreen');
 ```
 
 #### 4. Offscreen → Background Messages
@@ -627,9 +631,13 @@ Any State Change in Background
     │   │
     │   └─► Popup receives via port.onMessage.addListener()
     │
-    └─► Forward relevant updates to offscreen via safelySendOffscreenMessage()
+    └─► Forward relevant updates to offscreen via sendToOffscreen()
+        (real function name — see webSocketManager.ts:36 where it's
+         injected as a dependency; earlier drafts called this
+         safelySendOffscreenMessage() which doesn't exist)
         │
-        └─► Wrapped in BackgroundToOffscreenMessage format
+        └─► Wrapped in BackgroundToOffscreenWrapper format
+            ({ type: 'fromBackground', payload: <BackgroundToOffscreenMessage> })
 
 Popup State Updates:
     │
