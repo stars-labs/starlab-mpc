@@ -719,9 +719,21 @@ not a bare top-level variable.
 - **Session Management**: Coordinate MPC session proposals
 
 ### Connection Management
-- Automatic reconnection with exponential backoff
-- Connection state monitoring and UI updates
-- Error handling and recovery mechanisms
+
+- **Connection state tracking**: `WebSocketClient` at
+  `websocket.ts:65-73` logs `onerror` / `onclose` events and
+  propagates them to registered callbacks. Popup UI reflects
+  `wsConnected` state via the `wsStatus` broadcast.
+- **No automatic reconnection**: on `onclose` the WebSocket
+  reference is set to `null` and the next connect must be
+  explicit (re-enter from the popup / reload the service worker).
+  Earlier drafts of this section claimed "Automatic reconnection
+  with exponential backoff" — no such retry loop exists in
+  `websocket.ts` or `webSocketManager.ts`. Adding a reconnect
+  backoff (with MV3-service-worker-wake-up awareness) is open
+  future work.
+- **Error propagation**: errors surface as `wsError` broadcasts
+  to the popup (see `stateManager.broadcastToPopupPorts` usage).
 
 ## WebRTC Management
 
