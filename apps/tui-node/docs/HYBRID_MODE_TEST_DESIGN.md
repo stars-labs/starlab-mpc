@@ -221,23 +221,52 @@ impl HybridCoordinator {
 
 ## Security Considerations
 
+> **Scope note**: the bullets below mix real properties with
+> aspirational hardening items. Each is labelled with its shipped
+> status.
+
 ### Online Nodes
-- TLS 1.3 for WebSocket
-- DTLS for WebRTC
-- Authenticated channels
-- Rate limiting
+- **TLS for WebSocket** — ✅ real, `wss://` via the platform TLS
+  stack. NOT pinned to a specific TLS version (earlier drafts
+  claimed "TLS 1.3"; the code delegates version negotiation to
+  tokio-tungstenite's defaults).
+- **DTLS for WebRTC** — ✅ real, negotiated by the webrtc crate.
+- **Authenticated channels** — ⚠ transport-level only (DTLS
+  certificate fingerprint exchange); no app-level authentication
+  on signal-server relays.
+- **Rate limiting** — ❌ not implemented. The signal server
+  doesn't rate-limit announcements or relays; adding that is open
+  hardening work.
 
 ### Offline Node
-- Air-gap enforcement
-- SD card encryption
-- Physical security
-- Audit logging
+- **Air-gap enforcement** — ⚠ enforced at the operator level
+  (launching with `--offline` skips network bring-up; there's no
+  runtime interface-blocker beyond the flag).
+- **Per-wallet encryption at rest** — ✅ AES-256-GCM + PBKDF2 or
+  Argon2id password KDF (not "SD card encryption" as a
+  filesystem-level feature; the files ON the SD card are already
+  the encrypted `<wallet_id>.json` or the `OfflineData` envelopes).
+- **Physical security** — out-of-scope for the software; operator-
+  controlled.
+- **Audit logging** — ❌ no structured audit log ships. `tracing`
+  output at `--log-location` is the only observability path.
 
 ### Bridge Security
-- One-way data flow enforcement
-- Sanitization of SD card data
-- Verification of all imported data
-- Time-based validity windows
+- **Verification of imported data** — ⚠ partial. `frost-core`'s
+  `dkg::part2` / `part3` + `aggregate` reject malformed commitments
+  / shares cryptographically, which IS the real tamper-detection
+  line. No signatures on the outer JSON envelopes themselves.
+- **Time-based validity windows** — ✅ real; `OfflineData.expires_at`
+  at `src/offline/types.rs:12` gates import against wall-clock
+  expiry.
+- **One-way data flow enforcement** — ❌ not mechanically enforced
+  by the TUI; it's a procedural recommendation (export to SD card,
+  import on air-gapped node, re-export back). Earlier drafts
+  described this as a code-level feature.
+- **Sanitization of SD card data** — ❌ no sanitization layer.
+  Imported JSON is deserialized via serde; malformed structures
+  error out at parse time, but there's no allowlist / fuzzer-
+  resistance layer.
 
 ## Success Criteria
 
