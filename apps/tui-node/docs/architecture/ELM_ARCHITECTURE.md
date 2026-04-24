@@ -39,19 +39,27 @@ pub struct Model {
     pub wallet_state: WalletState,
     pub network_state: NetworkState,
     pub ui_state: UIState,
-    
+
     // Navigation
     pub navigation_stack: Vec<Screen>,
     pub current_screen: Screen,
-    
+
     // Session management
     pub active_session: Option<SessionInfo>,
     pub pending_operations: Vec<Operation>,
-    
+    pub session_invites: Vec<SessionInfo>, // discovered but not
+                                           // accepted yet; populated
+                                           // from session_available
+                                           // broadcasts
+
     // User context
     pub selected_wallet: Option<String>,   // Wallet ID as plain String;
                                            // no newtype WalletId exists
     pub device_id: String,
+
+    // Application metadata
+    pub app_version: String,
+    pub last_saved: Option<DateTime<Utc>>,
 }
 
 pub struct WalletState {
