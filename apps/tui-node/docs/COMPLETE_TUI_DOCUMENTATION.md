@@ -161,24 +161,38 @@ Welcome Screen
 
 ### Keyboard Shortcuts
 
-#### Global Shortcuts
-| Key | Action | Available |
-|-----|--------|-----------|
-| `Ctrl+Q` | Quit application | Always |
-| `Ctrl+R` | Refresh current screen | Always |
-| `Ctrl+H` | Go to home (main menu) | Always |
-| `?` | Show contextual help | Always |
-| `Esc` | Go back / Cancel | Context-dependent |
+#### Global Shortcuts (wired at `src/elm/app.rs:851-866`)
 
-#### Navigation Keys
+| Key | Action | Source |
+|-----|--------|--------|
+| `Ctrl+Q` | Quit application | app.rs:851 → `Message::Quit` |
+| `Ctrl+C` | Quit application | app.rs:855 → `Message::Quit` |
+| `Ctrl+R` | Refresh current screen | app.rs:859 → `Message::Refresh` |
+| `Ctrl+H` | Go to home (main menu) | app.rs:863 → `Message::NavigateHome` |
+| `Esc` | Go back / cancel | app.rs:847 → `Message::NavigateBack` (per-component also handles it) |
+
+Earlier drafts listed `?` as a contextual-help global; no such
+handler exists (`grep -n "KeyCode::Char..?.." src/elm/app.rs`
+returns no matches). No help modal ships. See
+[`KEYBOARD_NAVIGATION_GUIDE.md`](./KEYBOARD_NAVIGATION_GUIDE.md)
+for the authoritative per-screen reference.
+
+#### Navigation Keys (per-component `Component::on` handlers)
+
 | Key | Action | Context |
 |-----|--------|---------|
-| `↑/↓` | Navigate menu items | Menus/Lists |
-| `←/→` | Switch tabs/fields | Forms |
-| `Enter` | Select/Confirm | Always |
-| `Space` | Toggle selection | Checkboxes |
-| `Tab` | Next field | Forms |
-| `Shift+Tab` | Previous field | Forms |
+| `↑` / `↓` | Navigate menu items / list rows | Menus, lists |
+| `Enter` | Select / confirm | Most screens |
+| `Tab` | Move focus to next form field | Forms |
+| `Shift+Tab` | Move focus to previous field | Forms (supported by tui-realm's default field tab cycling) |
+
+Earlier drafts listed `←/→` (switch tabs/fields) and `Space`
+(toggle selection) as standard navigation keys. Neither is
+wired up in the per-component handlers (`grep "KeyCode::Left\|
+KeyCode::Right\|KeyCode::Char(' ')"` returns matches only inside
+password/message-input fields where the printable char flows into
+the text buffer, not as navigation). Form-field navigation is
+Tab-only.
 
 ### Navigation Stack
 
