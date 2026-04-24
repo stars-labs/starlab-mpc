@@ -537,20 +537,34 @@ The WebRTC manager handles:
 - **Connection State Monitoring**: Track connection health and handle failures
 
 ### Session Management
+
+Session proposal and acceptance live on the **background-side
+`SessionManager`** (`src/entrypoints/background/sessionManager.ts`),
+NOT on `WebRTCManager`. The offscreen document explicitly rejects
+an `acceptSession` command with "should be handled by background
+script, not offscreen. Ignoring." (see `offscreen/index.ts:640-644`).
+
 ```typescript
-// Session Proposal
-webRTCManager.proposeSession(sessionId, total, threshold, participants);
+// Real call surface — from messageHandlers.ts → sessionManager.ts:
+sessionManager.proposeSession(/* sessionId, total, threshold,
+                                 participants, blockchain */)
+//   -> relays the session offer via the signal server
+sessionManager.acceptSession(sessionId, blockchain)
+//   -> relays the session response + triggers mesh setup
 
-// Session Acceptance
-webRTCManager.acceptSession(sessionId);
-
-// Mesh Status Tracking
+// Mesh Status Tracking (shared type, from @mpc-wallet/types):
 enum MeshStatusType {
     Incomplete,
     PartiallyReady,
     Ready
 }
 ```
+
+Earlier drafts of this block showed `webRTCManager.proposeSession`
+/ `.acceptSession` — neither method exists on WebRTCManager.
+Session logic is orchestrated at the background layer because the
+offscreen WebRTC host only learns about a session after the
+background sends it a `sessionReadyForSigning` / analogous event.
 
 ### Security Features
 - **Origin Validation**: Verify message sources
