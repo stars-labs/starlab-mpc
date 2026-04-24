@@ -187,29 +187,58 @@ Considerations section of the main architecture doc for context).
 
 ## 🔑 Key Features
 
+> **Reminder**: the features listed here apply to the
+> `src/webrtc/` test-harness library (`WebRTCMeshManager` +
+> `ConnectionMonitor` + `RejoinCoordinator` + `MeshSimulator`)
+> consumed by `examples/webrtc_mesh_e2e_test.rs`. They do NOT
+> describe the production Elm-runtime WebRTC path in
+> `src/network/webrtc.rs` + `src/elm/webrtc_signaling.rs`. See
+> the top-of-file scope note for the full split.
+
 ### 1. Fault Tolerance
 - Automatic detection of peer failures
-- Message buffering for offline peers
-- Graceful degradation under poor network conditions
+- Message buffering for offline peers (see the `message_buffer`
+  field on `WebRTCMeshManager` at `mesh_manager.rs:148`)
+- Graceful degradation under simulated network conditions
 - Threshold-based operation continuation
 
 ### 2. Security
-- Participant authentication for rejoin
-- Session validation
-- Token-based authorization
-- State consistency verification
+- Rudimentary participant "authentication" for rejoin: the
+  `authenticate_peer` helper at `rejoin_coordinator.rs:222-231`
+  only rejects tokens shorter than 10 characters and stores the
+  passed-through token verbatim. There is no cryptographic
+  verification — the token string itself isn't signed or
+  bound to anything. Treat this as a placeholder API surface,
+  not production authentication.
+- Session validation for rejoin (session_id must match the
+  coordinator's record)
+- Earlier drafts claimed "Token-based authorization" + "State
+  consistency verification" as hardened features; they're
+  stubs.
 
 ### 3. Performance
-- Efficient message routing
-- Connection pooling
-- Adaptive quality monitoring
-- Optimized reconnection strategies
+- Efficient message routing (adjacency-list mesh topology in
+  `MeshTopology`)
+- Optimised reconnection strategies (exponential backoff on
+  failed connects in the simulator scenarios)
+
+Earlier drafts listed "Connection pooling" + "Adaptive quality
+monitoring" — neither exists (`grep -rn 'ConnectionPool\|adaptive'
+apps/tui-node/src/webrtc` returns zero hits). Connection reuse
+is per-peer `RTCPeerConnection` objects held in a HashMap, not
+a pool; and quality metrics are collected by `ConnectionMonitor`
+but no adaptive feedback loop acts on them.
 
 ### 4. Scalability
-- Support for multiple participants
-- Dynamic mesh reconfiguration
-- Load distribution
-- Resource-efficient buffering
+- Support for arbitrary participant counts (WebRTC full-mesh
+  degree is n·(n-1)/2 — the bottleneck, not the cryptography)
+- Dynamic mesh reconfiguration via `handle_peer_disconnect` /
+  `handle_peer_rejoin`
+- Message buffering for disconnected peers (same `message_buffer`
+  field as § 1)
+
+Earlier drafts mentioned "Load distribution" — not implemented;
+every peer is symmetric in the mesh.
 
 ## 📁 File Structure
 
