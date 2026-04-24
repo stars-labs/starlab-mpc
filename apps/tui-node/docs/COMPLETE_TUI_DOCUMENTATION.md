@@ -280,9 +280,19 @@ impl Component<Message, UserEvent> for MainMenu {
 ```
 
 The `MpcWalletComponent` extension trait in
-`src/elm/components/mod.rs` adds an `id()` method that returns the
-`Id` enum variant so `Application::mount` knows which screen it's
-wiring up.
+`src/elm/components/mod.rs:51` sits on top of tui-realm's
+`AppComponent<Message, UserEvent>` and adds three methods:
+
+  - `id(&self) -> Id` — returns the `Id` enum variant
+    (`mod.rs:64`) so `Application::mount` knows which screen it's
+    wiring up
+  - `is_visible(&self) -> bool` — the tui-realm shell gates
+    render on this
+  - `on_focus(&mut self, focused: bool)` — notifies the component
+    when its focus state flips
+
+Earlier drafts mentioned only `id()` — the other two are part of
+the public trait surface.
 
 ### Core Components
 
