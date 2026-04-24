@@ -746,7 +746,9 @@ apps/tui-node/src/
 │   └── mpc-wallet-tui.rs        # clap entry + keystore init + ElmApp bootstrap
 ├── elm/
 │   ├── app.rs                   # ElmApp<C> — main event loop + tui-realm shell
-│   ├── model.rs                 # Model (immutable state snapshot)
+│   ├── model.rs                 # Model — single source of UI state;
+│   │                             # mutated in place by update() via
+│   │                             # `&mut Model`, not an immutable snapshot
 │   ├── update.rs                # Update fn: Message → state transition + Commands
 │   ├── command.rs               # Command enum — side-effect tasks
 │   │                             # (non-generic; ciphersuite-generic
@@ -782,7 +784,11 @@ apps/tui-node/src/
 │                                # site — the Elm-loop driver that
 │                                # handles offer/answer/ICE exchange
 ├── keystore/
-│   ├── storage.rs               # Keystore struct + `.json`/`.dat` I/O
+│   ├── storage.rs               # Keystore struct + single-file
+│   │                             # `<wallet_id>.json` I/O via
+│   │                             # save_wallet_file_v2_with_method;
+│   │                             # NO separate `.dat` file despite
+│   │                             # earlier drafts of this tree
 │   ├── encryption.rs            # AES-256-GCM + PBKDF2 100k
 │   ├── models.rs                # WalletFile / Metadata structs
 │   ├── frost_keystore.rs        # FROST-specific keystore plumbing
