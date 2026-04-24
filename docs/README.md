@@ -11,7 +11,9 @@ workspace member.
   layout, how the Rust + Bun workspaces fit together, build order.
 - [`MPC_WALLET_TECHNICAL_DOCUMENTATION.md`](MPC_WALLET_TECHNICAL_DOCUMENTATION.md)
   — comprehensive technical reference (architecture, protocol,
-  crypto details, deployment scenarios). Several hundred pages.
+  crypto details, deployment scenarios). ~1,440 lines (earlier
+  drafts said "several hundred pages" — not literally page-based;
+  at typical print density this is closer to ~30 pages).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code-of-conduct, branching
   model, commit format, PR guidelines.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history.
@@ -54,7 +56,7 @@ Each app and package has its own docs subtree:
   (mostly retrospectives of fixes that have long since
   landed).
 - [`apps/browser-extension/docs/`](../apps/browser-extension/docs/)
-- [`apps/native-node/docs/`](../apps/native-node/docs/) — deferrs
+- [`apps/native-node/docs/`](../apps/native-node/docs/) — defers
   most content to the parent [`apps/native-node/README.md`](../apps/native-node/README.md).
 - [`apps/signal-server/docs/`](../apps/signal-server/docs/)
 - (Rust library crates don't have docs subtrees; their public API
