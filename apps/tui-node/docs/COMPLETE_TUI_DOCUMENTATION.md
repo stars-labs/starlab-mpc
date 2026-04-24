@@ -670,8 +670,11 @@ pub enum Command {
     InitializeKeystore { path: String, device_id: String },
     FinalizeWalletFromDkg { password: String, keystore_path: String,
                             wallet_name: String },
-    UnlockWallet { wallet_id: String, keystore_path: String,
-                   password: String, … },
+    UnlockWallet { wallet_id: String,
+                   password: String,
+                   keystore_path: String },              // command.rs:90 —
+                                                         // exactly 3 fields,
+                                                         // no more
 
     // DKG / signing orchestration
     StartDKG { config: WalletConfig },         // command.rs:46 —
@@ -704,9 +707,15 @@ impl Command {
 // src/utils/state.rs — ciphersuite-generic, per-round DKG/signing
 pub enum InternalCommand<C: Ciphersuite> {
     // Keystore
-    InitKeystore { path: String, device_name: String },
+    InitKeystore { path: String, device_name: String },  // state.rs:32
     ListWallets,
-    CreateWallet { name: String, password: String, … },
+    CreateWallet {                                       // state.rs:41
+        name: String,
+        description: Option<String>,
+        password: String,
+        tags: Vec<String>,
+    },
+    LocateWallet { wallet_id: String },                  // state.rs:49
 
     // Session lifecycle
     SendToServer(ClientMsg),
