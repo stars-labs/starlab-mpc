@@ -462,38 +462,62 @@ for COMPLETE_TUI_DOCUMENTATION.md).
 
 ### Screen Transitions
 
-Valid screen transitions are enforced through the type system:
+The `Screen` enum itself tags which screen is active; validity of
+transitions is enforced by the `update()` function rather than a
+separate transition-checking helper. Real enum at
+`src/elm/model.rs:378-427`:
 
 ```rust
-// See src/elm/model.rs for the real enum — IDs are plain Strings
-// throughout, NOT newtype WalletId / SessionId wrappers (neither
-// type exists in source).
-#[derive(Debug, Clone, PartialEq)]
+// IDs are plain Strings throughout, NOT newtype WalletId /
+// SessionId wrappers (neither type exists in source).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Screen {
     Welcome,
     MainMenu,
+
+    // Wallet management
     CreateWallet(CreateWalletState),
     ManageWallets,
     WalletDetail { wallet_id: String },
+    ImportWallet,
+    ExportWallet { wallet_id: String },
+
+    // DKG flow
+    PathSelection,
+    ModeSelection,
+    ThresholdConfig,
+    TemplateSelection,
+    WalletConfiguration(WalletConfig),
+    PasswordPrompt,
+    DKGProgress { session_id: String },
+    WalletComplete { wallet_id: String },
+
+    // Session management
     JoinSession,
     SessionDetail { session_id: String },
-    SignTransaction { wallet_id: String },
-    Settings,
-}
+    AcceptSession { sessions: Vec<SessionInfo> },
 
-impl Screen {
-    pub fn can_navigate_to(&self, target: &Screen) -> bool {
-        match (self, target) {
-            // Define valid transitions
-            (Screen::MainMenu, Screen::CreateWallet(_)) => true,
-            (Screen::MainMenu, Screen::ManageWallets) => true,
-            (Screen::ManageWallets, Screen::WalletDetail { .. }) => true,
-            // ... other valid transitions
-            _ => false,
-        }
-    }
+    // Signing flow
+    SignTransaction { wallet_id: String },
+    SigningProgress { request_id: String },
+    SignatureComplete { request_id: String },
+
+    // Settings
+    Settings,
+    NetworkSettings,
+    SecuritySettings,
+    About,
 }
 ```
+
+There is **no** `impl Screen { fn can_navigate_to(...) }` helper —
+earlier drafts of this section showed one as the type-safe
+transition enforcer, but grep returns zero hits for
+`can_navigate_to`. In practice the `update()` function decides
+what `PushScreen(X)` to emit (or returns early if a transition
+wouldn't make sense given current Model state), and invalid
+sequences are caught by tui-realm at mount-time (the target
+Component must be registered under the destination Screen's Id).
 
 ## Event Flow
 
