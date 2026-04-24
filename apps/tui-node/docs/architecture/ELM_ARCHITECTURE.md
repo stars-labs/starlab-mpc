@@ -103,17 +103,18 @@ shape + grouping; read `src/elm/message.rs` for the canonical list.
 ```rust
 #[derive(Debug, Clone)]
 pub enum Message {
-    // Navigation
-    PushScreen(Screen),     // NOT `Navigate(Screen)` — earlier drafts
-    PopScreen,              //  used that name; not a real variant
-    GoHome,
-    Initialize,
+    // Navigation (real variant names verified against message.rs:15-18,263)
+    NavigateBack,            // message.rs:15 — Esc goes back one screen
+    NavigateHome,            // message.rs:16 — Ctrl+H goes to main menu
+    PushScreen(Screen),      // message.rs:17
+    PopScreen,               // message.rs:18
+    Quit,                    // message.rs:263 — Ctrl+Q / Ctrl+C emit this
+    Refresh,                 // Ctrl+R
 
     // User input (routed from Component::on handlers)
     SelectItem { index: usize },
-    SelectMode(Mode),
-    SelectCurve(CurveType),
-    ThresholdConfigConfirm,
+    SelectMode(WalletMode),  // message.rs:34 — carries WalletMode, not Mode
+    SetThreshold(u16),       // message.rs:37 — NOT `ThresholdConfigConfirm`
     SignTypeChar(char),
     SignBackspace,
     SignSubmit,
@@ -137,8 +138,30 @@ pub enum Message {
 Raw `KeyPressed(KeyEvent)` does not appear as a top-level variant
 — tui-realm's own `Component::on(Event<UserEvent>)` translates
 keystrokes into the specific `Message::<Action>` variants per
-screen (see KEYBOARD_HANDLING_GUIDE.md). There is no
-`Message::Quit` wired to `Ctrl+Q`; quit is a system interrupt.
+screen (see KEYBOARD_HANDLING_GUIDE.md).
+
+**Real global Ctrl-key bindings** (handled in `src/elm/app.rs:851-866`
+BEFORE per-component dispatch):
+  - `Ctrl+Q` / `Ctrl+C` → `Message::Quit`
+  - `Ctrl+R` → `Message::Refresh`
+  - `Ctrl+H` → `Message::NavigateHome`
+
+Earlier drafts of this sketch had four specific errors:
+
+  - Listed `GoHome` as the navigate-home variant; real name is
+    `NavigateHome` (`message.rs:16`).
+  - Listed `SelectCurve(CurveType)` and `ThresholdConfigConfirm` as
+    real variants; neither exists (`grep -n 'SelectCurve\|ThresholdConfigConfirm'
+    src/elm/message.rs` returns zero matches). Curve selection is
+    a field on the Create Wallet form; threshold confirmation uses
+    `SetThreshold(u16)` + regular SelectItem/Enter submission.
+  - Claimed "There is no `Message::Quit` wired to `Ctrl+Q`; quit
+    is a system interrupt". Wrong — `Message::Quit` is real at
+    `message.rs:263`, and app.rs:851 wires Ctrl+Q to it. Quit is
+    NOT a bare system interrupt.
+  - Claimed "`Message::NavigateBack` is not a real variant name".
+    Wrong — NavigateBack is real at `message.rs:15` and is the
+    variant emitted on Esc.
 
 ### 3. Update Function (`src/elm/update.rs`)
 
@@ -188,30 +211,41 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 }
 ```
 
-A few points that earlier drafts of this section got wrong:
+A few points that earlier drafts of this section got wrong (now
+corrected inline above; notes below trace the error history):
 
-- `Message::Navigate(Screen)` / `Message::NavigateBack` — not real
-  variant names. Real variants are `PushScreen(Screen)` / `PopScreen`
-  / `GoHome`, and `model.push_screen` / `model.pop_screen` /
-  `model.go_home` are the helper methods on `Model` that mutate
-  the navigation stack (defined at `src/elm/model.rs:57-76`).
-- `Message::KeyPressed(KeyEvent)` with a global `Ctrl+Q → Quit`
-  / `Esc → NavigateBack` match — none of that is in the real
-  update function. Tui-realm dispatches keys to the active
-  component's `on(event)` handler, which emits the appropriate
-  typed Message variant. There is no Ctrl+Q keybinding
-  (consistent with d09bddc's KEYBOARD_NAVIGATION_GUIDE rewrite).
+- `Message::Navigate(Screen)` was claimed as a variant; it isn't.
+  **Real navigation variants**: `NavigateBack` / `NavigateHome` /
+  `PushScreen(Screen)` / `PopScreen` (message.rs:15-18). The
+  matching helper methods are `model.push_screen` / `model.pop_screen`
+  (`model.rs:57,63`) and `model.go_home` (`model.rs:73` — note
+  the method is `go_home` while the Message variant is
+  `NavigateHome`; they're NOT the same identifier).
+- Tui-realm dispatches keys to the active component's
+  `on(event)` handler, which emits typed Message variants. In
+  ADDITION to per-component routing there ARE four global Ctrl
+  keybindings handled at `app.rs:851-866` BEFORE component
+  dispatch (Ctrl+Q / Ctrl+C → Quit, Ctrl+R → Refresh,
+  Ctrl+H → NavigateHome). An earlier draft of THIS note claimed
+  "there is no Ctrl+Q keybinding" — that was wrong; Ctrl+Q fires
+  `Message::Quit` at line 851.
 - `Command::SendMessage(Message::…)` — not a real variant.
   Commands produce side effects (I/O, WebSocket send, keystore
   write, DKG round trigger) that eventually emit Messages back
   through a separate channel, rather than carrying a Message as
   a payload.
-- `Command::StartDKG` is real, but the follow-on that actually
-  runs the FROST rounds is `Command::StartFrostProtocol` (not
-  `TriggerDkgRound1` as I claimed in an earlier fix to the
-  tech doc's API Reference — retracting that here; the real name
-  is `StartFrostProtocol`, fired once the WebRTC mesh is
-  established).
+- Two parallel command enums drive DKG:
+    - **Elm-loop level**: `Command::StartDKG { config }` at
+      `command.rs:46` (announces the session) and
+      `Command::StartFrostProtocol` at `command.rs:53` (kicks
+      off the FROST ceremony once the mesh is ready).
+    - **Protocol level**: `InternalCommand<C>::TriggerDkgRound1`
+      / `TriggerDkgRound2` / `ProcessDkgRound1` / `ProcessDkgRound2`
+      at `utils/state.rs:104,113,107,116` drive the per-round
+      FROST state transitions.
+  Elm-loop `Command` is non-generic; `InternalCommand<C>` is
+  ciphersuite-generic. Both are real and distinct — see bb333ff
+  for the original cross-reference fix.
 
 ### 4. Commands (`src/elm/command.rs`)
 
