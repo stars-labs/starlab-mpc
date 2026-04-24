@@ -681,14 +681,34 @@ Popup Error Display:
 ## WebSocket Communication
 
 ### Server Connection
-**Location:** Background Page (`/src/entrypoints/background/websocket.ts`)
-
-The WebSocket client connects to a signaling server for peer discovery and WebRTC signaling:
+**Locations:**
+- `src/entrypoints/background/websocket.ts` — low-level
+  `WebSocketClient` class (transport only)
+- `src/entrypoints/background/webSocketManager.ts:92` — owns the
+  client, constructs `new WebSocketClient(url)` inside its
+  `initialize()` method
+- `src/entrypoints/background/index.ts:412-419` — resolves the
+  URL via `await getSignalServerUrl()` (reads from
+  `chrome.storage.local`, falls back to
+  `DEFAULT_SIGNAL_SERVER_URL` in `src/config/signal-server.ts`)
+  and passes it to `webSocketManager.initialize(url, deviceId)`
 
 ```typescript
-const WEBSOCKET_URL = "wss://xiongchenyu.dpdns.org";
-wsClient = new WebSocketClient(WEBSOCKET_URL);
+// Real init path (simplified):
+const url = await getSignalServerUrl();  // chrome.storage.local or
+                                         // DEFAULT_SIGNAL_SERVER_URL
+                                         //   = "wss://xiongchenyu.dpdns.org"
+await webSocketManager.initialize(url, deviceId);
+// ... inside webSocketManager.initialize:
+this.wsClient = new WebSocketClient(url);
 ```
+
+Earlier drafts of this section showed a direct
+`const WEBSOCKET_URL = "wss://xiongchenyu.dpdns.org"; wsClient = new
+WebSocketClient(WEBSOCKET_URL);` construction at the background-page
+top level. That sketch elides the per-user configuration layer — the
+URL is NOT hardcoded, and `wsClient` is a field on `WebSocketManager`,
+not a bare top-level variable.
 
 ### Message Types
 - **Registration**: devices register with their unique ID
