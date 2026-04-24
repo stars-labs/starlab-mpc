@@ -123,25 +123,58 @@ Real opportunities if someone takes perf work on:
 
 ### Screen Hierarchy
 
+Real Screen enum at `src/elm/model.rs:378-427` (see
+ELM_ARCHITECTURE.md § Screen Transitions for the full 23-variant
+list). Tree structure below groups by user-flow, with each leaf
+matching a real Screen variant:
+
 ```
-Welcome Screen
-    ├── Main Menu
-    │   ├── Create New Wallet
-    │   │   ├── Mode Selection (Online/Offline)
-    │   │   ├── Curve Selection (Secp256k1/Ed25519)
-    │   │   ├── Threshold Config
-    │   │   └── DKG Process
-    │   ├── Join Session
-    │   │   ├── Session Discovery
-    │   │   └── Session Details
-    │   ├── Manage Wallets
-    │   │   ├── Wallet List
-    │   │   └── Wallet Details
-    │   └── Settings
-    │       ├── Network Settings
-    │       └── Security Settings
-    └── Help/About
+Welcome
+    └── MainMenu
+        ├── CreateWallet (wizard)
+        │   ├── PathSelection
+        │   ├── ModeSelection             (Online/Offline)
+        │   ├── TemplateSelection
+        │   ├── WalletConfiguration       (contains threshold + curve
+        │   │                              choice as form fields; not
+        │   │                              separate screens)
+        │   ├── ThresholdConfig
+        │   ├── PasswordPrompt
+        │   ├── DKGProgress { session_id }
+        │   └── WalletComplete { wallet_id }
+        │
+        ├── JoinSession
+        │   ├── SessionDetail { session_id }
+        │   └── AcceptSession { sessions }
+        │
+        ├── ManageWallets                  (wallet_count > 0)
+        │   ├── WalletDetail { wallet_id }
+        │   ├── ImportWallet
+        │   └── ExportWallet { wallet_id }
+        │
+        ├── SignTransaction { wallet_id }  (wallet_count > 0)
+        │   ├── SigningProgress { request_id }
+        │   └── SignatureComplete { request_id }
+        │
+        └── Settings
+            ├── NetworkSettings
+            ├── SecuritySettings
+            └── About
 ```
+
+Earlier drafts of this tree:
+  - Showed a standalone `Curve Selection (Secp256k1/Ed25519)` screen
+    — doesn't exist. Curve choice is a form field on
+    `WalletConfiguration`, not its own screen.
+  - Omitted the `SignTransaction` top-level branch (it's a sibling of
+    `ManageWallets`, not nested under it).
+  - Omitted `PasswordPrompt`, `ImportWallet`, `ExportWallet`,
+    `AcceptSession`, `DKGProgress`, `WalletComplete`,
+    `SigningProgress`, `SignatureComplete`, `About` — all real
+    Screen variants.
+  - Showed a `Help/About` leaf; there is no Help screen (no help
+    modal ships, see § Keyboard Shortcuts below). `About` IS a
+    real Screen.
 
 ### Visual Components
 
