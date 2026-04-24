@@ -391,11 +391,25 @@ impl Component<Message, UserEvent> for MainMenu {
 }
 ```
 
-Earlier drafts used `Message::Navigate(Screen::...)` and
-`Message::Quit` inside the Enter match arm. Real variants are
-`Message::SelectItem { index }` + per-screen SelectMode /
-SelectCurve / ThresholdConfigConfirm / etc. — the update function
-is where the index-to-screen mapping happens, not the component.
+Earlier drafts used `Message::Navigate(Screen::...)` inside the
+Enter match arm. That variant is not real. Real per-screen Enter
+handlers typically emit either:
+
+  - `Message::SelectItem { index: self.selected }` — the update
+    function then translates the index-into-active-screen into
+    the appropriate downstream Message / Command; OR
+  - A screen-specific typed variant like
+    `Message::SelectMode(WalletMode)` (ModeSelection screen) or
+    `Message::SetThreshold(u16)` (ThresholdConfig screen — NOT
+    `ThresholdConfigConfirm`, which doesn't exist).
+
+The index-to-screen mapping happens in the update function, not
+the component.
+
+Earlier drafts of this paragraph also bundled `SelectCurve` and
+`ThresholdConfigConfirm` into the "per-screen Message variants"
+list — neither exists (no curve-selection screen ships, and the
+threshold form submits via `SetThreshold(u16)` + form Enter).
 
 Also: earlier drafts used `impl MockComponent for MainMenu` with a
 `render(&mut self, …)` method. `MockComponent` is not the trait
