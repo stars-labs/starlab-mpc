@@ -372,9 +372,15 @@ pub struct Keystore {
 
 Earlier drafts of this section listed a `Keystore { encryption_key,
 wallets: HashMap, metadata }` struct and a wrapper `EncryptedWallet`
-type — neither exist. The wallets themselves live as split files on
-disk (see the Storage System section below); the `Keystore` just
-maintains the metadata index and dispatches reads/writes.
+type — neither exist. The wallets themselves live as one JSON
+file per wallet on disk (partitioned by device_id + curve — see
+the § Storage System section below for the directory tree); the
+`Keystore` struct just caches `WalletMetadata` and dispatches
+reads/writes to those files. An earlier wording called this a
+"split files" layout which was ambiguous — to be clear: each
+wallet is a SINGLE file; "split" here means split ACROSS the
+`<device_id>/<curve>/` directory tree, not split between
+`.json` and `.dat` (no `.dat` file exists).
 
 **Encryption scheme** (see `src/keystore/encryption.rs`):
 
