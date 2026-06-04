@@ -11,3 +11,4 @@ pub mod policy;
 pub mod protocol;
 pub mod serve;
 pub mod simulate;
+pub mod trace;

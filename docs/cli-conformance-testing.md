@@ -284,6 +284,17 @@ extension is tested against in L4.
 **Cost:** ms. Pure comparison. Runs on every push. Regenerated deliberately with a
 `BLESS=1`-style env when the protocol intentionally changes (reviewed in the diff).
 
+**Status:** the **event-contract** half (2) is landed — `src/trace.rs` provides
+`normalize_event` (redacts volatile crypto/id fields → self-describing `"<key>"`
+placeholders, collapses `participants` to `["<device>"]`, keeps every structural/
+enum/numeric field literal) and `tests/event_contract.rs` pins all 13 `CliEvent`
+variants against `tests/fixtures/event_contract.golden.jsonl`. Deterministic and
+offline, so it runs in the fast CI lane; `BLESS=1` regenerates after a reviewed
+change. The **wire-frame** half (1) — capturing the on-the-wire `announce_session`/
+`session_available`/`relay` sequences via a `--trace` tee on `serve`/`simulate` —
+is still pending; `normalize_event`'s redaction approach is the reusable basis for
+it, and the same normal form is what the L4 oracle will diff the extension against.
+
 ### 5.3 L3 — Cross-client interop (CLI as automated peer)
 
 **What:** Drive a real ceremony where the CLI supplies N−1 peers and the **client under
