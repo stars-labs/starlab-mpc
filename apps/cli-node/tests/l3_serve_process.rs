@@ -32,11 +32,21 @@ struct ServeProc {
 
 impl ServeProc {
     async fn spawn(device_id: &str, keystore: &str, ws_url: &str) -> anyhow::Result<Self> {
+        Self::spawn_with_args(device_id, keystore, ws_url, &[]).await
+    }
+
+    async fn spawn_with_args(
+        device_id: &str,
+        keystore: &str,
+        ws_url: &str,
+        extra: &[&str],
+    ) -> anyhow::Result<Self> {
         let mut child = Command::new(env!("CARGO_BIN_EXE_mpc-wallet-cli"))
             .arg("serve")
             .args(["--device-id", device_id])
             .args(["--keystore", keystore])
             .args(["--signal-server", ws_url])
+            .args(extra)
             .args(["--log-level", std::env::var("L3_LOG").as_deref().unwrap_or("warn")])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -206,6 +216,67 @@ async fn dkg_2_of_2_across_serve_processes() {
     let (_wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
     assert!(!group_key.is_empty(), "empty group key");
     eprintln!("✅ 2-of-2 DKG across serve processes; group={group_key}");
+
+    a.quit().await;
+    b.quit().await;
+}
+
+/// SIG-8: a co-signer running `serve --auto-approve` contributes its share to
+/// an incoming signing request WITHOUT any manual approve command — gated by
+/// the auto-approval policy. Exercises the security-sensitive auto-approve path
+/// end to end: DKG across two processes (one in auto-approve mode), then the
+/// initiator signs and the co-signer auto-joins; the signature must verify.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "spawns serve processes + real WebRTC over loopback; run with --ignored"]
+async fn auto_approve_co_signer_signs_without_manual_approval() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(webrtc_signal_server::run(listener));
+    let ws_url = format!("ws://127.0.0.1:{port}");
+
+    let ks_a = tempfile::TempDir::new().unwrap();
+    let ks_b = tempfile::TempDir::new().unwrap();
+    // b's wallet password (set at DKG join) lives in a file for --auto-approve.
+    let pw_dir = tempfile::TempDir::new().unwrap();
+    let pw_file = pw_dir.path().join("approve.pw");
+    std::fs::write(&pw_file, "pw-b").unwrap();
+    let pw_file = pw_file.to_string_lossy().to_string();
+
+    let mut a = spawn_connected("auto-a", &ks_a.path().to_string_lossy(), &ws_url)
+        .await
+        .expect("a");
+    // b auto-approves any wallet (empty allowlist) using pw-b from the file.
+    let mut b = ServeProc::spawn_with_args(
+        "auto-b",
+        &ks_b.path().to_string_lossy(),
+        &ws_url,
+        &["--auto-approve", "--approve-password-file", &pw_file],
+    )
+    .await
+    .expect("spawn b");
+    b.wait_for("ready", 10).await.expect("b ready");
+    b.send(json!({"cmd": "connect"})).await.unwrap();
+    b.wait_connected(15).await.expect("b connected");
+
+    // DKG (b joins manually — auto-approve only governs SIGNING).
+    let (wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+    assert!(!group_key.is_empty());
+
+    // a initiates signing. b should auto-approve with NO manual command.
+    a.send(json!({
+        "id": 10, "cmd": "sign", "wallet_id": wallet_id,
+        "message": "auto-approve me", "encoding": "utf8", "password": "pw-a"
+    }))
+    .await
+    .unwrap();
+
+    // a receives the aggregated signature purely via b's auto-contribution.
+    let sc = a.wait_for("signature_complete", 90).await.expect("signature_complete");
+    assert!(
+        verify_secp256k1(&group_key, sc["message_hash"].as_str().unwrap(), sc["signature"].as_str().unwrap()),
+        "auto-approved signature failed to verify"
+    );
+    eprintln!("✅ SIG-8: co-signer auto-approved; signature verified");
 
     a.quit().await;
     b.quit().await;

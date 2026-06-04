@@ -108,7 +108,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 | SIG-5 | dApp `personal_sign`-shaped message (Ethereum) | extension-originated in cross-client |
 | SIG-6 | raw hex message vs utf8 message | `encoding` field — **L1** ✅ (hex-decode path → EIP-191 → verify) |
 | SIG-7 | co-signer decline (explicit rejection) | extension `SigningDecline` path |
-| SIG-8 | auto-approve policy gates signing | CLI `--auto-approve` + allowlist + budget |
+| SIG-8 | auto-approve policy gates signing | CLI `--auto-approve` + allowlist + budget — **L3** ✅ (found+fixed a bridge dedup bug) |
 
 ### 3.3 Persistence / lifecycle
 
