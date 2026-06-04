@@ -633,17 +633,12 @@ impl Command {
                             let total_participants = config_clone.total_participants;
                             let device_id_clone = device_id.clone();
 
-                            // Get session info before spawning
-                            let our_session_id = {
-                                let state = app_state.lock().await;
-                                state.session.as_ref().map(|s| s.session_id.clone())
-                            };
-
-                            // Clone app_state for the spawned task
-                            let app_state_clone = app_state.clone();
                             // Subscribe to the shared server-message fan-out owned by
                             // `Command::ReconnectWebSocket`. We see every parsed frame
-                            // without maintaining our own socket.
+                            // without maintaining our own socket. Relay frames (peer
+                            // WebRTC signals + participant_update) are handled by the
+                            // always-on relay handler (spawn_relay_handler_task), not
+                            // here — this loop only mirrors display/roster updates.
                             let mut broadcast_rx = broadcast_tx.subscribe();
 
                             tokio::spawn(async move {
@@ -699,17 +694,8 @@ impl Command {
                                                         });
                                                         let _ = &total_participants; // silence unused capture
                                                     }
-                                                    webrtc_signal_server::ServerMsg::Relay { from, data } => {
-                                                        crate::elm::webrtc_signaling::handle_relay(
-                                                            from.clone(),
-                                                            data.clone(),
-                                                            app_state_clone.clone(),
-                                                            tx_msg.clone(),
-                                                            device_id_clone.clone(),
-                                                            our_session_id.clone(),
-                                                        )
-                                                        .await;
-                                                    }
+                                        // Relay frames handled by the always-on
+                                        // relay handler, not this loop.
                                         _ => {}
                                     }
                                 }
@@ -1002,10 +988,6 @@ impl Command {
                 let session_id_clone = session_id.clone();
                 let device_id_clone = device_id.clone();
                 let session_total = known_total; // Known from the discovered announcement.
-                let our_session_id = {
-                    let state = app_state.lock().await;
-                    state.session.as_ref().map(|s| s.session_id.clone())
-                };
                 let app_state_clone = app_state.clone();
                 let mut broadcast_rx = broadcast_tx.subscribe();
 
@@ -1146,17 +1128,9 @@ impl Command {
                                                         });
                                                     }
                                                 }
-                                                webrtc_signal_server::ServerMsg::Relay { from, data } => {
-                                                    crate::elm::webrtc_signaling::handle_relay(
-                                                        from.clone(),
-                                                        data.clone(),
-                                                        app_state_clone.clone(),
-                                                        tx_msg.clone(),
-                                                        device_id_clone.clone(),
-                                                        our_session_id.clone(),
-                                                    )
-                                                    .await;
-                                                }
+                                    // Relay frames (peer WebRTC signals +
+                                    // participant_update) are handled by the
+                                    // always-on relay handler, not this loop.
                                     _ => {}
                                 }
                             }
@@ -2242,6 +2216,16 @@ impl Command {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
 
+                // Always-on relay handler (peer WebRTC signals +
+                // participant_update) for the whole connection — subscribe
+                // BEFORE the reader publishes. This is what lets a cold-started
+                // signer receive offers without a DKG driver loop running.
+                ws_runtime::spawn_relay_handler_task(
+                    channels.broadcast_tx.clone(),
+                    app_state.clone(),
+                    tx.clone(),
+                    params.device_id.clone(),
+                );
                 ws_runtime::spawn_sender_task(sink, channels.ws_msg_rx);
                 ws_runtime::spawn_reader_task(rx, tx.clone(), channels.broadcast_tx);
 
