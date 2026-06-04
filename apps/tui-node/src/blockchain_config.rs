@@ -146,10 +146,23 @@ pub fn generate_address_for_chain(
     match (chain, &curve) {
         // Ethereum-compatible chains with secp256k1
         ("ethereum" | "bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
-            // Use keccak256 hash of the public key for Ethereum-style addresses
+            // Ethereum addresses are keccak256(uncompressed pubkey X‖Y)[12..].
+            // FROST serializes the group verifying key COMPRESSED (33 bytes,
+            // 0x02/0x03 ‖ X), so we MUST decompress first: hashing the
+            // compressed bytes — or, as a previous version did, the 32-byte X
+            // coordinate after stripping the prefix — yields an address that
+            // does NOT correspond to the signing key (e.g. generator G gave the
+            // bogus 0x51cbf46… instead of the canonical 0x7e5f4552…).
+            // `from_sec1_bytes` accepts both compressed (33) and uncompressed
+            // (65) encodings, so this is robust to either input.
+            use k256::elliptic_curve::sec1::ToEncodedPoint;
             use sha3::{Digest, Keccak256};
+            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
+                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
+            let point = pk.to_encoded_point(false); // 0x04 ‖ X ‖ Y
+            let xy = &point.as_bytes()[1..]; // X ‖ Y, 64 bytes
             let mut hasher = Keccak256::new();
-            hasher.update(&group_public_key[1..]); // Skip the first byte (format indicator)
+            hasher.update(xy);
             let hash = hasher.finalize();
             Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
         }

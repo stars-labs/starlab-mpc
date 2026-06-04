@@ -311,6 +311,31 @@ mod tests {
         assert_eq!(derive_address("not-hex", "secp256k1"), "");
     }
 
+    // Address-derivation golden (L4 §5.4): pin derivation against the same
+    // external ground-truth vectors the yubiwallet repo uses, so the CLI's
+    // address oracle and the hardware-wallet derivations can't silently drift
+    // apart. secp256k1 generator G (pubkey for privkey=1) and the all-zero
+    // ed25519 key are the canonical, externally-verifiable inputs.
+    #[test]
+    fn golden_ethereum_address_for_generator_g() {
+        // Compressed secp256k1 G → the well-known address for privkey=1.
+        let g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        assert_eq!(
+            derive_address(g, "secp256k1").to_lowercase(),
+            "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
+        );
+    }
+
+    #[test]
+    fn golden_solana_address_for_zero_key() {
+        // base58 of 32 zero bytes is the Solana System Program id.
+        let zeros = "0".repeat(64);
+        assert_eq!(
+            derive_address(&zeros, "ed25519"),
+            "11111111111111111111111111111111"
+        );
+    }
+
     #[test]
     fn update_dkg_session_id_emits_session_announced_once() {
         let mut b = Bridge::new();

@@ -394,6 +394,23 @@ These reuse the same derivation paths as the per-chain tests already landed in
 `crypto-rust-tools/yubiwallet/tests/chains.rs`, keeping one source of truth for address
 ground-truth across both repos.
 
+**Status / 🐞 found a serious bug.** The deterministic address goldens are landed as
+bridge unit tests (`golden_ethereum_address_for_generator_g`,
+`golden_solana_address_for_zero_key`) — secp256k1 generator G → the canonical
+`0x7e5f4552…` (privkey=1) and the all-zero ed25519 key → the Solana System Program id,
+both externally verifiable against the yubiwallet vectors. **Writing them immediately
+caught a real bug:** `generate_address_for_chain` (used by the bridge/CLI for the address
+shown to users) derived Ethereum addresses by stripping the first byte of the **compressed**
+33-byte FROST group key and keccak-hashing the remaining 32 bytes — i.e. hashing only the
+X coordinate — instead of decompressing to `X‖Y` first. That produced addresses that **do
+not correspond to the signing key** (G gave `0x51cbf46…` instead of `0x7e5f4552…`), and it
+**disagreed with the keystore's own `derive_ethereum_address`** (which already decompressed
+correctly). Fixed by decompressing via `k256::PublicKey::from_sec1_bytes` →
+`to_encoded_point(false)` before hashing (robust to compressed *or* uncompressed input);
+the golden now matches the canonical vector and the two derivations agree. This is the
+address-oracle catching a wrong-receive-address bug that affected every secp256k1 wallet's
+displayed address. (Bitcoin P2WPKH golden still to add.)
+
 ---
 
 ## 6. Per-client bug classes each layer targets
