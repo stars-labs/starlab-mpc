@@ -38,6 +38,14 @@ pub struct AppState<C: Ciphersuite> {
     pub webrtc_initiation_started_at: Option<std::time::Instant>,
     pub signing_state: SigningState<C>,
     pub pending_signing_requests: Vec<super::state::PendingSigningRequest>,
+    /// Raw `SIGN_COMMIT` payloads (from_device_id, commitment_bytes) that
+    /// arrived BEFORE this node had a signing session — e.g. a cold-started
+    /// co-signer whose `JoinSigning` (which rebuilds the session from keystore
+    /// metadata) hasn't run yet when the initiator's commit lands over the
+    /// freshly-formed mesh. Can't be keyed by `Identifier` yet (no
+    /// participants list), so they're held raw and re-fed through
+    /// `process_signing_round1` once the session exists.
+    pub pending_pre_session_commitments: Vec<(String, Vec<u8>)>,
     // Additional DKG and other fields
     pub reconnection_tracker: std::collections::HashMap<String, std::time::Instant>,
     pub dkg_part1_public_package: Option<Vec<u8>>,
@@ -140,6 +148,7 @@ where
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
+            pending_pre_session_commitments: Vec::new(),
             reconnection_tracker: std::collections::HashMap::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
@@ -211,6 +220,7 @@ where
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
+            pending_pre_session_commitments: Vec::new(),
             reconnection_tracker: std::collections::HashMap::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,

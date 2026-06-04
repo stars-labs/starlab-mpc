@@ -226,19 +226,15 @@ async fn malformed_jsonl_is_rejected_and_loop_survives() {
 /// verifies against the original group key. This is the production restart
 /// condition.
 ///
-/// KNOWN GAP — this currently FAILS and reproduces a real bug (NOT a test
-/// artifact): cold-start cross-node signing loses the WebRTC offer. The
-/// initiator runs `StartSigning` and broadcasts its offer immediately; the
-/// co-signer only starts its WebRTC *signaling subscriber* when it later runs
-/// `JoinSigning` (after discovering + approving), so the earlier offer reaches
-/// no subscriber and is dropped — the initiator never re-offers, the signing
-/// data channel never opens, and the ceremony stalls. Warm/DKG flows work
-/// because both peers initiate WebRTC near-simultaneously. Fix needs the
-/// signaling subscriber to run while connected (or early offers buffered, or
-/// the initiator to re-offer). Excluded from the CI sweep until fixed; kept as
-/// the runnable reproduction. See docs/cli-conformance-testing.md.
+/// Regression guard for the cold-start signing bug (now FIXED). It required two
+/// fixes, both verified by this test going green: (1) an always-on WebRTC relay
+/// handler so the cold-started co-signer receives the initiator's offer even
+/// though no DKG driver loop is running this session, and (2) a pre-session
+/// SIGN_COMMIT buffer so the initiator's commit — which races ahead of the
+/// co-signer's JoinSigning session setup over the freshly-formed mesh — is
+/// re-fed instead of dropped. See docs/cli-conformance-testing.md.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-#[ignore = "KNOWN GAP: cold-start signing WebRTC offer race (real bug) — reproduction; excluded from CI until fixed, see docs/cli-conformance-testing.md"]
+#[ignore = "spawns serve processes + real WebRTC over loopback; run with --ignored"]
 async fn sign_after_process_restart_verifies() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().unwrap().port();

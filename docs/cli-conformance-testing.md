@@ -115,7 +115,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 | ID | Flow | Notes | Layer |
 |---|---|---|---|
 | LIFE-1 | DKG → keystore written → reload → list shows wallet | cold-start replay; pure keystore round-trip | **L1** ✅ |
-| LIFE-2 | reload → sign with persisted share (no re-DKG) | the bug that bit the headless sign path | **L3** (see note) |
+| LIFE-2 | reload → sign with persisted share (no re-DKG) | found+fixed 2 real races | **L3** ✅ (see note) |
 | LIFE-3 | wallet label/name round-trips through keystore | `WalletMetadata.label` / `display_name()` | L1 |
 | LIFE-4 | session announced before our connect is still discoverable | `request_active_sessions` replay | **L1** ✅ (found+fixed a parity gap — see note) |
 
@@ -134,11 +134,37 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 > LIFE-1 (the persistence half — the share is on disk and reloads with the right
 > group key) is fully covered in L1.
 
-> **🐞 LIFE-2 found a real bug (cold-start signing WebRTC offer race).** The L3
-> reproduction (`tests/l3_serve_process.rs::sign_after_process_restart_verifies`)
-> does a DKG across two `serve` processes, kills both, respawns on the same
-> keystores, and signs. It **fails**, and the failure is a genuine product bug,
-> not a test artifact (verified by full log trace):
+> **🐞→✅ LIFE-2 found and FIXED two real cold-start signing races.** The L3 test
+> (`tests/l3_serve_process.rs::sign_after_process_restart_verifies`) does a DKG
+> across two `serve` processes, kills both, respawns on the same keystores, and
+> signs — now green and back in the CI gate. Getting there exposed **two** genuine
+> product bugs (not test artifacts), in sequence:
+>
+> **Bug A — the WebRTC offer was dropped.** Relay handling (peer offer/answer/ICE
+> + `participant_update`) lived only inside the StartDKG/JoinDKG driver loops, so
+> it was alive only while/after a DKG had run *this session*. A cold-started
+> signer (load keystore → sign, no DKG) had no such loop, so the initiator's
+> offer hit the inbound broadcast with no subscriber and was dropped; the mesh
+> never formed. Fixed with an **always-on relay handler** (`spawn_relay_handler_task`)
+> subscribed once at connect, with the Relay arms removed from the driver loops to
+> keep single-handling. (It locks `app_state` only for `from=="server"` frames —
+> never for the high-volume peer ICE candidates — so it doesn't contend with the
+> FROST ceremony; an earlier version that locked per-candidate tripled large-mesh
+> runtime.)
+>
+> **Bug B — the first SIGN_COMMIT was dropped.** With the mesh fixed, the
+> initiator's `SIGN_COMMIT` then raced ~250 ms ahead of the co-signer's
+> `JoinSigning` (which rebuilds the signing session from keystore metadata) and
+> was dropped ("no active session"), stalling the ceremony. Fixed with a
+> **pre-session commit buffer** (`AppState::pending_pre_session_commitments`):
+> commits arriving before the session is established are held raw (they can't be
+> keyed by `Identifier` yet) and re-fed via `drain_pre_session_commitments` once
+> `handle_start_signing` has set up the session.
+>
+> Both affect any client that restarts then signs (TUI/native/extension share the
+> staggered initiator-vs-joiner ordering). Verified: LIFE-2 green; DKG (L3 +
+> in-process secp/ed25519), signing (secp/ed25519/hex), and the full 9-group
+> matrix all stay green (~81 s). Original failure analysis, kept for the record:
 >
 > 1. After restart the initiator unlocks its persisted share and runs
 >    `StartSigning` (cold path: rebuilds the signing session from wallet

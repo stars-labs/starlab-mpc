@@ -46,13 +46,11 @@ jobs:
         run: cargo test -p mpc-wallet-cli --test conformance_matrix --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
-      # L3 process isolation: DKG across two real `serve` binaries + the
-      # malformed-input survival test. Skips the LIFE-2 cold-start-signing
-      # reproduction, a KNOWN GAP (real bug) excluded from the gate until fixed
-      # — see docs/cli-conformance-testing.md.
-      - name: L3 serve-process interop (DKG + error handling across processes)
-        run: cargo test -p mpc-wallet-cli --test l3_serve_process --locked -- --ignored --test-threads=1 --skip sign_after_process_restart_verifies
-        timeout-minutes: 10
+      # L3 process isolation across two real `serve` binaries: DKG, malformed-
+      # input survival, and LIFE-2 cold-start signing after a real restart.
+      - name: L3 serve-process interop (DKG + signing + error handling)
+        run: cargo test -p mpc-wallet-cli --test l3_serve_process --locked -- --ignored --test-threads=1
+        timeout-minutes: 12
 
   extension:
     name: Browser extension tests

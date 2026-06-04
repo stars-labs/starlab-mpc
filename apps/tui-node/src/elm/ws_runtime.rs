@@ -250,13 +250,21 @@ pub(crate) fn spawn_relay_handler_task<C>(
             match rx.recv().await {
                 Ok(shared) => {
                     if let webrtc_signal_server::ServerMsg::Relay { from, data } = &*shared {
-                        let our_session_id = {
+                        // `our_session_id` is ONLY needed to filter
+                        // server-originated `participant_update` frames; peer
+                        // WebRTC signals (offer/answer/the high-volume ICE
+                        // candidates) don't use it. Avoid an app_state lock per
+                        // candidate — that lock contends with the FROST
+                        // ceremony and badly slows large meshes.
+                        let our_session_id = if from == "server" {
                             app_state
                                 .lock()
                                 .await
                                 .session
                                 .as_ref()
                                 .map(|s| s.session_id.clone())
+                        } else {
+                            None
                         };
                         crate::elm::webrtc_signaling::handle_relay(
                             from.clone(),
