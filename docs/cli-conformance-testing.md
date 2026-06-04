@@ -93,7 +93,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 | DKG-2 | 2-of-3 | canonical; primary CI case |
 | DKG-3 | 3-of-5 | larger participant set |
 | DKG-4 | t-of-n parametric | property-style sweep over small (t,n) with t≤n, n≤7 |
-| DKG-5 | ed25519 ciphersuite | currently CLI runner is secp256k1-fixed — see §7 gap |
+| DKG-5 | ed25519 ciphersuite | **L1** ✅ (`spawn_ed25519`; 2-of-2 & 2-of-3 agree) |
 | DKG-6 | secp256k1 ciphersuite | default |
 | DKG-7 | both curves from one root secret | `unified_dkg` path |
 
@@ -433,10 +433,12 @@ behavior by default.
    and every emitted `CliEvent` to a JSONL trace file, with volatile fields normalized
    (see §5.2). Off by default; stdout protocol stream is unchanged.
 
-3. **ed25519 runner.** `spawn_secp256k1` is curve-fixed. Add `spawn_ed25519` (or
-   parameterize `HeadlessRunner` over the ciphersuite) so DKG-5 / SIG-4 / Solana address
-   goldens can run. The Elm core is already generic over `FrostCurve`; this is wiring, not
-   new crypto.
+3. **ed25519 runner.** ✅ **Done.** Added `spawn_ed25519` alongside `spawn_secp256k1`,
+   and made `HeadlessRunner::new` seed `curve_type` from `C` (it previously relied on the
+   default being secp256k1 — which silently mis-curved an ed25519 runner). `simulate`
+   accepts `curve=ed25519` and switches the spawn fn; DKG-5 (2-of-2 & 2-of-3 ed25519)
+   passes. Still open: SIG-4 (ed25519 sign+verify, needs a `frost_ed25519` verify in the
+   harness) and the Solana address golden.
 
 4. **Deterministic test entropy hook (test-only).** An opt-in seed (behind a
    `#[cfg(test)]` / hidden flag) so a run can be made reproducible for trace stability

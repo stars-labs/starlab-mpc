@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tui_node::elm::headless::spawn_secp256k1;
+use tui_node::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use tui_node::elm::model::{WalletConfig, WalletMode};
 use tui_node::elm::{Message, Model};
 
@@ -167,8 +167,8 @@ async fn embedded_signal_server() -> anyhow::Result<String> {
 }
 
 fn validate(opts: &SimulateOpts) -> anyhow::Result<()> {
-    if opts.curve != "secp256k1" {
-        anyhow::bail!("simulate currently supports curve=secp256k1 only");
+    if opts.curve != "secp256k1" && opts.curve != "ed25519" {
+        anyhow::bail!("simulate supports curve=secp256k1 or ed25519");
     }
     if opts.nodes < 2 {
         anyhow::bail!("need at least 2 nodes");
@@ -196,12 +196,12 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     for device_id in &device_ids {
         let ks = tempfile::TempDir::new()?;
         let (cb, rx) = watcher();
-        let tx = spawn_secp256k1(
-            device_id.clone(),
-            ks.path().to_string_lossy().into_owned(),
-            ws_url.clone(),
-            cb,
-        );
+        let ks_path = ks.path().to_string_lossy().into_owned();
+        let tx = if opts.curve == "ed25519" {
+            spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
+        } else {
+            spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
+        };
         keystores.push(ks);
         senders.push(tx);
         receivers.push(rx);

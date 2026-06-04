@@ -29,10 +29,14 @@ fn init_logs() {
 }
 
 fn opts(nodes: usize, threshold: u16) -> SimulateOpts {
+    opts_curve(nodes, threshold, "secp256k1")
+}
+
+fn opts_curve(nodes: usize, threshold: u16, curve: &str) -> SimulateOpts {
     SimulateOpts {
         nodes,
         threshold,
-        curve: "secp256k1".into(),
+        curve: curve.into(),
         signal_url: None,
         // Larger sets need more ICE/DKG time; scale with node count.
         timeout_secs: 60 + (nodes as u64) * 20,
@@ -81,6 +85,42 @@ async fn dkg_matrix() {
     }
 
     report_and_assert("DKG", &rows);
+}
+
+/// DKG-5: ed25519 (Solana) ciphersuite. Same agreement invariant as the
+/// secp256k1 matrix, exercising the spawn_ed25519 runner and the curve-generic
+/// DKG/keystore path end-to-end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "real WebRTC/DKG over loopback; run with --ignored"]
+async fn dkg_ed25519_matrix() {
+    init_logs();
+    let cases = [(2u16, 2u16), (3, 2)];
+    let mut rows = Vec::new();
+
+    for (n, t) in cases {
+        let label = format!("DKG-ed25519 {t}-of-{n}");
+        match run_simulation(opts_curve(n as usize, t, "ed25519")).await {
+            Ok(r) => {
+                let ok = r.agreed
+                    && r.outcomes.len() == n as usize
+                    && !r.group_public_key.is_empty();
+                rows.push(Row {
+                    detail: format!(
+                        "agreed={} outcomes={} {}ms group={}…",
+                        r.agreed,
+                        r.outcomes.len(),
+                        r.elapsed_ms,
+                        &r.group_public_key[..8.min(r.group_public_key.len())]
+                    ),
+                    ok,
+                    label,
+                });
+            }
+            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+        }
+    }
+
+    report_and_assert("DKG-ed25519", &rows);
 }
 
 /// Signing catalog: SIG-1 (sign with exactly threshold signers) and SIG-2

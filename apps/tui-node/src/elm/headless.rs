@@ -66,6 +66,12 @@ where
         let (tx, rx) = unbounded_channel();
         let mut model = Model::new(device_id.clone());
         model.wallet_state.keystore_path = keystore_path.clone();
+        // Seed the running ciphersuite from `C` exactly as `ElmApp::new<C>`
+        // does — otherwise update-layer sites that read `curve_type` (session
+        // announcements, address derivation) would all assume the default
+        // (secp256k1) and an ed25519 runner would mis-announce its curve.
+        model.wallet_state.curve_type =
+            <C as crate::utils::curve_traits::CurveIdentifier>::curve_type();
         Self {
             model,
             app_state,
@@ -194,6 +200,37 @@ where
         ),
     ));
     let runner = HeadlessRunner::<Secp256K1Sha256>::new(
+        device_id,
+        keystore_path,
+        app_state,
+        Box::new(on_sync),
+    );
+    let tx = runner.sender();
+    tokio::spawn(runner.run());
+    tx
+}
+
+/// Convenience constructor for ed25519 (Solana) front-ends — the ed25519
+/// counterpart of [`spawn_secp256k1`]. Builds an `AppState<Ed25519Sha512>`,
+/// spawns the runner, and returns the `Message` sender. Must be called from
+/// within a Tokio runtime.
+pub fn spawn_ed25519<F>(
+    device_id: String,
+    keystore_path: String,
+    signal_server_url: String,
+    on_sync: F,
+) -> UnboundedSender<Message>
+where
+    F: Fn(&Model, Option<&Message>) + Send + 'static,
+{
+    use frost_ed25519::Ed25519Sha512;
+    let app_state = Arc::new(Mutex::new(
+        AppState::<Ed25519Sha512>::with_device_id_and_server(
+            device_id.clone(),
+            signal_server_url,
+        ),
+    ));
+    let runner = HeadlessRunner::<Ed25519Sha512>::new(
         device_id,
         keystore_path,
         app_state,
