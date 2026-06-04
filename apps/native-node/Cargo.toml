@@ -14,6 +14,7 @@ slint = { version = "1.9.1", features = ["backend-winit", "backend-winit-x11", "
 # SessionManager, DkgManager, OfflineManager, ConnectionManager,
 # SigningManager, CoreState. Reused verbatim.
 tui-node = { path = "../tui-node" }
+hex = "0.4"
 
 # Async runtime for the Slint event-loop bridge + tokio::task::spawn_blocking
 # for rfd dialogs.

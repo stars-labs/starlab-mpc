@@ -172,14 +172,25 @@ fn wallet_entries(wallets: &[WalletMetadata]) -> Vec<WalletEntry> {
         .map(|w| WalletEntry {
             id: w.session_id.clone(),
             name: w.display_name().to_string(),
-            // Address derivation from the group key is tracked in #18;
-            // dkg_complete already carries the real address from the
-            // finalize message.
-            address: String::new(),
+            address: derive_address(&w.group_public_key, &w.curve_type),
             chain: chain_for_curve(&w.curve_type),
             threshold: format!("{}/{}", w.threshold, w.total_participants),
         })
         .collect()
+}
+
+/// Derive the primary chain address from a hex-encoded FROST group key
+/// (#18). secp256k1 → Ethereum (keccak), ed25519 → Solana (base58).
+/// Returns "" if the key can't be decoded/derived.
+fn derive_address(group_public_key_hex: &str, curve: &str) -> String {
+    let chain = if curve == "ed25519" { "solana" } else { "ethereum" };
+    match hex::decode(group_public_key_hex) {
+        Ok(bytes) => {
+            tui_node::blockchain_config::generate_address_for_chain(&bytes, curve, chain)
+                .unwrap_or_default()
+        }
+        Err(_) => String::new(),
+    }
 }
 
 fn session_entry(s: &SessionInfo) -> SessionEntry {
@@ -272,6 +283,20 @@ mod tests {
         assert_eq!(done.0, "wallet-ab12");
         assert_eq!(done.1, "0xabc123");
         assert_eq!(done.2, "deadbeef");
+    }
+
+    #[test]
+    fn derives_ethereum_address_from_secp256k1_group_key() {
+        // A real compressed secp256k1 group key from a DKG run.
+        let key = "0207eb4473c42b74a8a3c72762af295c26fdd40dcaf14e2c65df89aeb6f89073cf";
+        let addr = derive_address(key, "secp256k1");
+        assert!(addr.starts_with("0x"), "expected 0x-prefixed eth address, got {addr}");
+        assert_eq!(addr.len(), 42, "eth address should be 20 bytes hex: {addr}");
+    }
+
+    #[test]
+    fn derive_address_handles_bad_hex() {
+        assert_eq!(derive_address("not-hex", "secp256k1"), "");
     }
 
     #[test]

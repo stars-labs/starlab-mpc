@@ -58,7 +58,19 @@ fn model_wallets(model: &Model) -> Vec<WalletInfo> {
         .map(|m| WalletInfo {
             id: m.session_id.clone(),
             name: m.display_name().to_string(),
-            address: String::new(),
+            // Derive the primary chain address from the group key (#18).
+            address: {
+                let chain = if m.curve_type == "ed25519" { "solana" } else { "ethereum" };
+                hex::decode(&m.group_public_key)
+                    .ok()
+                    .and_then(|b| {
+                        tui_node::blockchain_config::generate_address_for_chain(
+                            &b, &m.curve_type, chain,
+                        )
+                        .ok()
+                    })
+                    .unwrap_or_default()
+            },
             balance: String::new(),
             chain: if m.curve_type == "ed25519" {
                 "Solana".to_string()
