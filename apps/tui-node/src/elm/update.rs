@@ -416,6 +416,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             Some(Command::SendMessage(Message::SubmitPassword { value: password }))
         }
 
+        // Headless cold-start session replay: ask the server to resend every
+        // active session so a node that connected after an announcement can
+        // still discover it. Maps straight to the same discovery command the
+        // Join-Session screen uses.
+        Message::HeadlessRefreshSessions => Some(Command::LoadSessions),
+
         Message::SubmitPassword { value } => {
             info!(
                 "Password submitted ({} chars) — routing to DKG/sign",

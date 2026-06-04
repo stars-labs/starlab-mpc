@@ -101,6 +101,12 @@ where
         });
     }
 
+    /// Ask the signal server to replay all active sessions (cold-start
+    /// discovery of sessions announced before this node connected).
+    pub fn refresh_sessions(&self) {
+        let _ = self.tx.send(Message::HeadlessRefreshSessions);
+    }
+
     /// Join a discovered DKG/signing session as a participant.
     pub fn join_session(&self, session_id: String, password: String, label: String) {
         let _ = self.tx.send(Message::HeadlessJoinSession {

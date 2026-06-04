@@ -536,6 +536,113 @@ pub async fn run_reload_unlock_simulation(
     })
 }
 
+/// Outcome of a late-join discovery run (LIFE-4).
+#[derive(Debug, Serialize)]
+pub struct LateJoinResult {
+    /// True iff the late node discovered the session WITHOUT an explicit
+    /// replay request (i.e. an automatic cold-start replay on connect).
+    pub discovered_on_connect: bool,
+    /// True iff the late node discovered the session after an explicit
+    /// `RequestActiveSessions` replay.
+    pub discovered_after_refresh: bool,
+    pub elapsed_ms: u128,
+}
+
+impl LateJoinResult {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+/// LIFE-4: a session announced BEFORE a node connects must still be
+/// discoverable. node 0 connects and announces a DKG session; node 1 then
+/// connects *late* (missing the live broadcast) and must find the session via
+/// the `RequestActiveSessions` replay.
+///
+/// Also records whether the late node discovered it WITHOUT an explicit
+/// refresh — i.e. whether the headless runner auto-replays on connect the way
+/// the browser extension does. (It currently does not; the headless/CLI path
+/// needs an explicit refresh — `discovered_on_connect` captures that parity
+/// gap rather than asserting it.)
+pub async fn run_late_join_discovery_simulation(
+    opts: SimulateOpts,
+) -> anyhow::Result<LateJoinResult> {
+    validate(&opts)?;
+    let started = Instant::now();
+
+    let ws_url = match &opts.signal_url {
+        Some(u) => u.clone(),
+        None => embedded_signal_server().await?,
+    };
+
+    // --- node 0: connect, announce a DKG session, leave it pending ---
+    let ks0 = tempfile::TempDir::new()?;
+    let (cb0, mut rx0) = watcher();
+    let tx0 = spawn_secp256k1(
+        "late-node-0".into(),
+        ks0.path().to_string_lossy().into_owned(),
+        ws_url.clone(),
+        cb0,
+    );
+    let _ = tx0.send(Message::TriggerReconnect);
+    wait_for(&mut rx0, 15, |e| matches!(e, Evt::Connected)).await?;
+    tx0.send(Message::HeadlessCreateWallet {
+        config: WalletConfig {
+            name: SIM_WALLET_LABEL.into(),
+            total_participants: opts.nodes as u16,
+            threshold: opts.threshold,
+            mode: WalletMode::Online,
+        },
+        password: "late-password-0".into(),
+        label: SIM_WALLET_LABEL.into(),
+    })?;
+    // Let the announcement reach the server before node 1 connects, so node 1
+    // genuinely misses the live broadcast and must rely on the replay.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // --- node 1: connect LATE (after the announce) ---
+    let ks1 = tempfile::TempDir::new()?;
+    let (cb1, mut rx1) = watcher();
+    let tx1 = spawn_secp256k1(
+        "late-node-1".into(),
+        ks1.path().to_string_lossy().into_owned(),
+        ws_url.clone(),
+        cb1,
+    );
+    let _ = tx1.send(Message::TriggerReconnect);
+    wait_for(&mut rx1, 15, |e| matches!(e, Evt::Connected)).await?;
+
+    // Did it auto-discover on connect (no explicit refresh)?
+    let discovered_on_connect = wait_for(&mut rx1, 3, |e| {
+        matches!(e, Evt::SessionDiscovered { signing: false, .. })
+    })
+    .await
+    .is_ok();
+
+    // Now request the replay explicitly and require discovery.
+    let discovered_after_refresh = if discovered_on_connect {
+        true
+    } else {
+        tx1.send(Message::HeadlessRefreshSessions)?;
+        wait_for(&mut rx1, 15, |e| {
+            matches!(e, Evt::SessionDiscovered { signing: false, .. })
+        })
+        .await
+        .is_ok()
+    };
+
+    let _ = tx0.send(Message::Quit);
+    let _ = tx1.send(Message::Quit);
+    drop(ks0);
+    drop(ks1);
+
+    Ok(LateJoinResult {
+        discovered_on_connect,
+        discovered_after_refresh,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
 /// Verify a FROST(secp256k1) signature against the group verifying key.
 fn verify_secp256k1(group_key_hex: &str, message_hex: &str, sig_hex: &str) -> anyhow::Result<bool> {
     use frost_secp256k1::{Signature, VerifyingKey};

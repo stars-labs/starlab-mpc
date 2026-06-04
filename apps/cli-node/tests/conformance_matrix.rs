@@ -13,8 +13,8 @@
 //!   cargo test -p mpc-wallet-cli --test conformance_matrix -- --ignored --nocapture
 
 use mpc_wallet_cli::simulate::{
-    run_reload_list_simulation, run_reload_unlock_simulation, run_signing_simulation,
-    run_simulation, SimulateOpts, SIM_WALLET_LABEL,
+    run_late_join_discovery_simulation, run_reload_list_simulation, run_reload_unlock_simulation,
+    run_signing_simulation, run_simulation, SimulateOpts, SIM_WALLET_LABEL,
 };
 
 fn init_logs() {
@@ -221,6 +221,36 @@ async fn wrong_password_rejected_cleanly() {
     }
 
     report_and_assert("ERR-1", &rows);
+}
+
+/// LIFE-4: a session announced before a node connects is still discoverable.
+/// node 1 connects after node 0's announce (missing the live broadcast) and
+/// must find the session via the RequestActiveSessions replay. Also reports
+/// whether discovery happened automatically on connect (the extension's
+/// behavior) — currently the headless/CLI path needs an explicit refresh.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "real WebRTC/WS over loopback; run with --ignored"]
+async fn late_joiner_discovers_via_replay() {
+    init_logs();
+    let mut rows = Vec::new();
+
+    match run_late_join_discovery_simulation(opts(2, 2)).await {
+        Ok(r) => rows.push(Row {
+            ok: r.discovered_after_refresh,
+            detail: format!(
+                "after_refresh={} on_connect={} {}ms",
+                r.discovered_after_refresh, r.discovered_on_connect, r.elapsed_ms
+            ),
+            label: "LIFE-4 late joiner discovers via replay".to_string(),
+        }),
+        Err(e) => rows.push(Row {
+            label: "LIFE-4 late joiner discovers via replay".to_string(),
+            ok: false,
+            detail: format!("error: {e}"),
+        }),
+    }
+
+    report_and_assert("LIFE-4", &rows);
 }
 
 fn report_and_assert(group: &str, rows: &[Row]) {

@@ -184,6 +184,11 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                 let _ = out_tx.send(CliEvent::Wallets { wallets: s.wallets });
             }
             CliCommand::ListSessions => {
+                // Fire a server replay so sessions announced before we
+                // connected are (re)discovered; they stream back as
+                // `session_available` events as the replies arrive. Also
+                // answer immediately from the cache for what we already know.
+                let _ = runner_tx.send(Message::HeadlessRefreshSessions);
                 let s = snapshot.lock().unwrap().clone();
                 let _ = out_tx.send(CliEvent::Sessions { sessions: s.sessions });
             }

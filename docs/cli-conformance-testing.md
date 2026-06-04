@@ -117,7 +117,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 | LIFE-1 | DKG → keystore written → reload → list shows wallet | cold-start replay; pure keystore round-trip | **L1** ✅ |
 | LIFE-2 | reload → sign with persisted share (no re-DKG) | the bug that bit the headless sign path | **L3** (see note) |
 | LIFE-3 | wallet label/name round-trips through keystore | `WalletMetadata.label` / `display_name()` | L1 |
-| LIFE-4 | session announced before our connect is still discoverable | `request_active_sessions` replay | L1/L3 |
+| LIFE-4 | session announced before our connect is still discoverable | `request_active_sessions` replay | **L1** ✅ (found+fixed a parity gap — see note) |
 
 > **LIFE-2 is an L3 (process-isolation) test, not L1.** A faithful cold-restart
 > *re-signing* requires the previous node to be truly gone. In-process, the CLI
@@ -133,6 +133,19 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 > which is also exactly the production condition (a restart kills the process).
 > LIFE-1 (the persistence half — the share is on disk and reloads with the right
 > group key) is fully covered in L1.
+
+> **LIFE-4 surfaced a real cross-client parity gap (now fixed).** The browser
+> extension fires `requestActiveSessions()` automatically ~2s after the WebSocket
+> opens, so it always discovers sessions announced before it connected. The Rust
+> core only fired the equivalent `LoadSessions` replay when the user was on the
+> Join-Session *screen* — so a headless node (native/CLI) never auto-replayed and
+> would silently miss a pre-announced session. Fix: a `HeadlessRefreshSessions`
+> message (→ `Command::LoadSessions`) plus a `HeadlessRunner::refresh_sessions()`
+> helper, and the CLI `list_sessions` command now triggers a real server replay
+> (previously it only answered from the local cache). The LIFE-4 test asserts the
+> explicit replay works and *records* (without yet asserting) that auto-on-connect
+> replay is still extension-only — a candidate follow-up if headless auto-replay is
+> wanted.
 
 ### 3.4 Error & edge cases
 

@@ -45,6 +45,14 @@ pub enum Message {
         encoding: String,
         password: String,
     },
+    /// Request the active-session replay (`RequestActiveSessions`) over the
+    /// primary WebSocket. The interactive TUI fires this implicitly on
+    /// entering the Join-Session screen; headless front-ends (native, CLI)
+    /// have no such screen, so without this they never discover sessions
+    /// announced before they connected — the cold-start replay the browser
+    /// extension does automatically. Replies stream back as
+    /// `SessionDiscovered`.
+    HeadlessRefreshSessions,
 
     // Wallet management messages
     CreateWallet { config: WalletConfig },
