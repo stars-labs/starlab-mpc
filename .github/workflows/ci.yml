@@ -46,6 +46,11 @@ jobs:
         run: cargo test -p mpc-wallet-cli --test conformance_matrix --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
+      # L3 process isolation: DKG across two real `serve` binaries over JSONL.
+      - name: L3 serve-process interop (DKG across separate processes)
+        run: cargo test -p mpc-wallet-cli --test l3_serve_process --locked -- --ignored --test-threads=1
+        timeout-minutes: 10
+
   extension:
     name: Browser extension tests
     runs-on: ubuntu-latest

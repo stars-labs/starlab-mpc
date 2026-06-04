@@ -265,6 +265,19 @@ a real `apps/signal-server` instance for the extension).
 
 Three sub-harnesses, one per non-CLI client:
 
+#### L3·0 — CLI ↔ CLI across processes (foundation) ✅
+
+Before any cross-*client* interop, the substrate is two real `mpc-wallet-cli
+serve` **binaries** driven over JSONL, with the signal server in-process. This
+is the first thing to exercise the compiled bin's stdin/stdout surface (the lib
+tests never do) and the first place teardown is real OS process death — which is
+why faithful cold-restart signing (LIFE-2) belongs here, not in the in-process
+simulate. Landed: `tests/l3_serve_process.rs` runs a 2-of-2 DKG across two
+`serve` processes and asserts they agree on the group key (~3s); it also
+cross-checks the creator's `session_announced` id against the peer's
+`session_available` id. The `ServeProc` JSONL driver it introduces (spawn,
+send, `wait_for(event)`) is the reusable harness the cross-client layers extend.
+
 #### L3a — CLI ↔ native (in-process)
 Native node already embeds `HeadlessRunner` via `core_adapter.rs`. Spin up the native core
 adapter + (n−1) CLI runners in one test binary on a loopback signal server. Assert the
