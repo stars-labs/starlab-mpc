@@ -128,22 +128,24 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
     let msgType: string | undefined;
     let actualPayload: any = {};
 
-    // Ensure message and message.payload are defined before accessing properties
+    // The background↔offscreen contract is a WRAPPED envelope:
+    //   { type: "fromBackground", payload: { type: "...", ...data } }
+    // (see OffscreenManager.sendToOffscreen). chrome.runtime.sendMessage
+    // broadcasts to EVERY extension context, so this listener also sees
+    // bare top-level popup→background / content→background traffic
+    // (createKeystore, unlockKeystore, importKeystore, …). Those are NOT
+    // ours: if we processed and answered them we'd race ahead of the
+    // background's async reply and hijack the caller's callback (the
+    // "Unknown message type: createKeystore" bug). So we only act on the
+    // wrapped form and silently ignore everything else (return false, no
+    // sendResponse) — leaving the channel open for the real owner.
     if (message && message.payload && typeof message.payload.type === 'string') {
-        // Message format: { payload: { type: "...", ...data } }
         msgType = message.payload.type;
         const { type, ...rest } = message.payload;
         actualPayload = rest;
         console.log(`Offscreen: Processing wrapped message. Type: ${msgType}, Payload:`, actualPayload);
-    } else if (message && typeof message.type === 'string') {
-        // Message format: { type: "...", ...data }
-        msgType = message.type;
-        const { type, ...rest } = message;
-        actualPayload = rest;
-        console.log(`Offscreen: Processing top-level type message. Type: ${msgType}, Payload:`, actualPayload);
     } else {
-        console.warn("Offscreen: Received message with unknown structure or missing type:", message);
-        sendResponse({ success: false, error: "Malformed or untyped message" });
+        // Not a background-forwarded message — ignore without responding.
         return false;
     }
 
@@ -968,6 +970,11 @@ chrome.runtime.onMessage.addListener((message: { type?: string; payload?: any },
             return true;
 
         default:
+            // Only reached for WRAPPED ({type:"fromBackground"}) messages —
+            // i.e. genuinely from the background, which awaits a reply — so an
+            // error response is correct here. Stray top-level broadcasts from
+            // other contexts are filtered out before the switch (see below),
+            // so this no longer hijacks popup→background traffic.
             console.warn("Offscreen: Received unhandled message type from background:", msgType, payload);
             sendResponse({ success: false, error: `Unknown message type: ${msgType}` });
             break;

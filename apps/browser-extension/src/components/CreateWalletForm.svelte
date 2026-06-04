@@ -9,6 +9,10 @@
      */
     import { createEventDispatcher } from "svelte";
     import { MESSAGE_TYPES } from "@mpc-wallet/types/messages";
+    import Button from "../lib/ui/Button.svelte";
+    import Icon from "../lib/ui/Icon.svelte";
+
+    let showAdvanced = false;
 
     export let deviceId: string = "";
     export let wsConnected: boolean = false;
@@ -63,90 +67,119 @@
     }
 </script>
 
-<div class="rounded border border-gray-200 bg-white p-4">
-    <h2 class="mb-3 text-lg font-semibold">Create MPC Wallet</h2>
-    <p class="mb-4 text-xs text-gray-600">
-        Your device ({deviceId || "unregistered"}) will initiate a DKG ceremony.
-        Other participants (TUI nodes or other extensions) join by discovering
-        the session over the signal server.
+<div class="card card-pad">
+    <h2 class="text-base font-bold">Create a wallet</h2>
+    <p class="mt-1 text-xs text-muted">
+        You'll set up a shared wallet that several devices co-manage. Others
+        join from their own wallet once you create it — no single device can
+        sign alone.
     </p>
 
-    <label class="mb-3 block">
-        <span class="mb-1 block text-sm font-medium">Wallet name (optional)</span>
+    <div class="mt-4">
+        <label class="label" for="cw-name">Wallet name (optional)</label>
         <input
+            id="cw-name"
             type="text"
             bind:value={walletName}
-            placeholder="e.g. Treasury 2-of-3"
-            class="w-full rounded border px-2 py-1 text-sm"
+            placeholder="e.g. Treasury"
+            class="input"
             disabled={submitting}
         />
-    </label>
+    </div>
 
-    <div class="mb-3 grid grid-cols-2 gap-3">
-        <label class="block">
-            <span class="mb-1 block text-sm font-medium">Total participants (N)</span>
+    <div class="mt-3 grid grid-cols-2 gap-3">
+        <div>
+            <label class="label" for="cw-total">Total devices</label>
             <input
+                id="cw-total"
                 type="number"
                 min="2"
                 max="10"
                 bind:value={total}
-                class="w-full rounded border px-2 py-1 text-sm"
+                class="input"
                 disabled={submitting}
             />
-        </label>
-        <label class="block">
-            <span class="mb-1 block text-sm font-medium">Threshold (K)</span>
+        </div>
+        <div>
+            <label class="label" for="cw-threshold">Needed to sign</label>
             <input
+                id="cw-threshold"
                 type="number"
                 min="2"
                 max={total}
                 bind:value={threshold}
-                class="w-full rounded border px-2 py-1 text-sm"
+                class="input"
                 disabled={submitting}
             />
-        </label>
+        </div>
     </div>
 
-    <label class="mb-4 block">
-        <span class="mb-1 block text-sm font-medium">Curve</span>
+    <div class="mt-3">
+        <label class="label" for="cw-curve">Network</label>
         <select
+            id="cw-curve"
             bind:value={curve}
-            class="w-full rounded border px-2 py-1 text-sm"
+            class="select"
             disabled={submitting}
         >
-            <option value="secp256k1">secp256k1 (Ethereum / EVM)</option>
-            <option value="ed25519">ed25519 (Solana)</option>
+            <option value="secp256k1">Ethereum &amp; EVM chains</option>
+            <option value="ed25519">Solana</option>
         </select>
-    </label>
+    </div>
 
-    <p class="mb-3 text-xs text-gray-500">
-        This announces <code>{threshold}-of-{total}</code>
-        {curve} to the signal server. Joiners will see this session in
-        their own "Join Session" tab.
-    </p>
+    <div class="mt-3 alert alert-info text-xs">
+        Any <b>{threshold}</b> of <b>{total}</b> devices will be able to approve
+        a transaction together.
+    </div>
 
-    {#if errorMessage}
-        <div class="mb-3 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700">
-            {errorMessage}
+    <!-- Advanced / technical details -->
+    <button
+        type="button"
+        class="mt-3 flex w-full items-center justify-between text-xs font-semibold text-muted"
+        on:click={() => (showAdvanced = !showAdvanced)}
+    >
+        <span>Advanced details</span>
+        <span class="transition-transform" class:rotate-180={showAdvanced}>
+            <Icon name="chevron" size={15} />
+        </span>
+    </button>
+    {#if showAdvanced}
+        <div class="mt-2 space-y-1 rounded-lg bg-surface-2 p-2.5 text-xs text-muted">
+            <p>
+                Runs a FROST <b>{threshold}-of-{total}</b> distributed key
+                generation (DKG) on the
+                <span class="mono"
+                    >{curve === "secp256k1" ? "secp256k1" : "ed25519"}</span
+                > curve.
+            </p>
+            <p class="mono break-all">
+                initiator: {deviceId || "unregistered"}
+            </p>
+            <p>
+                The session is announced on the signal server; any TUI node or
+                extension can discover and join it.
+            </p>
         </div>
     {/if}
 
-    <div class="flex gap-2">
-        <button
-            type="button"
-            class="flex-1 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:bg-blue-300"
+    {#if errorMessage}
+        <div class="mt-3 alert alert-danger text-xs">{errorMessage}</div>
+    {/if}
+
+    <div class="mt-4 flex gap-2">
+        <Button
+            block
             on:click={handleSubmit}
             disabled={submitting || !wsConnected}
         >
-            {submitting ? "Announcing…" : "Announce DKG Session"}
-        </button>
-        <button
-            type="button"
-            class="rounded border border-gray-300 px-3 py-2 text-sm hover:bg-gray-50"
+            {submitting ? "Creating…" : "Create wallet"}
+        </Button>
+        <Button
+            variant="secondary"
             on:click={() => dispatch("cancel")}
             disabled={submitting}
         >
             Cancel
-        </button>
+        </Button>
     </div>
 </div>

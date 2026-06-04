@@ -1,8 +1,8 @@
 /**
  * Regression tests for Ext-0: centralized signal-server URL config.
- * Guards against the three previous hardcoded `wss://auto-life.tech`
- * sites silently reappearing, and the default drifting away from the
- * TUI's URL (which would re-break interop).
+ * Guards against hardcoded signal-server URLs silently reappearing, and
+ * the default drifting away from the TUI's URL (which would re-break
+ * interop).
  */
 import { describe, it, expect, beforeEach } from 'bun:test';
 import {
@@ -20,7 +20,7 @@ describe('Signal server config', () => {
     it('default matches the TUI URL', () => {
         // If this assertion fails, check `apps/tui-node/src/elm/model.rs`
         // — if the TUI moved its default, we probably need to move too.
-        expect(DEFAULT_SIGNAL_SERVER_URL).toBe('wss://xiongchenyu.dpdns.org');
+        expect(DEFAULT_SIGNAL_SERVER_URL).toBe('wss://panda.qzz.io');
     });
 
     it('returns default when storage is unset', async () => {

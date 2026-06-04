@@ -477,7 +477,7 @@ export class KeystoreService {
         return JSON.parse(json);
     }
     
-    private async deriveKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+    private async deriveKey(password: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
         const encoder = new TextEncoder();
         const keyMaterial = await crypto.subtle.importKey(
             'raw',
@@ -585,7 +585,7 @@ export class KeystoreService {
     /**
      * Derive key compatible with CLI (should use Argon2id for full compatibility)
      */
-    private async deriveCLIKey(password: string, salt: Uint8Array): Promise<CryptoKey> {
+    private async deriveCLIKey(password: string, salt: Uint8Array<ArrayBuffer>): Promise<CryptoKey> {
         // NOTE: CLI uses Argon2id, but WebCrypto doesn't support it natively
         // For now, using PBKDF2 with higher iterations as a fallback
         const encoder = new TextEncoder();

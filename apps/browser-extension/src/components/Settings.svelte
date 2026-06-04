@@ -11,39 +11,22 @@
     } from "@mpc-wallet/types/appstate";
     import { createPublicClient, http } from "viem";
     import { createEventDispatcher } from "svelte";
+    import { themeMode, setTheme, type ThemeMode } from "../lib/theme";
+    import Button from "../lib/ui/Button.svelte";
+    import Icon from "../lib/ui/Icon.svelte";
     const dispatch = createEventDispatcher<{
         backToWallet: { chain: string; curve: string };
     }>();
 
-    // Theme settings
-    let isDarkMode = false;
-
-    onMount(() => {
-        // Check for saved theme preference or system preference
-        const savedTheme = localStorage.getItem("theme");
-        const prefersDark = window.matchMedia(
-            "(prefers-color-scheme: dark)",
-        ).matches;
-
-        isDarkMode = savedTheme === "dark" || (!savedTheme && prefersDark);
-        updateTheme();
-    });
-
-    function toggleDarkMode() {
-        isDarkMode = !isDarkMode;
-        updateTheme();
-    }
-
-    function updateTheme() {
-        const htmlElement = document.documentElement;
-        if (isDarkMode) {
-            htmlElement.classList.add("dark");
-            localStorage.setItem("theme", "dark");
-        } else {
-            htmlElement.classList.remove("dark");
-            localStorage.setItem("theme", "light");
-        }
-    }
+    // Theme is managed by the shared store (system | light | dark) so it
+    // stays in sync with the header toggle and survives reloads.
+    let currentTheme: ThemeMode = "system";
+    themeMode.subscribe((v) => (currentTheme = v));
+    const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string }[] = [
+        { value: "system", label: "System", icon: "monitor" },
+        { value: "light", label: "Light", icon: "sun" },
+        { value: "dark", label: "Dark", icon: "moon" },
+    ];
 
     // Wallet configuration
     let curve: "secp256k1" | "ed25519" = "secp256k1";
@@ -273,73 +256,56 @@
     }
 </script>
 
-<div class="p-4">
-    <div class="flex justify-between items-center mb-4">
-        <h2 class="text-2xl font-bold">Wallet Settings</h2>
-        <button
-            class="text-sm px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+<div class="space-y-4">
+    <div class="flex items-center justify-between">
+        <h2 class="text-base font-bold">Settings</h2>
+        <Button
+            variant="secondary"
+            size="sm"
             on:click={() => dispatch("backToWallet", { chain, curve })}
-            >Back to Wallet</button
         >
+            Done
+        </Button>
     </div>
 
-    <!-- Theme Settings -->
-    <div class="mb-6 p-4 border rounded">
-        <h3 class="text-lg font-semibold mb-3">Theme</h3>
-        <div class="flex justify-between items-center">
-            <span>Dark Mode</span>
-            <button
-                class={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors focus:outline-none ${isDarkMode ? "bg-blue-600" : "bg-gray-300"}`}
-                on:click={toggleDarkMode}
-                aria-label="Toggle dark mode"
-            >
-                <span
-                    class={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${isDarkMode ? "translate-x-6" : "translate-x-1"}`}
-                ></span>
-            </button>
+    <!-- Appearance -->
+    <div class="card card-pad">
+        <h3 class="section-title mb-2.5">Appearance</h3>
+        <div class="grid grid-cols-3 gap-1.5 rounded-xl bg-surface-2 p-1">
+            {#each THEME_OPTIONS as opt}
+                <button
+                    class="flex flex-col items-center gap-1 rounded-lg py-2 text-xs font-semibold transition {currentTheme ===
+                    opt.value
+                        ? 'bg-surface text-content shadow-sm'
+                        : 'text-muted hover:text-content'}"
+                    on:click={() => setTheme(opt.value)}
+                >
+                    <Icon name={opt.icon} size={16} />
+                    {opt.label}
+                </button>
+            {/each}
         </div>
     </div>
 
-    <!-- Blockchain Configuration -->
-    <div class="mb-6 p-4 border rounded">
-        <h3 class="text-lg font-semibold mb-3">Blockchain Configuration</h3>
+    <!-- Network -->
+    <div class="card card-pad space-y-3">
+        <h3 class="section-title">Network</h3>
 
-        <!-- Curve Selection -->
-        <div class="mb-4">
-            <label for="curve-select" class="block font-bold mb-2"
-                >Curve Type:</label
-            >
-            <select
-                id="curve-select"
-                bind:value={curve}
-                on:change={handleCurveChange}
-                class="w-full border p-2 rounded"
-            >
-                <option value="secp256k1">secp256k1</option>
-                <option value="ed25519">ed25519</option>
-            </select>
-        </div>
-
-        <!-- Chain Selection -->
-        <div class="mb-4">
-            <label for="chain-select" class="block font-bold mb-2"
-                >Blockchain:</label
-            >
+        <div>
+            <label class="label" for="chain-select">Blockchain</label>
             <select
                 id="chain-select"
                 bind:value={chain}
                 on:change={handleChainChange}
-                class="w-full border p-2 rounded"
+                class="select"
             >
-                <!-- secp256k1-based chains -->
-                <optgroup label="secp256k1">
+                <optgroup label="Ethereum / EVM (secp256k1)">
                     <option value="ethereum">Ethereum</option>
                     <option value="polygon">Polygon</option>
                     <option value="arbitrum">Arbitrum</option>
                     <option value="optimism">Optimism</option>
                     <option value="base">Base</option>
                 </optgroup>
-                <!-- ed25519-based chains -->
                 <optgroup label="ed25519">
                     <option value="solana">Solana</option>
                     <option value="sui">Sui</option>
@@ -347,141 +313,136 @@
             </select>
         </div>
 
-        <!-- Network Selection (for EVM chains) -->
         {#if ["ethereum", "polygon", "arbitrum", "optimism", "base"].includes(chain) && networks.length > 0}
-            <div class="mb-4">
-                <label for="network-select" class="block font-bold mb-2"
-                    >Network:</label
-                >
+            <div>
+                <label class="label" for="network-select">Network</label>
                 <select
                     id="network-select"
                     on:change={handleNetworkChange}
-                    class="w-full border p-2 rounded"
+                    class="select"
                     value={currentNetwork?.id}
                 >
                     {#each networks as network}
                         <option value={network.id}>{network.name}</option>
                     {/each}
                 </select>
-
-                <button
-                    class="mt-2 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded text-sm w-full"
-                    on:click={toggleCustomNetworkForm}
-                >
-                    {showCustomNetworkForm
-                        ? "Hide Custom Network Form"
-                        : "Add Custom Network"}
-                </button>
             </div>
 
-            <!-- Network Details -->
+            <button
+                class="btn btn-secondary btn-sm btn-block"
+                on:click={toggleCustomNetworkForm}
+            >
+                {showCustomNetworkForm ? "Hide custom network" : "Add custom network"}
+            </button>
+
             {#if currentNetwork}
-                <div class="mt-2 p-3 bg-gray-50 rounded text-sm">
-                    <p><strong>Chain ID:</strong> {currentNetwork.id}</p>
-                    <p><strong>Network Name:</strong> {currentNetwork.name}</p>
+                <div class="rounded-lg bg-surface-2 p-2.5 text-xs text-muted">
+                    <p><span class="font-semibold">Chain ID:</span> {currentNetwork.id}</p>
+                    <p>
+                        <span class="font-semibold">Name:</span>
+                        {currentNetwork.name}
+                    </p>
                     {#if currentNetwork.rpcUrls?.default?.http}
-                        <p>
-                            <strong>RPC URL:</strong>
+                        <p class="break-all">
+                            <span class="font-semibold">RPC:</span>
                             {currentNetwork.rpcUrls.default.http[0]}
                         </p>
                     {/if}
                 </div>
             {/if}
         {/if}
+
+        <!-- Advanced: curve (technical) -->
+        <details class="text-sm">
+            <summary class="cursor-pointer text-xs font-semibold text-muted"
+                >Advanced</summary
+            >
+            <div class="mt-2">
+                <label class="label" for="curve-select">Signature curve</label>
+                <select
+                    id="curve-select"
+                    bind:value={curve}
+                    on:change={handleCurveChange}
+                    class="select"
+                >
+                    <option value="secp256k1">secp256k1</option>
+                    <option value="ed25519">ed25519</option>
+                </select>
+            </div>
+        </details>
     </div>
 
-    <!-- Add Custom Network Form -->
+    <!-- Add Custom Network -->
     {#if showCustomNetworkForm}
-        <div class="mb-6 p-4 border rounded">
-            <h3 class="text-lg font-semibold mb-3">Add Custom Network</h3>
+        <div class="card card-pad space-y-3">
+            <h3 class="section-title">Add custom network</h3>
 
             {#if customNetworkError}
-                <div
-                    class="mb-4 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm"
-                >
-                    {customNetworkError}
-                </div>
+                <div class="alert alert-danger text-xs">{customNetworkError}</div>
             {/if}
 
-            <div class="mb-4">
-                <label for="network-name" class="block font-bold mb-2"
-                    >Network Name:</label
-                >
+            <div>
+                <label class="label" for="network-name">Network name</label>
                 <input
                     id="network-name"
                     type="text"
-                    class="w-full border p-2 rounded"
+                    class="input"
                     placeholder="My Custom Network"
                     bind:value={customNetworkName}
                 />
             </div>
-
-            <div class="mb-4">
-                <label for="network-rpc" class="block font-bold mb-2"
-                    >RPC URL:</label
-                >
+            <div>
+                <label class="label" for="network-rpc">RPC URL</label>
                 <input
                     id="network-rpc"
                     type="text"
-                    class="w-full border p-2 rounded"
-                    placeholder="https://my-custom-network.example.com"
+                    class="input"
+                    placeholder="https://rpc.example.com"
                     bind:value={customNetworkRpcUrl}
                 />
             </div>
-
-            <div class="mb-4">
-                <label for="network-chainid" class="block font-bold mb-2"
-                    >Chain ID:</label
-                >
-                <input
-                    id="network-chainid"
-                    type="text"
-                    class="w-full border p-2 rounded"
-                    placeholder="1"
-                    bind:value={customNetworkChainId}
-                />
+            <div class="grid grid-cols-2 gap-3">
+                <div>
+                    <label class="label" for="network-chainid">Chain ID</label>
+                    <input
+                        id="network-chainid"
+                        type="text"
+                        class="input"
+                        placeholder="1"
+                        bind:value={customNetworkChainId}
+                    />
+                </div>
+                <div>
+                    <label class="label" for="network-symbol">Symbol</label>
+                    <input
+                        id="network-symbol"
+                        type="text"
+                        class="input"
+                        placeholder="ETH"
+                        bind:value={customNetworkSymbol}
+                    />
+                </div>
             </div>
-
-            <div class="mb-4">
-                <label for="network-symbol" class="block font-bold mb-2"
-                    >Currency Symbol:</label
-                >
-                <input
-                    id="network-symbol"
-                    type="text"
-                    class="w-full border p-2 rounded"
-                    placeholder="ETH"
-                    bind:value={customNetworkSymbol}
-                />
-            </div>
-
-            <div class="mb-4">
-                <label for="network-explorer" class="block font-bold mb-2"
-                    >Block Explorer URL: (optional)</label
+            <div>
+                <label class="label" for="network-explorer"
+                    >Block explorer (optional)</label
                 >
                 <input
                     id="network-explorer"
                     type="text"
-                    class="w-full border p-2 rounded"
+                    class="input"
                     placeholder="https://etherscan.io"
                     bind:value={customNetworkExplorer}
                 />
             </div>
 
-            <div class="flex justify-between gap-2">
-                <button
-                    class="w-1/2 bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded"
-                    on:click={toggleCustomNetworkForm}
-                >
+            <div class="flex gap-2">
+                <Button variant="secondary" block on:click={toggleCustomNetworkForm}>
                     Cancel
-                </button>
-
-                <button
-                    class="w-1/2 bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
-                    on:click={addCustomNetwork}
-                >
-                    Save Network
-                </button>
+                </Button>
+                <Button block variant="success" on:click={addCustomNetwork}>
+                    Save network
+                </Button>
             </div>
         </div>
     {/if}

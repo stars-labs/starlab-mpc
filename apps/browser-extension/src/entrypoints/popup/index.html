@@ -1,18 +1,24 @@
 <!doctype html>
-<html lang="en" class="">
+<html lang="en">
   <head>
     <script>
-      // Initialize dark mode from localStorage on page load
-      const darkMode = localStorage.getItem('theme') === 'dark' || 
-                     (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
-      // Dark mode only applies to text and borders, very minimal
-      if (darkMode) {
-        document.documentElement.classList.add('dark');
-      }
+      // Apply the saved theme before the bundle loads to avoid a flash
+      // of the wrong color scheme. Mirrors resolveDark() in src/lib/theme.ts:
+      // "system" (default) follows the OS; "light"/"dark" are explicit.
+      (function () {
+        try {
+          var mode = localStorage.getItem("mpc_wallet_theme") || "system";
+          var dark =
+            mode === "dark" ||
+            (mode === "system" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (e) {}
+      })();
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Crypto Wallet</title>
+    <title>MPC Wallet</title>
     <meta name="manifest.type" content="browser_action" />
   </head>
   <body>

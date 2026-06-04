@@ -1,23 +1,21 @@
 /**
  * Signal-server URL config, single source of truth.
  *
- * Historically the extension hardcoded `wss://auto-life.tech` in three
- * places. The TUI default moved to `wss://xiongchenyu.dpdns.org` (see
- * `apps/tui-node/src/elm/model.rs:332`), which points at the Cloudflare
- * Worker variant of the signal server — but until we aligned the
- * extension too, a TUI node and an extension couldn't see each other's
- * session broadcasts at all.
+ * The default is `wss://panda.qzz.io` (see `apps/tui-node/src/elm/model.rs`),
+ * which points at the Cloudflare Worker variant of the signal server — the
+ * TUI and the extension must share this default so a TUI node and an
+ * extension can see each other's session broadcasts.
  *
  * This module centralizes the decision: one default, one override
- * mechanism, one call site for callers to fetch the value. All three
- * prior hardcodes should now route through {@link getSignalServerUrl}.
+ * mechanism, one call site for callers to fetch the value. Every caller
+ * routes through {@link getSignalServerUrl}.
  */
 
 /**
  * Fallback URL used when the user hasn't set an override. Intentionally
  * matches the TUI default so extension+TUI can interop out of the box.
  */
-export const DEFAULT_SIGNAL_SERVER_URL = "wss://xiongchenyu.dpdns.org";
+export const DEFAULT_SIGNAL_SERVER_URL = "wss://panda.qzz.io";
 
 /**
  * chrome.storage.local key for the user-configurable override. Reads
