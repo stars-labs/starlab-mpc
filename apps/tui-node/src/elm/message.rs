@@ -35,6 +35,16 @@ pub enum Message {
         password: String,
         label: String,
     },
+    /// Initiator-side signing for a non-TUI front-end: seeds the same
+    /// `pending_sign_*` state SignSubmit's cold path sets, then hands off to
+    /// SubmitPassword → UnlockWallet → InitiateSigning (announce + ceremony).
+    /// `encoding` is "utf8" (default) or "hex" for `message`.
+    HeadlessSign {
+        wallet_id: String,
+        message: String,
+        encoding: String,
+        password: String,
+    },
 
     // Wallet management messages
     CreateWallet { config: WalletConfig },

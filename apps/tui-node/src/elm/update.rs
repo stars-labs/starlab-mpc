@@ -378,6 +378,36 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
         }
 
+        // Headless initiator-side signing. Mirrors SignSubmit's cold path:
+        // compute the payload (EIP-191 hash for secp256k1, raw otherwise),
+        // stash pending_sign_* (no session_id → "we're announcing one"),
+        // then hand off to SubmitPassword which unlocks + InitiateSigning.
+        Message::HeadlessSign { wallet_id, message, encoding, password } => {
+            let raw = if encoding.eq_ignore_ascii_case("hex") {
+                match hex::decode(message.trim().trim_start_matches("0x")) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!("HeadlessSign: bad hex message: {}", e);
+                        return None;
+                    }
+                }
+            } else {
+                message.into_bytes()
+            };
+            let curve = model.wallet_state.curve_type;
+            let bytes_to_sign = if curve == "secp256k1" {
+                crate::utils::eth_helper::eip191_hash(&raw).to_vec()
+            } else {
+                raw.clone()
+            };
+            model.wallet_state.pending_sign_message = Some(bytes_to_sign);
+            model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
+            model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_raw_message =
+                if curve == "secp256k1" { Some(raw) } else { None };
+            Some(Command::SendMessage(Message::SubmitPassword { value: password }))
+        }
+
         Message::SubmitPassword { value } => {
             info!(
                 "Password submitted ({} chars) — routing to DKG/sign",
@@ -3101,6 +3131,32 @@ mod tests {
         match cmd {
             Some(Command::SendMessage(Message::SubmitPassword { value })) => {
                 assert_eq!(value, "hunter2hunter2");
+            }
+            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn headless_sign_seeds_pending_state_and_hands_off() {
+        let mut model = Model::new("dev".to_string());
+        let cmd = update(
+            &mut model,
+            Message::HeadlessSign {
+                wallet_id: "wallet-ab12".to_string(),
+                message: "hello".to_string(),
+                encoding: "utf8".to_string(),
+                password: "pw".to_string(),
+            },
+        );
+        assert!(model.wallet_state.pending_sign_message.is_some());
+        assert_eq!(
+            model.wallet_state.pending_sign_wallet_id.as_deref(),
+            Some("wallet-ab12")
+        );
+        assert!(model.wallet_state.pending_sign_session_id.is_none());
+        match cmd {
+            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+                assert_eq!(value, "pw");
             }
             other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
         }

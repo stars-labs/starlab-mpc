@@ -56,14 +56,16 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
         device_id: opts.device_id.clone(),
         ..Snapshot::default()
     }));
-    // Correlates the next `dkg_complete` with the create command's id.
+    // Correlate the next terminal event with the command that started it.
     let pending_create: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
+    let pending_sign: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
 
     // --- runner sync closure: model/message → events + snapshot cache ---
     let out_for_sync = out_tx.clone();
     let bridge_for_sync = bridge.clone();
     let snapshot_for_sync = snapshot.clone();
     let pending_for_sync = pending_create.clone();
+    let pending_sign_for_sync = pending_sign.clone();
     let runner_tx = spawn_secp256k1(
         opts.device_id.clone(),
         opts.keystore_path.clone(),
@@ -74,11 +76,15 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
             *snapshot_for_sync.lock().unwrap() = b.snapshot(model);
             drop(b);
             for mut ev in events {
-                // Stamp the create-command id onto the terminal dkg_complete.
-                if let CliEvent::DkgComplete { correlates, .. } = &mut ev {
-                    if correlates.is_none() {
+                // Stamp the originating command id onto terminal events.
+                match &mut ev {
+                    CliEvent::DkgComplete { correlates, .. } if correlates.is_none() => {
                         *correlates = pending_for_sync.lock().unwrap().take();
                     }
+                    CliEvent::SignatureComplete { correlates, .. } if correlates.is_none() => {
+                        *correlates = pending_sign_for_sync.lock().unwrap().take();
+                    }
+                    _ => {}
                 }
                 let _ = out_for_sync.send(ev);
             }
@@ -176,6 +182,33 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                     session_id,
                     password,
                     label,
+                });
+                ack(id);
+            }
+            CliCommand::Sign {
+                wallet_id,
+                message,
+                encoding,
+                password,
+            } => {
+                *pending_sign.lock().unwrap() = id;
+                let _ = runner_tx.send(Message::HeadlessSign {
+                    wallet_id,
+                    message,
+                    encoding,
+                    password,
+                });
+                ack(id);
+            }
+            CliCommand::ApproveSigning {
+                session_id,
+                password,
+            } => {
+                // A co-signer approves by joining the signing session.
+                let _ = runner_tx.send(Message::HeadlessJoinSession {
+                    session_id,
+                    password,
+                    label: String::new(),
                 });
                 ack(id);
             }

@@ -54,8 +54,27 @@ pub enum CliCommand {
         #[serde(default)]
         label: String,
     },
+    /// Initiate a threshold signing ceremony as the wallet owner.
+    Sign {
+        wallet_id: String,
+        message: String,
+        /// "utf8" (default) or "hex".
+        #[serde(default = "default_encoding")]
+        encoding: String,
+        password: String,
+    },
+    /// Approve an incoming signing request by joining its session (a
+    /// co-signer "approves" by contributing its share).
+    ApproveSigning {
+        session_id: String,
+        password: String,
+    },
     /// Stop the runner and exit.
     Quit,
+}
+
+fn default_encoding() -> String {
+    "utf8".to_string()
 }
 
 fn default_curve() -> String {
@@ -103,6 +122,21 @@ pub enum CliEvent {
         #[serde(default)]
         address: String,
         group_public_key: String,
+    },
+    /// An incoming signing request we're a co-signer for (discovered).
+    SigningRequest {
+        session_id: String,
+        wallet: String,
+        threshold: u16,
+        total: u16,
+        proposer: String,
+    },
+    /// A threshold signing ceremony finished.
+    SignatureComplete {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        correlates: Option<u64>,
+        signature: String,
+        message_hash: String,
     },
     /// Something went wrong.
     Error {
@@ -161,6 +195,8 @@ pub fn schema_json() -> String {
             {"cmd": "list_sessions"},
             {"cmd": "create_wallet", "fields": {"name?": "string", "threshold": "u16", "total": "u16", "curve?": "secp256k1|ed25519", "password": "string"}},
             {"cmd": "join_session", "fields": {"session_id": "string", "password": "string", "label?": "string"}},
+            {"cmd": "sign", "fields": {"wallet_id": "string", "message": "string", "encoding?": "utf8|hex", "password": "string"}},
+            {"cmd": "approve_signing", "fields": {"session_id": "string", "password": "string"}},
             {"cmd": "quit"},
             {"_note": "every command may include an `id` (u64); long-running ones echo it back as `correlates`"}
         ],
@@ -174,6 +210,8 @@ pub fn schema_json() -> String {
             {"event": "sessions", "fields": {"sessions": "[SessionEntry]"}},
             {"event": "dkg_progress", "fields": {"session_id": "string", "round": "u8", "received": "usize", "need": "usize"}},
             {"event": "dkg_complete", "fields": {"correlates?": "u64", "wallet_id": "string", "address": "string", "group_public_key": "string"}},
+            {"event": "signing_request", "fields": {"session_id": "string", "wallet": "string", "threshold": "u16", "total": "u16", "proposer": "string"}},
+            {"event": "signature_complete", "fields": {"correlates?": "u64", "signature": "string", "message_hash": "string"}},
             {"event": "error", "fields": {"correlates?": "u64", "code": "string", "message": "string"}}
         ]
     });

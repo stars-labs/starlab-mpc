@@ -77,10 +77,35 @@ impl Bridge {
                 }
                 Message::SessionDiscovered { session } => {
                     if self.announced_sessions.insert(session.session_id.clone()) {
-                        events.push(CliEvent::SessionAvailable {
-                            session: session_entry(session),
-                        });
+                        // Signing sessions surface as a signing_request (a
+                        // co-signer can approve by joining); DKG sessions as
+                        // session_available.
+                        match &session.session_type {
+                            SessionType::Signing { wallet_name, .. } => {
+                                events.push(CliEvent::SigningRequest {
+                                    session_id: session.session_id.clone(),
+                                    wallet: wallet_name.clone(),
+                                    threshold: session.threshold,
+                                    total: session.total,
+                                    proposer: session.proposer_id.clone(),
+                                });
+                            }
+                            SessionType::DKG => {
+                                events.push(CliEvent::SessionAvailable {
+                                    session: session_entry(session),
+                                });
+                            }
+                        }
                     }
+                }
+                Message::SigningComplete {
+                    message, signature, ..
+                } => {
+                    events.push(CliEvent::SignatureComplete {
+                        correlates: None, // serve stamps the sign-command id
+                        signature: format!("0x{}", hex::encode(signature)),
+                        message_hash: format!("0x{}", hex::encode(message)),
+                    });
                 }
                 _ => {}
             }
