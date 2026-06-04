@@ -14,6 +14,12 @@ use tui_node::elm::headless::spawn_secp256k1;
 use tui_node::elm::model::{WalletConfig, WalletMode};
 use tui_node::elm::{Message, Model};
 
+/// The user-facing label the simulated DKG creator gives its wallet. Chosen
+/// so it can never collide with a `dkg_<uuid>` session id — that lets LIFE-3
+/// assert the label genuinely round-tripped (vs `display_name()` falling back
+/// to the session id when the label was dropped).
+pub const SIM_WALLET_LABEL: &str = "sim-creator-wallet";
+
 /// Simulation configuration.
 pub struct SimulateOpts {
     pub nodes: usize,
@@ -210,13 +216,13 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
 
     senders[0].send(Message::HeadlessCreateWallet {
         config: WalletConfig {
-            name: "sim".into(),
+            name: SIM_WALLET_LABEL.into(),
             total_participants: opts.nodes as u16,
             threshold: opts.threshold,
             mode: WalletMode::Online,
         },
         password: "sim-password-0".into(),
-        label: "sim".into(),
+        label: SIM_WALLET_LABEL.into(),
     })?;
 
     for (i, rx) in receivers.iter_mut().enumerate().skip(1) {
@@ -358,6 +364,9 @@ pub struct ReloadListResult {
     pub expected_group_public_key: String,
     /// Group keys the fresh runner loaded from the persisted keystore.
     pub reloaded_group_keys: Vec<String>,
+    /// User-facing wallet names (`display_name()`) after the cold reload —
+    /// LIFE-3 checks the creation label survives the keystore round-trip.
+    pub reloaded_wallet_names: Vec<String>,
     /// True iff the expected key reappeared after the cold reload.
     pub persisted: bool,
     pub elapsed_ms: u128,
@@ -406,26 +415,29 @@ pub async fn run_reload_list_simulation(
     // Fresh runner on node 0's keystore. The runner auto-sends ListWallets on
     // startup (see HeadlessRunner::run), so the persisted wallets land in the
     // model without any network. Capture their group keys via the sync hook.
-    let (wtx, mut wrx) = unbounded_channel::<Vec<String>>();
+    // Capture (group_key, display_name) pairs from the reloaded model.
+    let (wtx, mut wrx) = unbounded_channel::<Vec<(String, String)>>();
     let cb = move |model: &Model, _msg: Option<&Message>| {
-        let keys: Vec<String> = model
+        let wallets: Vec<(String, String)> = model
             .wallet_state
             .wallets
             .iter()
-            .map(|w| w.group_public_key.clone())
+            .map(|w| (w.group_public_key.clone(), w.display_name().to_string()))
             .collect();
-        if !keys.is_empty() {
-            let _ = wtx.send(keys);
+        if !wallets.is_empty() {
+            let _ = wtx.send(wallets);
         }
     };
     // Signal URL is irrelevant — we never connect.
     let _tx = spawn_secp256k1(device_id, keystore_path, String::new(), cb);
 
-    let reloaded_group_keys = tokio::time::timeout(Duration::from_secs(10), wrx.recv())
+    let reloaded = tokio::time::timeout(Duration::from_secs(10), wrx.recv())
         .await
         .map_err(|_| anyhow::anyhow!("timed out waiting for reloaded wallet list"))?
         .ok_or_else(|| anyhow::anyhow!("reloaded runner produced no wallet list"))?;
 
+    let reloaded_group_keys: Vec<String> = reloaded.iter().map(|(k, _)| k.clone()).collect();
+    let reloaded_wallet_names: Vec<String> = reloaded.iter().map(|(_, n)| n.clone()).collect();
     let persisted = reloaded_group_keys.contains(&expected_group_public_key);
 
     drop(c.keystores);
@@ -433,6 +445,7 @@ pub async fn run_reload_list_simulation(
     Ok(ReloadListResult {
         expected_group_public_key,
         reloaded_group_keys,
+        reloaded_wallet_names,
         persisted,
         elapsed_ms: started.elapsed().as_millis(),
     })

@@ -14,6 +14,7 @@
 
 use mpc_wallet_cli::simulate::{
     run_reload_list_simulation, run_signing_simulation, run_simulation, SimulateOpts,
+    SIM_WALLET_LABEL,
 };
 
 fn init_logs() {
@@ -150,6 +151,35 @@ async fn reload_lists_persisted_wallet() {
     }
 
     report_and_assert("RELOAD-LIST", &rows);
+}
+
+/// LIFE-3: the user-facing wallet label round-trips through the keystore. After
+/// DKG (creator labels the wallet) and a cold reload, `display_name()` must
+/// still be the label — not the `session_id` fallback it degrades to when the
+/// label is dropped on persist.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "real WebRTC/DKG over loopback; run with --ignored"]
+async fn reload_preserves_wallet_label() {
+    init_logs();
+    let mut rows = Vec::new();
+    let label = "LIFE-3 label round-trip";
+
+    match run_reload_list_simulation(opts(2, 2)).await {
+        Ok(r) => {
+            let name = r.reloaded_wallet_names.first().cloned().unwrap_or_default();
+            let ok = name == SIM_WALLET_LABEL;
+            rows.push(Row {
+                ok,
+                detail: format!(
+                    "reloaded name={name:?} (expected label {SIM_WALLET_LABEL:?})"
+                ),
+                label: label.to_string(),
+            });
+        }
+        Err(e) => rows.push(Row { label: label.to_string(), ok: false, detail: format!("error: {e}") }),
+    }
+
+    report_and_assert("RELOAD-LABEL", &rows);
 }
 
 fn report_and_assert(group: &str, rows: &[Row]) {
