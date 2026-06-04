@@ -384,11 +384,11 @@ For each flow and each client:
 
 **Address golden table** (cross-run deterministic — derived from a fixed group key):
 
-| Curve | Group key (hex) | Chain | Expected address |
+| Curve | Group key | Chain | Expected address |
 |---|---|---|---|
-| secp256k1 | *(pinned)* | Ethereum | *(pinned, lower-case)* |
-| secp256k1 | *(pinned)* | Bitcoin P2WPKH | *(pinned bc1q…)* |
-| ed25519 | *(pinned)* | Solana | *(pinned base58)* |
+| secp256k1 | generator G | Ethereum | `0x7e5f4552091a69125d5dfcb7b8c2659029395bdf` ✅ |
+| secp256k1 | generator G | Bitcoin P2WPKH | `bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4` ✅ |
+| ed25519 | all-zero key | Solana | `11111111111111111111111111111111` ✅ |
 
 These reuse the same derivation paths as the per-chain tests already landed in
 `crypto-rust-tools/yubiwallet/tests/chains.rs`, keeping one source of truth for address
@@ -409,7 +409,15 @@ correctly). Fixed by decompressing via `k256::PublicKey::from_sec1_bytes` →
 `to_encoded_point(false)` before hashing (robust to compressed *or* uncompressed input);
 the golden now matches the canonical vector and the two derivations agree. This is the
 address-oracle catching a wrong-receive-address bug that affected every secp256k1 wallet's
-displayed address. (Bitcoin P2WPKH golden still to add.)
+displayed address.
+
+The **Bitcoin P2WPKH golden** is now landed too (`golden_bitcoin_p2wpkh_for_generator_g`),
+and it surfaced a second gap: `generate_address_for_chain` had **no `bitcoin` arm at all**
+— "bitcoin" is a registered chain, but the oracle returned "address generation not
+implemented", so BTC MPC wallets could not display an address. Implemented P2WPKH = bech32
+segwit-v0 of `hash160(compressed pubkey)` (P2WPKH mandates the compressed key, which is
+exactly FROST's serialization), pinned against the BIP-173 worked example
+(G → `bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4`). All three address goldens now hold.
 
 ---
 

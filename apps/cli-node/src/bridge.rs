@@ -327,6 +327,20 @@ mod tests {
     }
 
     #[test]
+    fn golden_bitcoin_p2wpkh_for_generator_g() {
+        // BIP-173 worked example: compressed G → this mainnet P2WPKH address.
+        let g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let bytes = hex::decode(g).unwrap();
+        let addr = tui_node::blockchain_config::generate_address_for_chain(
+            &bytes,
+            "secp256k1",
+            "bitcoin",
+        )
+        .expect("derive btc address");
+        assert_eq!(addr, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
+    }
+
+    #[test]
     fn golden_solana_address_for_zero_key() {
         // base58 of 32 zero bytes is the Solana System Program id.
         let zeros = "0".repeat(64);

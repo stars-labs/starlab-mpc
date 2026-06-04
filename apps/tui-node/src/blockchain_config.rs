@@ -167,6 +167,25 @@ pub fn generate_address_for_chain(
             Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
         }
         
+        // Bitcoin native SegWit (P2WPKH) with secp256k1
+        ("bitcoin", CurveType::Secp256k1) => {
+            // P2WPKH = bech32 segwit-v0 of hash160(compressed pubkey), where
+            // hash160 = ripemd160(sha256(pubkey)). P2WPKH mandates the
+            // COMPRESSED pubkey — which is exactly how FROST serializes the
+            // group key — so we hash it as-is (re-compressing via k256 to
+            // normalize in case an uncompressed key is ever passed).
+            use k256::elliptic_curve::sec1::ToEncodedPoint;
+            use ripemd::Ripemd160;
+            use sha2::{Digest as _, Sha256};
+            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
+                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
+            let compressed = pk.to_encoded_point(true); // 0x02/0x03 ‖ X
+            let sha = Sha256::digest(compressed.as_bytes());
+            let h160 = Ripemd160::digest(sha);
+            bech32::segwit::encode_v0(bech32::hrp::BC, &h160)
+                .map_err(|e| format!("bech32 encode failed: {e}"))
+        }
+
         // Solana with ed25519
         ("solana", CurveType::Ed25519) => {
             // Solana addresses are base58 encoded public keys
