@@ -134,6 +134,33 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 > LIFE-1 (the persistence half — the share is on disk and reloads with the right
 > group key) is fully covered in L1.
 
+> **🐞 LIFE-2 found a real bug (cold-start signing WebRTC offer race).** The L3
+> reproduction (`tests/l3_serve_process.rs::sign_after_process_restart_verifies`)
+> does a DKG across two `serve` processes, kills both, respawns on the same
+> keystores, and signs. It **fails**, and the failure is a genuine product bug,
+> not a test artifact (verified by full log trace):
+>
+> 1. After restart the initiator unlocks its persisted share and runs
+>    `StartSigning` (cold path: rebuilds the signing session from wallet
+>    metadata, announces it, and **immediately broadcasts its WebRTC offer**).
+> 2. The co-signer only discovers the signing session, approves, unlocks, and
+>    then runs `JoinSigning` — and **only then starts its WebRTC signaling
+>    subscriber**, ~0.7s *after* the initiator's offer was relayed.
+> 3. The offer is delivered over the broadcast channel with **no subscriber yet**,
+>    so it is dropped; the initiator never re-offers; the signing data channel
+>    never opens; `SIGN_COMMIT` retries exhaust and the ceremony stalls.
+>
+> Warm flows (DKG, and same-run signing) work because both peers initiate WebRTC
+> near-simultaneously, so neither offer predates the other's subscriber. This
+> affects **all clients** that restart then sign (TUI/native/extension share the
+> staggered initiator-vs-joiner ordering). Candidate fixes: run the signaling
+> subscriber whenever connected (decoupled from `InitiateWebRTC`); buffer WebRTC
+> signals that arrive before the peer connection exists; or have the initiator
+> re-send its offer until the channel opens. The reproduction is `#[ignore]`'d
+> and **excluded from the CI gate** (CI names the DKG test explicitly) until the
+> fix lands, at which point it flips red→green. This is the harness working as
+> designed: CLI-as-oracle surfaced a cross-client bug nothing else exercised.
+
 > **LIFE-4 surfaced a real cross-client parity gap (now fixed).** The browser
 > extension fires `requestActiveSessions()` automatically ~2s after the WebSocket
 > opens, so it always discovers sessions announced before it connected. The Rust
