@@ -106,7 +106,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 | SIG-3 | sign secp256k1 → verify against group key | `verify_secp256k1` |
 | SIG-4 | sign ed25519 → verify | needs ed25519 runner (§7) |
 | SIG-5 | dApp `personal_sign`-shaped message (Ethereum) | extension-originated in cross-client |
-| SIG-6 | raw hex message vs utf8 message | `encoding` field |
+| SIG-6 | raw hex message vs utf8 message | `encoding` field — **L1** ✅ (hex-decode path → EIP-191 → verify) |
 | SIG-7 | co-signer decline (explicit rejection) | extension `SigningDecline` path |
 | SIG-8 | auto-approve policy gates signing | CLI `--auto-approve` + allowlist + budget |
 

@@ -276,6 +276,7 @@ async fn drive_signing(
     receivers: &mut [UnboundedReceiver<Evt>],
     wallet_id: String,
     message: &str,
+    encoding: &str,
     threshold: u16,
     timeout_secs: u64,
 ) -> anyhow::Result<(String, String)> {
@@ -283,7 +284,7 @@ async fn drive_signing(
     senders[0].send(Message::HeadlessSign {
         wallet_id,
         message: message.to_string(),
-        encoding: "utf8".into(),
+        encoding: encoding.to_string(),
         password: "sim-password-0".into(),
     })?;
 
@@ -331,6 +332,16 @@ pub async fn run_signing_simulation(
     opts: SimulateOpts,
     message: &str,
 ) -> anyhow::Result<SigningResult> {
+    run_signing_simulation_enc(opts, message, "utf8").await
+}
+
+/// As [`run_signing_simulation`], but with an explicit message `encoding`
+/// ("utf8" or "hex") — exercises `HeadlessSign`'s hex-decode path (SIG-6).
+pub async fn run_signing_simulation_enc(
+    opts: SimulateOpts,
+    message: &str,
+    encoding: &str,
+) -> anyhow::Result<SigningResult> {
     let nodes = opts.nodes;
     let threshold = opts.threshold;
     let started = Instant::now();
@@ -340,9 +351,16 @@ pub async fn run_signing_simulation(
     }
     let wallet_id = c.outcomes[0].wallet_id.clone();
 
-    let (signature, signed_message) =
-        drive_signing(&c.senders, &mut c.receivers, wallet_id, message, threshold, opts.timeout_secs)
-            .await?;
+    let (signature, signed_message) = drive_signing(
+        &c.senders,
+        &mut c.receivers,
+        wallet_id,
+        message,
+        encoding,
+        threshold,
+        opts.timeout_secs,
+    )
+    .await?;
 
     let verified = verify_secp256k1(&c.group_key, &signed_message, &signature).unwrap_or(false);
 

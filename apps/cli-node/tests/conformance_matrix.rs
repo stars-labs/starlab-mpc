@@ -14,7 +14,8 @@
 
 use mpc_wallet_cli::simulate::{
     run_late_join_discovery_simulation, run_reload_list_simulation, run_reload_unlock_simulation,
-    run_signing_simulation, run_simulation, SimulateOpts, SIM_WALLET_LABEL,
+    run_signing_simulation, run_signing_simulation_enc, run_simulation, SimulateOpts,
+    SIM_WALLET_LABEL,
 };
 
 fn init_logs() {
@@ -116,6 +117,33 @@ async fn sign_matrix() {
     }
 
     report_and_assert("SIGN", &rows);
+}
+
+/// SIG-6: sign a HEX-encoded message. Exercises HeadlessSign's hex-decode path
+/// (decode → EIP-191 hash → FROST), which the utf8 matrix never touches. The
+/// produced signature must verify against the group key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+#[ignore = "real WebRTC/DKG+signing over loopback; run with --ignored"]
+async fn sign_hex_encoded_message_verifies() {
+    init_logs();
+    let mut rows = Vec::new();
+    // 32 bytes of hex (0x-prefixed; HeadlessSign strips the prefix).
+    let hex_msg = "0xdeadbeefcafe0123456789abcdef0011223344556677889900aabbccddeeff00";
+
+    match run_signing_simulation_enc(opts(2, 2), hex_msg, "hex").await {
+        Ok(r) => rows.push(Row {
+            ok: r.verified && !r.signature.is_empty(),
+            detail: format!("verified={} {}ms (hex-encoded message)", r.verified, r.elapsed_ms),
+            label: "SIG-6 hex message 2-of-2".to_string(),
+        }),
+        Err(e) => rows.push(Row {
+            label: "SIG-6 hex message 2-of-2".to_string(),
+            ok: false,
+            detail: format!("error: {e}"),
+        }),
+    }
+
+    report_and_assert("SIG-6", &rows);
 }
 
 /// LIFE-1: cold-start persistence. Run DKG, tear node 0's runner down, bring
