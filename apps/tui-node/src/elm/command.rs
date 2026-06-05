@@ -1937,6 +1937,32 @@ impl Command {
                             .map(|s| s.participants.clone())
                             .unwrap_or_default()
                     };
+                    // The `blockchain` field must be a real chain name (the
+                    // extension's session-parse.ts reads it), not the curve.
+                    // `request.chain` is set to the curve upstream (the headless
+                    // sign API has no per-chain context), so resolve the wallet's
+                    // actual primary chain from keystore metadata, falling back
+                    // to the curve's canonical chain. (#32)
+                    let announce_blockchain = {
+                        let state = app_state.lock().await;
+                        state
+                            .keystore
+                            .as_ref()
+                            .and_then(|ks| ks.get_wallet(&request.wallet_id))
+                            .and_then(|w| {
+                                w.blockchains
+                                    .first()
+                                    .map(|b| b.blockchain.clone())
+                                    .or_else(|| w.blockchain.clone())
+                            })
+                            .unwrap_or_else(|| {
+                                if announced_curve == "ed25519" {
+                                    "solana".to_string()
+                                } else {
+                                    "ethereum".to_string()
+                                }
+                            })
+                    };
                     let session_info = serde_json::json!({
                         "session_id": session_id.clone(),
                         "total": n_participants,
@@ -1948,7 +1974,7 @@ impl Command {
                         "coordination_type": "Network",
                         "wallet_name": request.wallet_id.clone(),
                         "group_public_key": group_pubkey_hex,
-                        "blockchain": request.chain.clone(),
+                        "blockchain": announce_blockchain,
                         // Joiners need the exact bytes to sign — embed them in
                         // the announce rather than requiring an extra round.
                         "signing_message_hex": hex::encode(&request.transaction_data),
