@@ -177,6 +177,11 @@ struct SimulateArgs {
     /// If set, after DKG sign this message with a quorum and verify it.
     #[arg(long)]
     sign: Option<String>,
+    /// External signal server URL (e.g. wss://panda.qzz.io/?room=test). When
+    /// omitted, an isolated server is embedded in-process. Use this to smoke-
+    /// test a deployed/remote server (incl. a specific multi-tenant room).
+    #[arg(long)]
+    signal_server: Option<String>,
     /// tracing filter (stderr); empty to silence.
     #[arg(long, default_value = "")]
     log_level: String,
@@ -288,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
                 nodes: args.nodes,
                 threshold,
                 curve: args.curve,
-                signal_url: None,
+                signal_url: args.signal_server.clone(),
                 timeout_secs: args.timeout,
             };
             let ok = if let Some(msg) = args.sign {
