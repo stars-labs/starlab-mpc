@@ -120,17 +120,23 @@ Target: a **2-of-3** wallet shared by `cli-a`, `cli-b`, and the extension
 ### 3.1 Prerequisites
 - A signal server reachable by all three (live `wss://panda.qzz.io`, or a local
   one — see §4.2).
+- **A shared strong room** (hosted server requires it, #31): generate once with
+  `uuidgen` and use the SAME value for all three (`ROOM=$(uuidgen)`). A local
+  standalone server (§4.2) needs no room.
 - **Unique device-ids**: `cli-a`, `cli-b`, `ext-1`. Never reuse.
 - Isolated keystore dir per CLI node.
 - **Apply the §2.3 fix first**, or use the ordering workaround in §3.4.
 
 ### 3.2 Start the two CLI nodes (JSONL `serve`)
 ```bash
+ROOM=$(uuidgen)   # the ONE shared room for all three; the extension uses the same
 # terminal 1
-mpc-wallet-cli serve --device-id cli-a --keystore /tmp/ks-a --signal-server wss://panda.qzz.io
+mpc-wallet-cli serve --device-id cli-a --keystore /tmp/ks-a --signal-server wss://panda.qzz.io --room "$ROOM"
 # terminal 2
-mpc-wallet-cli serve --device-id cli-b --keystore /tmp/ks-b --signal-server wss://panda.qzz.io
+mpc-wallet-cli serve --device-id cli-b --keystore /tmp/ks-b --signal-server wss://panda.qzz.io --room "$ROOM"
 ```
+For the extension, set its signal server to `wss://panda.qzz.io/?room=<the same ROOM>`
+(or set the room in its settings).
 Each prints a `ready` event, then accepts newline-delimited JSON commands on
 stdin and emits events on stdout. Connect both:
 ```json

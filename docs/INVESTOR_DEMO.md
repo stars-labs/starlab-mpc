@@ -21,8 +21,13 @@ The whole strategy is three layers:
   mesh silently breaks. Pre-assign names: `alice`, `bob`, `carol`, … Hand them out.
 - **Run `preflight.sh` 10 minutes before.** Green = the cryptography + WebRTC +
   network path are healthy. Red = you found out in private, not on stage.
+- **One shared room, generated once.** The hosted server requires a strong
+  `--room` (≥16 chars). Generate it ONCE (`uuidgen`), send the exact same value
+  to every participant, and pass it on every device. Different rooms can't see
+  each other; a bare URL with no room is rejected. (This is also the
+  tenant-isolation boundary — keep each cohort's room private.)
 - **Decide the signal server up front** and put it on every device:
-  - Live: `--signal-server wss://panda.qzz.io` (needs internet on all devices).
+  - Live: `--signal-server wss://panda.qzz.io --room "$ROOM"` (needs internet).
   - Local backup: one laptop runs the server; everyone uses `--signal-server
     ws://<that-laptop-LAN-ip>:9000` (needs same Wi-Fi, no internet). Set this up
     *before* the meeting so you can switch in 10 seconds.
@@ -38,11 +43,20 @@ git clone <repo> && cd mpc-wallet
 nix develop                      # or have the toolchain installed
 cargo build --release -p tui-node
 
-# launch the wallet (pick the id you were assigned!)
+# ONE person generates the shared room id and sends it to everyone:
+ROOM=$(uuidgen)        # e.g. 7f3a9c2e-4b1d-4e8a-9c2f-001122334455
+
+# launch the wallet (pick the id you were assigned + the SHARED room!)
 cargo run --release --bin mpc-wallet-tui -p tui-node -- \
   --device-id alice \
-  --signal-server wss://panda.qzz.io
+  --signal-server wss://panda.qzz.io \
+  --room "$ROOM"
 ```
+
+> The hosted server (`panda.qzz.io`) now **requires a strong `--room`** (≥16
+> chars; see #31). All participants of one wallet must pass the **same** room.
+> A bare `wss://panda.qzz.io` (no room) is rejected. The local-server fallback
+> (§5, standalone server) does **not** need a room.
 
 Roles for a 2-of-3 demo: **alice, bob, carol**. (2-of-3 = any two can sign; no one
 alone can. Good story.)
