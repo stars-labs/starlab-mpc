@@ -1,0 +1,16 @@
+# DKG wire-protocol contract (normalized)
+
+# type vocabulary
+C>announce_session
+C>register
+C>relay
+C>session_status_update
+S>devices
+S>relay
+S>session_available
+
+# announce_session (client→server)
+{"session_info":{"coordination_type":"Network","curve_type":"secp256k1","participants":["<device>"],"proposer_id":"<proposer_id>","session_id":"<session_id>","session_type":"dkg","threshold":2,"total":2},"type":"announce_session"}
+
+# session_available (server→client)
+{"session_info":{"coordination_type":"Network","curve_type":"secp256k1","participants":["<device>"],"proposer_id":"<proposer_id>","session_id":"<session_id>","session_type":"dkg","threshold":2,"total":2},"type":"session_available"}

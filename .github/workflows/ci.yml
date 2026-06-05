@@ -52,6 +52,13 @@ jobs:
         run: cargo test -p mpc-wallet-cli --test l3_serve_process --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
+      # L2 wire-frame golden: captures the real signal-server protocol via a
+      # recording proxy and pins its normalized shape (the contract the
+      # extension must match).
+      - name: L2 wire-protocol golden (recording proxy)
+        run: cargo test -p mpc-wallet-cli --test wire_trace --locked -- --ignored --test-threads=1
+        timeout-minutes: 8
+
   extension:
     name: Browser extension tests
     runs-on: ubuntu-latest

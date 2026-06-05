@@ -27,3 +27,6 @@ tempfile = "3.14.0"
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+# Test-only recording WebSocket proxy for the L2 wire-frame golden.
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.31"

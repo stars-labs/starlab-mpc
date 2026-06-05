@@ -316,10 +316,11 @@ placeholders, collapses `participants` to `["<device>"]`, keeps every structural
 enum/numeric field literal) and `tests/event_contract.rs` pins all 13 `CliEvent`
 variants against `tests/fixtures/event_contract.golden.jsonl`. Deterministic and
 offline, so it runs in the fast CI lane; `BLESS=1` regenerates after a reviewed
-change. The **wire-frame** half (1) — capturing the on-the-wire `announce_session`/
-`session_available`/`relay` sequences via a `--trace` tee on `serve`/`simulate` —
-is still pending; `normalize_event`'s redaction approach is the reusable basis for
-it, and the same normal form is what the L4 oracle will diff the extension against.
+change. The **wire-frame** half (1) is also landed — `tests/wire_trace.rs` captures the
+on-the-wire `announce_session`/`session_available`/`relay` frames via a test-only
+recording WebSocket proxy (rather than a `--trace` tee, which would have needed WS-layer
+instrumentation) and pins the normalized type vocabulary + session-discovery frame shapes.
+The same normal form is what the L4 oracle will diff the extension against.
 
 ### 5.3 L3 — Cross-client interop (CLI as automated peer)
 
@@ -563,10 +564,15 @@ Each phase is independently mergeable and leaves the tree green.
   (2-of-2/2-of-3/3-of-3/3-of-5/2-of-4, secp256k1 + ed25519), signing (threshold + quorum
   subset, secp256k1 + ed25519 + hex), LIFE-1/3/4, ERR-1/4. `session_announced` (#7.1)
   added. Wired into the CI e2e job.
-- **Phase 2 — L2 goldens.** ◑ **Partial.** Event-contract golden + normalizer
+- **Phase 2 — L2 goldens.** ✅ **Done.** Event-contract golden + normalizer
   (`src/trace.rs`, `tests/event_contract.rs`) and the ETH/BTC/SOL address goldens
-  (`bridge.rs`) are done and in the fast lane. The **wire-frame `--trace` capture** (#7.2)
-  is still pending (needs WS-layer instrumentation).
+  (`bridge.rs`) are in the fast lane. The **wire-frame golden** (#7.2) is also done —
+  `tests/wire_trace.rs` captures the real signal-server protocol via a test-only recording
+  WebSocket proxy (no core instrumentation needed: clients are pointed at the proxy via
+  `SimulateOpts.signal_url`), and pins the normalized type vocabulary + `announce_session`/
+  `session_available` shapes in `tests/fixtures/dkg_wire_protocol.golden.txt`. Stable
+  across runs; `BLESS=1` regenerates. This is the wire contract the L4 oracle diffs the
+  extension against.
 - **Phase 3 — ed25519 runner (#7.3).** ✅ **Done.** `spawn_ed25519`; DKG-5 + SIG-4 pass;
   Solana address golden landed.
 - **L3 foundation + tests.** ✅ **Done (beyond the original plan).**
