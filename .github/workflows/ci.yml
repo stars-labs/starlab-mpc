@@ -55,9 +55,9 @@ jobs:
       # L2 wire-frame golden: captures the real signal-server protocol via a
       # recording proxy and pins its normalized shape (the contract the
       # extension must match).
-      - name: L2 wire-protocol golden (recording proxy)
+      - name: L2 wire-protocol golden (recording proxy; DKG + signing)
         run: cargo test -p mpc-wallet-cli --test wire_trace --locked -- --ignored --test-threads=1
-        timeout-minutes: 8
+        timeout-minutes: 10
 
   extension:
     name: Browser extension tests

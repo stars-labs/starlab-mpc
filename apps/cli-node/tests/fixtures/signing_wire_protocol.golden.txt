@@ -1,0 +1,7 @@
+# Signing wire-protocol contract (normalized)
+
+# announce_session signing (client→server)
+{"session_info":{"blockchain":"secp256k1","coordination_type":"Network","curve_type":"secp256k1","group_public_key":"<group_public_key>","participants":["<device>"],"proposer_id":"<proposer_id>","session_id":"<session_id>","session_type":"signing","signing_message_hex":"<signing_message_hex>","threshold":2,"total":2,"wallet_name":"<wallet_name>"},"type":"announce_session"}
+
+# session_available signing (server→client)
+{"session_info":{"blockchain":"secp256k1","coordination_type":"Network","curve_type":"secp256k1","group_public_key":"<group_public_key>","participants":["<device>"],"proposer_id":"<proposer_id>","session_id":"<session_id>","session_type":"signing","signing_message_hex":"<signing_message_hex>","threshold":2,"total":2,"wallet_name":"<wallet_name>"},"type":"session_available"}

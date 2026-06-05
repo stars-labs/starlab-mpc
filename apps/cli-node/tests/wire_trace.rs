@@ -113,6 +113,7 @@ fn redact(v: &mut serde_json::Value) {
         "proposer_id",
         "group_public_key",
         "signing_message_hex",
+        "wallet_name",
         "device_id",
         "from",
         "to",
@@ -152,9 +153,109 @@ fn first_shape(frames: &[String], dir: char, ty: &str) -> Option<String> {
     None
 }
 
+/// First frame of `dir`+`ty` whose `session_info.session_type == sess_type`,
+/// normalized. Distinguishes the DKG vs signing `announce_session` (which share
+/// the `announce_session` message type but differ in `session_type`).
+fn shape_with_session_type(
+    frames: &[String],
+    dir: char,
+    ty: &str,
+    sess_type: &str,
+) -> Option<String> {
+    for f in frames {
+        let (d, body) = f.split_at(2);
+        if !d.starts_with(dir) {
+            continue;
+        }
+        let Ok(mut v) = serde_json::from_str::<serde_json::Value>(body) else {
+            continue;
+        };
+        let is_type = v.get("type").and_then(|t| t.as_str()) == Some(ty);
+        let is_sess = v
+            .get("session_info")
+            .and_then(|s| s.get("session_type"))
+            .and_then(|t| t.as_str())
+            == Some(sess_type);
+        if is_type && is_sess {
+            redact(&mut v);
+            return Some(serde_json::to_string(&v).unwrap());
+        }
+    }
+    None
+}
+
 fn golden_path() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/dkg_wire_protocol.golden.txt")
+}
+
+fn signing_golden_path() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/signing_wire_protocol.golden.txt")
+}
+
+/// Run DKG-then-sign with all traffic through the recording proxy.
+async fn capture_signing_frames(nodes: usize, threshold: u16) -> Vec<String> {
+    let server = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+    let s_port = server.local_addr().unwrap().port();
+    tokio::spawn(webrtc_signal_server::run(server));
+    let (proxy_url, log) = spawn_record_proxy(format!("ws://127.0.0.1:{s_port}")).await;
+
+    let r = mpc_wallet_cli::simulate::run_signing_simulation(
+        SimulateOpts {
+            nodes,
+            threshold,
+            curve: "secp256k1".into(),
+            signal_url: Some(proxy_url),
+            timeout_secs: 120,
+        },
+        "wire-trace signing payload",
+    )
+    .await
+    .expect("signing through proxy");
+    assert!(r.verified, "signing did not verify through the proxy");
+
+    let frames = log.lock().unwrap().clone();
+    frames
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+signing over loopback; run with --ignored"]
+async fn signing_wire_protocol_matches_golden() {
+    let frames = capture_signing_frames(2, 2).await;
+    assert!(!frames.is_empty(), "no wire frames captured");
+
+    // The signing-typed announce + its server rebroadcast — these carry the
+    // extension-critical fields (wallet_name, group_public_key, blockchain,
+    // signing_message_hex) that session-parse.ts must handle.
+    let announce = shape_with_session_type(&frames, 'C', "announce_session", "signing")
+        .expect("a signing announce_session frame");
+    let available = shape_with_session_type(&frames, 'S', "session_available", "signing")
+        .expect("a signing session_available frame");
+
+    let actual = format!(
+        "# Signing wire-protocol contract (normalized)\n\n# announce_session signing (client→server)\n{}\n\n# session_available signing (server→client)\n{}\n",
+        announce, available,
+    );
+
+    let path = signing_golden_path();
+    if std::env::var("BLESS").is_ok() {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &actual).unwrap();
+        eprintln!("blessed signing wire golden at {}", path.display());
+        return;
+    }
+    let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+        panic!(
+            "missing signing wire golden {} — generate with BLESS=1 cargo test -p mpc-wallet-cli --test wire_trace -- --ignored",
+            path.display()
+        )
+    });
+    assert_eq!(
+        actual, expected,
+        "signing wire protocol drifted from golden. If intended, regenerate with BLESS=1 \
+         and review (this is the signing contract the extension must match)."
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
