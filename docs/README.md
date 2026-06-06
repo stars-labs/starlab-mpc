@@ -7,6 +7,12 @@ workspace member.
 
 ## Contents
 
+- [`LIVE_MPC_DEMO.md`](LIVE_MPC_DEMO.md) — **run the live, independently
+  verifiable MPC demo** for investors: raw `mpc-wallet-cli` commands across
+  three machines (ed25519), with the signature verified by an *external* tool
+  (Node/Python/OpenSSL) and the key shown as a real Solana address. Includes
+  talking points, the "one device can't sign alone" proof, fallbacks, and
+  troubleshooting.
 - [`MONOREPO_ARCHITECTURE.md`](MONOREPO_ARCHITECTURE.md) — workspace
   layout, how the Rust + Bun workspaces fit together, build order.
 - [`MPC_WALLET_TECHNICAL_DOCUMENTATION.md`](MPC_WALLET_TECHNICAL_DOCUMENTATION.md)
