@@ -328,12 +328,13 @@
                 class="input flex-1 text-xs"
                 placeholder="strong room id (shared)"
                 bind:value={signalRoom}
+                data-testid="room-input"
             />
             <Button variant="ghost" size="sm" on:click={genRoom}>Generate</Button>
             <Button size="sm" on:click={saveRoom}>Save</Button>
         </div>
         {#if roomStatus}
-            <span class="text-xs text-muted">{roomStatus}</span>
+            <span class="text-xs text-muted" data-testid="room-status">{roomStatus}</span>
         {/if}
     </div>
 

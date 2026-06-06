@@ -118,12 +118,18 @@ def main():
                     send({"cmd": "join_session", "session_id": sid,
                           "password": password})
             elif kind == "dkg_complete":
+                gk = ev.get("group_public_key", "")
                 log(node, f"✅ DKG COMPLETE wallet={ev.get('wallet_id')} "
-                          f"addr={ev.get('address')} "
-                          f"group_key={ev.get('group_public_key','')[:16]}…")
+                          f"addr={ev.get('address')} group_key={gk[:16]}…")
+                # Machine-parseable line for harnesses (group key is public).
+                print(f"RESULT {node} dkg_complete "
+                      f"{ev.get('wallet_id')} {ev.get('address')} {gk}",
+                      flush=True)
             elif kind == "signature_complete":
-                log(node, f"✅ SIGNATURE COMPLETE "
-                          f"sig={ev.get('signature','')[:24]}…")
+                sig = ev.get("signature", "")
+                log(node, f"✅ SIGNATURE COMPLETE sig={sig[:24]}…")
+                print(f"RESULT {node} signature_complete "
+                      f"{ev.get('message_hash','')} {sig}", flush=True)
             elif kind == "signing_request":
                 log(node, f"signing request for {ev.get('wallet')} "
                           f"(auto-approve handles it)")
