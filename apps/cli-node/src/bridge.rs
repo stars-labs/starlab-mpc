@@ -62,16 +62,31 @@ impl Bridge {
                 Message::DKGFinalized {
                     wallet_id,
                     group_pubkey_hex,
+                    curve_type,
                     addresses,
-                    ..
                 } => {
+                    // Use the curve's canonical primary address (ed25519 →
+                    // Solana base58, secp256k1 → Ethereum) instead of
+                    // `addresses.first()`: the source `addresses` vec is built
+                    // by iterating a HashMap of compatible chains, so its order
+                    // is non-deterministic and could surface e.g. a Sui/Aptos
+                    // 0x-hex address for an ed25519 wallet (#43). Fall back to
+                    // the first entry only if canonical derivation fails.
+                    let address = {
+                        let primary = derive_address(group_pubkey_hex, curve_type);
+                        if primary.is_empty() {
+                            addresses
+                                .first()
+                                .map(|(_chain, addr)| addr.clone())
+                                .unwrap_or_default()
+                        } else {
+                            primary
+                        }
+                    };
                     events.push(CliEvent::DkgComplete {
                         correlates: None, // the serve layer stamps the create-cmd id
                         wallet_id: wallet_id.clone(),
-                        address: addresses
-                            .first()
-                            .map(|(_chain, addr)| addr.clone())
-                            .unwrap_or_default(),
+                        address,
                         group_public_key: group_pubkey_hex.clone(),
                     });
                 }
@@ -306,6 +321,40 @@ mod tests {
         assert_eq!(done.0, "wallet-ab12");
         assert_eq!(done.1, "0xabc123");
         assert_eq!(done.2, "deadbeef");
+    }
+
+    #[test]
+    fn dkg_complete_reports_canonical_solana_address_for_ed25519() {
+        // Regression for #43: the source `addresses` vec is built by iterating a
+        // HashMap of compatible chains, so a 0x-hex Sui/Aptos address can land
+        // first. DkgComplete must still report the canonical Solana base58
+        // derived from the group key, never the 0x one.
+        let mut b = Bridge::new();
+        let model = Model::new("d".to_string());
+        let _ = b.on_sync(&model, None);
+        let zeros = "0".repeat(64); // valid 32-byte all-zero ed25519 key
+        let msg = Message::DKGFinalized {
+            wallet_id: "wallet-ed".to_string(),
+            group_pubkey_hex: zeros.clone(),
+            curve_type: "ed25519".to_string(),
+            addresses: vec![
+                ("sui".to_string(), "0xdeadbeefcafe".to_string()), // first, but wrong
+                ("solana".to_string(), "11111111111111111111111111111111".to_string()),
+            ],
+        };
+        let addr = b
+            .on_sync(&model, Some(&msg))
+            .iter()
+            .find_map(|e| match e {
+                CliEvent::DkgComplete { address, .. } => Some(address.clone()),
+                _ => None,
+            })
+            .expect("dkg_complete emitted");
+        assert!(!addr.starts_with("0x"), "ed25519 must not report a 0x address: {addr}");
+        assert_eq!(
+            addr, "11111111111111111111111111111111",
+            "should be the Solana base58 of the all-zero group key"
+        );
     }
 
     #[test]
