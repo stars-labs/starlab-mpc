@@ -28,6 +28,11 @@ workspace member.
   — which chains can actually *verify* a FROST (Schnorr) signature,
   and the sharp EVM-EOA exception (standard Ethereum EOAs verify
   ECDSA → need a smart-contract account).
+- [`RECOVERY_AND_RESHARING.md`](RECOVERY_AND_RESHARING.md) — "what if a
+  device is lost or stolen?" — threat model, recovery flows, and the
+  design for share refresh/resharing (same address, fresh shares, drop a
+  lost device) built on `frost-core::keys::refresh`. Investor talking
+  points included.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code-of-conduct, branching
   model, commit format, PR guidelines.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history.
