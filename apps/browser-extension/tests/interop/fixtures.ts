@@ -25,12 +25,17 @@ export const test = base.extend<ExtFixtures>({
         `Built extension not found at ${EXT_PATH}. Run \`bun run build\` first.`,
       );
     }
+    // Use a system Chrome when PLAYWRIGHT_CHROME_PATH is set (e.g. Nix/CI where
+    // Playwright's bundled chromium can't resolve system libs); else bundled.
+    const executablePath = process.env.PLAYWRIGHT_CHROME_PATH || undefined;
     const context = await chromium.launchPersistentContext("", {
       headless: false,
+      executablePath,
       args: [
         `--disable-extensions-except=${EXT_PATH}`,
         `--load-extension=${EXT_PATH}`,
         "--no-first-run",
+        "--no-sandbox",
       ],
     });
     await use(context);
