@@ -21,7 +21,11 @@ async fn main() -> Result<()> {
     let window = MainWindow::new()?;
     
     // Set initial device ID
-    let device_id = "native-node-001".to_string();
+    // Device id must be UNIQUE per room (a duplicate collides on the signal
+    // server and breaks the mesh). Env-configurable so multiple native
+    // instances / devices don't all share "native-node-001".
+    let device_id =
+        std::env::var("MPC_DEVICE_ID").unwrap_or_else(|_| "native-node-001".to_string());
     let app_state = window.global::<AppState>();
     app_state.set_device_id(device_id.clone().into());
 
@@ -31,8 +35,25 @@ async fn main() -> Result<()> {
         "{}/.frost_keystore",
         std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
     );
-    // Default signal server (matches the TUI default + browser extension).
-    let signal_url = "wss://panda.qzz.io".to_string();
+    // Signal server (matches the TUI default + browser extension). Both are
+    // env-configurable so native can join a hosted multi-tenant room: the
+    // hosted worker REQUIRES a strong ?room=<id> (#31), so set MPC_ROOM (or put
+    // it directly in MPC_SIGNAL_SERVER). Without a room the hosted worker
+    // rejects the connection; a local standalone server needs no room.
+    let signal_base =
+        std::env::var("MPC_SIGNAL_SERVER").unwrap_or_else(|_| "wss://panda.qzz.io".to_string());
+    let signal_url = match std::env::var("MPC_ROOM") {
+        Ok(room) if !room.is_empty() && !signal_base.contains("room=") => {
+            if signal_base.contains('?') {
+                format!("{signal_base}&room={room}")
+            } else if signal_base.splitn(2, "://").nth(1).unwrap_or(&signal_base).contains('/') {
+                format!("{signal_base}?room={room}")
+            } else {
+                format!("{signal_base}/?room={room}")
+            }
+        }
+        _ => signal_base,
+    };
 
     // Create core adapter with shared logic (real headless Elm backend).
     let adapter = Arc::new(CoreAdapter::new(
