@@ -41,14 +41,15 @@ mix of them can participate in one ceremony** (e.g. 1 extension + 2 CLI).
 |---|---|---|---|---|
 | Form | JSONL / one-shot commands | terminal UI | desktop window | browser popup + dApp |
 | Best for | automation, servers, scripts | power users, **offline/air-gap** | desktop users | everyday web3 / dApps |
-| Curves | secp256k1 + ed25519 | secp256k1 + ed25519 | **secp256k1 only** (today) | secp256k1 + ed25519 |
+| Curves | secp256k1 + ed25519 | secp256k1 + ed25519 | secp256k1 + ed25519 (`MPC_CURVE`, one per launch) | secp256k1 + ed25519 |
 | Signal server | `--signal-server` | `--signal-server` | `MPC_SIGNAL_SERVER` env | Settings ⚙ |
 | Room | `--room` | `--room` | `MPC_ROOM` env | Settings ⚙ ("Signal server room") |
 | Device id | `--device-id` | `--device-id` (default: hostname) | `MPC_DEVICE_ID` env | auto |
 | Keystore | `--keystore` | `~/.frost_keystore` | `~/.frost_keystore` | browser storage |
 
-> Native is currently **secp256k1-only** (Ethereum-family + Bitcoin; no Solana
-> yet) and configured via env vars. CLI/TUI/extension support both curves.
+> Native is configured via env vars and runs **one curve per launch**
+> (`MPC_CURVE=secp256k1` default, or `ed25519`) — like the CLI `serve`. Launch it
+> again with the other curve to use the other chain family.
 
 ---
 
@@ -112,6 +113,7 @@ cargo run --release --bin mpc-wallet-tui -p tui-node -- \
 ```bash
 MPC_DEVICE_ID=alice MPC_ROOM="$ROOM" \
   MPC_SIGNAL_SERVER=wss://panda.qzz.io \
+  MPC_CURVE=secp256k1 \                            # or ed25519 for Solana/Sui/Aptos/NEAR
   cargo run --release -p mpc-wallet-native        # needs `nix develop` for graphics
 ```
 
@@ -166,8 +168,9 @@ When all three have joined, DKG runs (seconds). Every participant ends with the
 4. When the group is complete, DKG runs; all screens show the same address.
 
 ### Native
-Launch with `MPC_DEVICE_ID`/`MPC_ROOM`/`MPC_SIGNAL_SERVER` set; use the window's
-Create/Join controls. (secp256k1 wallets only.)
+Launch with `MPC_DEVICE_ID`/`MPC_ROOM`/`MPC_SIGNAL_SERVER`/`MPC_CURVE` set; use
+the window's Create/Join controls. The launch `MPC_CURVE` fixes the wallet's
+curve (secp256k1 ⇒ EVM/BTC, ed25519 ⇒ Solana-family).
 
 ### Extension
 1. Set the room (§5). 2. **Create wallet** (popup) → pick threshold/total → set a
@@ -293,8 +296,8 @@ mpc-wallet-cli simulate --nodes 3 --threshold 2 --sign hi [--signal-server wss:/
 # TUI
 mpc-wallet-tui --device-id <id> --signal-server wss://panda.qzz.io --room "$ROOM" [--offline]
 
-# Native
-MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io cargo run --release -p mpc-wallet-native
+# Native (MPC_CURVE=secp256k1|ed25519, one curve per launch)
+MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CURVE=secp256k1 cargo run --release -p mpc-wallet-native
 
 # Extension: ⚙ Settings → Signal server room → Generate/paste "$ROOM" → Save → reopen popup
 ```

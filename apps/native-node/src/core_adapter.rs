@@ -12,7 +12,7 @@ use tui_node::core::{
     wallet_manager::WalletManager,
     CoreState, UICallback, WalletInfo,
 };
-use tui_node::elm::headless::spawn_secp256k1;
+use tui_node::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use tui_node::elm::model::{WalletConfig, WalletMode};
 use tui_node::elm::{Message, Model};
 
@@ -87,36 +87,43 @@ impl CoreAdapter {
     /// Create new core adapter with native UI callback + a real headless
     /// Elm backend. `device_id`/`keystore_path`/`signal_url` configure the
     /// runner. Must be called from within a Tokio runtime.
+    /// `curve` selects the runner's ciphersuite for this launch:
+    /// `"ed25519"` (Solana/Sui/Aptos/NEAR) or anything else ⇒ secp256k1
+    /// (Ethereum-family + Bitcoin). Like the CLI `serve`, a single native
+    /// instance is one curve; launch again with a different curve for the other
+    /// family.
     pub fn new(
         window: Weak<MainWindow>,
         device_id: String,
         keystore_path: String,
         signal_url: String,
+        curve: String,
     ) -> Self {
         let state = Arc::new(CoreState::new());
         let ui_callback: Arc<dyn UICallback> = Arc::new(NativeUICallback::new(window));
 
         // on_sync: mirror the runner's model into the Slint UI after every
         // message. Reuses NativeUICallback's Slint conversions; the async
-        // pushes are spawned since on_sync itself is synchronous.
+        // pushes are spawned since on_sync itself is synchronous. Curve-agnostic
+        // (operates on Model), so it's shared by both spawn fns below.
         let cb_for_sync = ui_callback.clone();
-        let runner_tx = spawn_secp256k1(
-            device_id.clone(),
-            keystore_path,
-            signal_url,
-            move |model: &Model, _msg| {
-                let cb = cb_for_sync.clone();
-                let wallets = model_wallets(model);
-                let connected = model.network_state.connected;
-                let dkg_active = model.active_session.is_some();
-                tokio::spawn(async move {
-                    cb.update_wallets(wallets).await;
-                    cb.update_connection_status(connected, false).await;
-                    cb.update_dkg_status(dkg_active, 0, if dkg_active { 0.5 } else { 0.0 })
-                        .await;
-                });
-            },
-        );
+        let on_sync = move |model: &Model, _msg: Option<&tui_node::elm::Message>| {
+            let cb = cb_for_sync.clone();
+            let wallets = model_wallets(model);
+            let connected = model.network_state.connected;
+            let dkg_active = model.active_session.is_some();
+            tokio::spawn(async move {
+                cb.update_wallets(wallets).await;
+                cb.update_connection_status(connected, false).await;
+                cb.update_dkg_status(dkg_active, 0, if dkg_active { 0.5 } else { 0.0 })
+                    .await;
+            });
+        };
+        let runner_tx = if curve == "ed25519" {
+            spawn_ed25519(device_id.clone(), keystore_path, signal_url, on_sync)
+        } else {
+            spawn_secp256k1(device_id.clone(), keystore_path, signal_url, on_sync)
+        };
 
         Self {
             connection_manager: Arc::new(ConnectionManager::new(state.clone(), ui_callback.clone())),

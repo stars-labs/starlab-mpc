@@ -55,12 +55,17 @@ async fn main() -> Result<()> {
         _ => signal_base,
     };
 
+    // Ciphersuite for this launch: MPC_CURVE=ed25519 (Solana/Sui/Aptos/NEAR)
+    // or default secp256k1 (Ethereum-family + Bitcoin). One curve per instance.
+    let curve = std::env::var("MPC_CURVE").unwrap_or_else(|_| "secp256k1".to_string());
+
     // Create core adapter with shared logic (real headless Elm backend).
     let adapter = Arc::new(CoreAdapter::new(
         window.as_weak(),
         device_id,
         keystore_path,
         signal_url,
+        curve,
     ));
     
     // Set up UI callbacks
