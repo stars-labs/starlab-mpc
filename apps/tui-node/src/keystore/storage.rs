@@ -138,6 +138,10 @@ impl Keystore {
         // Pass an empty `Vec` on code paths that don't know the
         // list — cold-start signing will degrade gracefully.
         participants: Vec<String>,
+        // Optional user-friendly display name. Stored as metadata.label;
+        // does NOT affect the wallet_id (which stays session-derived so
+        // every participant agrees). `None` → UI falls back to the id.
+        label: Option<String>,
     ) -> Result<String> {
         // Use the wallet name as the wallet ID (for session name convention)
         // Sanitize the name to ensure it's a valid filename
@@ -151,7 +155,7 @@ impl Keystore {
         }
 
         // Create wallet metadata including the participants list.
-        let metadata = WalletMetadata::with_participants(
+        let mut metadata = WalletMetadata::with_participants(
             wallet_id.clone(),
             self.device_id.clone(),
             curve_type.to_string(),
@@ -161,6 +165,10 @@ impl Keystore {
             group_public_key.to_string(),
             participants,
         );
+        // Attach the optional display label (trimmed; empty → None).
+        metadata.label = label
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         // Save the wallet with embedded metadata
         self.save_wallet_file_v2(&wallet_id, key_share_data, password, &metadata)?;
@@ -203,6 +211,7 @@ impl Keystore {
             description,
             participant_index,
             Vec::new(),
+            None, // legacy wrapper has no display label
         )
     }
 
@@ -339,6 +348,7 @@ impl Keystore {
                     let metadata = WalletMetadata {
                         session_id: wallet_info.wallet_id.clone(),
                         device_id: self.device_id.clone(),
+                        label: None, // legacy import: no display label
                         device_name: None, // Deprecated field
                         curve_type: wallet_info.curve_type.clone(),
                         blockchain: wallet_info.blockchain.clone(),
@@ -411,6 +421,7 @@ impl Keystore {
                     let metadata = WalletMetadata {
                         session_id: wallet_info.wallet_id.clone(),
                         device_id: self.device_id.clone(),
+                        label: None, // legacy import: no display label
                         device_name: None, // Deprecated field
                         curve_type: wallet_info.curve_type.clone(),
                         blockchain: wallet_info.blockchain.clone(),
@@ -515,6 +526,7 @@ mod tests {
                 None,
                 1,
                 vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+                None, // no display label in this test
             )
             .expect("create_wallet_multi_chain");
 

@@ -17,6 +17,33 @@ use tuirealm::ratatui::Frame;
 use tuirealm::props::Props;
 use tuirealm::state::{State, StateValue};
 
+/// What ceremony this progress component is rendering. Drives three
+/// pieces of behavior that diverge between DKG and signing:
+///
+/// 1. **Title** — `🔐 DKG Progress - Online Mode` vs
+///    `🖊️ Signing Progress - Online Mode`.
+/// 2. **Expected-other-participants math** — DKG genuinely needs every
+///    party (`total_participants - 1` others), but a t-of-n signing
+///    ceremony only needs `threshold - 1` others to co-sign. Without
+///    this distinction the screen waited on all 3 peers in a 2-of-3
+///    signing flow, which would never advance.
+/// 3. **Optional chain row** — only signing has a meaningful chain
+///    label (joiners pick it up from
+///    `SessionType::Signing.blockchain`; creators fall back to
+///    `wallet_state.curve_type`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Ceremony {
+    #[default]
+    Dkg,
+    Signing {
+        /// Blockchain or curve identifier rendered in the header
+        /// ("ethereum", "secp256k1", ...). `None` only on the rare
+        /// path where neither the session nor the wallet has any
+        /// curve hint, which mostly never happens at runtime.
+        chain: Option<String>,
+    },
+}
+
 /// Participant status in the DKG process
 #[derive(Debug, Clone)]
 pub struct ParticipantInfo {
@@ -56,11 +83,12 @@ pub struct DKGProgressComponent {
     websocket_connected: bool, // Track WebSocket connection status
     mesh_ready_count: usize,  // Track how many participants are mesh-ready
     all_data_channels_open: bool, // Track if all data channels are open
-    /// What ceremony this progress bar is tracking — used in the
-    /// title line. `"🔐 DKG"` for a DKG run, `"🖊️  Signing"` for a
-    /// signing ceremony. Reuses the same layout + participant mesh
-    /// rendering without a separate component file.
-    ceremony_label: &'static str,
+    /// What ceremony this progress bar is tracking — drives the title,
+    /// the chain row in the header, and the "expected other
+    /// participants" denominator (total-1 for DKG, threshold-1 for
+    /// signing). Reuses the same layout + participant mesh rendering
+    /// without a separate component file.
+    ceremony: Ceremony,
 }
 
 impl Default for DKGProgressComponent {
@@ -85,16 +113,41 @@ impl DKGProgressComponent {
             websocket_connected: false, // Default to disconnected
             mesh_ready_count: 0,
             all_data_channels_open: false,
-            ceremony_label: "🔐 DKG",
+            ceremony: Ceremony::default(),
         }
     }
 
-    /// Override the default DKG label for this mount — used by the
-    /// signing flow's mount site so the title reads
-    /// `🖊️  Signing Progress - Online Mode` instead of the
-    /// ceremony-mismatched `🔐 DKG Progress`.
-    pub fn set_ceremony_label(&mut self, label: &'static str) {
-        self.ceremony_label = label;
+    /// Override the default `Ceremony::Dkg` for this mount — used by
+    /// the signing flow's mount site so the title reads
+    /// `🖊️ Signing Progress - Online Mode`, the chain row appears in
+    /// the header, and the participant-expectation math switches from
+    /// `total - 1` to `threshold - 1` (a 2-of-3 signing only needs 1
+    /// other co-signer; without this swap the screen would forever
+    /// wait on the 3rd peer that signing intentionally does not need).
+    pub fn set_ceremony(&mut self, ceremony: Ceremony) {
+        self.ceremony = ceremony;
+    }
+
+    /// How many OTHER participants this ceremony needs. DKG requires
+    /// every party (`total - 1` others); a t-of-n signing only needs
+    /// `threshold - 1` others. Single source of truth — used for the
+    /// P2P status line, the placeholder roster, the mesh-ready
+    /// status line, and the all-channels-open check inside
+    /// `update_webrtc_status`.
+    fn expected_other_participants(&self) -> usize {
+        let denom = match self.ceremony {
+            Ceremony::Dkg => self.total_participants,
+            Ceremony::Signing { .. } => self.threshold,
+        };
+        denom.saturating_sub(1) as usize
+    }
+
+    /// Title text for the outer block — branches on ceremony.
+    fn ceremony_title(&self) -> &'static str {
+        match self.ceremony {
+            Ceremony::Dkg => "🔐 DKG",
+            Ceremony::Signing { .. } => "🖊️  Signing",
+        }
     }
     
     /// Set WebSocket connection status
@@ -167,11 +220,13 @@ impl DKGProgressComponent {
             });
         }
 
-        // Check if all data channels are open (comparing against other participants only)
-        let expected_other_participants = self.total_participants.saturating_sub(1) as usize;
+        // Check if all data channels are open (comparing against the
+        // ceremony-specific other-participant count: total-1 for DKG,
+        // threshold-1 for signing).
+        let expected_other_participants = self.expected_other_participants();
         self.all_data_channels_open = self.participants.len() >= expected_other_participants &&
             self.participants.iter().all(|p| p.data_channel_open);
-        
+
         // Update mesh_ready_count based on actual data channels open
         // Mesh is ready when we have all expected participants with open data channels
         if self.all_data_channels_open && self.participants.len() >= expected_other_participants {
@@ -282,7 +337,7 @@ impl Component for DKGProgressComponent {
         }
         
         // Main container — title reflects the ceremony (DKG or signing).
-        let title_text = format!(" {} Progress - Online Mode ", self.ceremony_label);
+        let title_text = format!(" {} Progress - Online Mode ", self.ceremony_title());
         let block = Block::default()
             .title(title_text)
             .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
@@ -404,17 +459,29 @@ impl DKGProgressComponent {
             .alignment(Alignment::Center);
         frame.render_widget(session_para, chunks[0]);
         
-        // Configuration
-        let config_text = vec![
-            Line::from(vec![
-                Span::styled("Configuration: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{}-of-{} Threshold", self.threshold, self.total_participants),
-                    Style::default().fg(Color::Cyan)
-                ),
-            ]),
+        // Configuration row. For signing we suffix the resolved chain
+        // identifier so the user can sanity-check what they're about
+        // to put a signature on; DKG has no chain at this point in
+        // the flow, so the row is just the threshold.
+        let mut config_spans = vec![
+            Span::styled("Configuration: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{}-of-{} Threshold", self.threshold, self.total_participants),
+                Style::default().fg(Color::Cyan),
+            ),
         ];
-        let config_para = Paragraph::new(config_text)
+        if let Ceremony::Signing { chain: Some(ref chain) } = self.ceremony {
+            config_spans.push(Span::raw("  |  "));
+            config_spans.push(Span::styled(
+                "Chain: ",
+                Style::default().fg(Color::Gray),
+            ));
+            config_spans.push(Span::styled(
+                chain.clone(),
+                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+            ));
+        }
+        let config_para = Paragraph::new(vec![Line::from(config_spans)])
             .alignment(Alignment::Center);
         frame.render_widget(config_para, chunks[1]);
         
@@ -435,9 +502,11 @@ impl DKGProgressComponent {
         // Participants Count with WebRTC details
         let data_channels_open = self.participants.iter().filter(|p| p.data_channel_open).count();
         let webrtc_connected = self.participants.iter().filter(|p| p.webrtc_connected).count();
-        
-        // total_participants includes self, but we only track connections to OTHER participants
-        let other_participants = self.total_participants.saturating_sub(1);
+
+        // For DKG we need every party (total - 1 others); for signing
+        // only `threshold - 1` others. Without this swap a 2-of-3 sign
+        // ceremony would forever read "0/2" when only 1 peer is needed.
+        let other_participants = self.expected_other_participants();
 
         let participants_text = vec![
             Line::from(vec![
@@ -446,7 +515,7 @@ impl DKGProgressComponent {
                     format!("WebRTC: {}/{} | Channels: {}/{} | Mesh: {}/1",
                             webrtc_connected, other_participants,
                             data_channels_open, other_participants,
-                            if self.mesh_ready_count >= other_participants as usize { 1 } else { 0 }),
+                            if self.mesh_ready_count >= other_participants { 1 } else { 0 }),
                     Style::default().fg(if self.all_data_channels_open {
                         Color::Green
                     } else if data_channels_open > 0 {
@@ -538,9 +607,13 @@ impl DKGProgressComponent {
             })
             .collect();
         
-        // Add placeholder slots for missing participants (excluding self)
+        // Add placeholder slots for missing participants (excluding self).
+        // Uses the ceremony-aware count so a 2-of-3 sign run only shows
+        // ONE waiting slot, not two — signing genuinely doesn't need
+        // the third device, and the placeholder text was the most
+        // visible "waiting for participant 2..." misdirection.
         let mut all_items = items;
-        let expected_other_participants = self.total_participants.saturating_sub(1) as usize;
+        let expected_other_participants = self.expected_other_participants();
         for i in self.participants.len()..expected_other_participants {
             all_items.push(ListItem::new(Line::from(vec![
                 Span::raw("  ⏳ "),
@@ -594,9 +667,12 @@ impl DKGProgressComponent {
                         }
                     },
                     DKGRound::WaitingForParticipants => {
-                        let expected_other_participants = self.total_participants.saturating_sub(1) as usize;
+                        let expected_other_participants = self.expected_other_participants();
                         if self.mesh_ready_count == expected_other_participants {
-                            "🟢 Mesh fully connected! Starting DKG...".to_string()
+                            match self.ceremony {
+                                Ceremony::Dkg => "🟢 Mesh fully connected! Starting DKG...".to_string(),
+                                Ceremony::Signing { .. } => "🟢 Mesh ready! Starting signing ceremony...".to_string(),
+                            }
                         } else {
                             format!("⏳ Mesh formation: {}/{} ready", self.mesh_ready_count, expected_other_participants)
                         }
@@ -715,12 +791,90 @@ impl MpcWalletComponent for DKGProgressComponent {
     fn id(&self) -> Id {
         Id::DKGProgress
     }
-    
+
     fn is_visible(&self) -> bool {
         true
     }
-    
+
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dkg_expects_total_minus_one_others() {
+        // 2-of-3 DKG: still needs all 3 parties (= 2 others) to
+        // generate the key share.
+        let component = DKGProgressComponent::new("session".into(), 3, 2);
+        assert_eq!(component.expected_other_participants(), 2);
+        assert_eq!(component.ceremony_title(), "🔐 DKG");
+    }
+
+    #[test]
+    fn signing_expects_threshold_minus_one_others() {
+        // The reported bug: a 2-of-3 sign run shouldn't wait on a
+        // third peer. Threshold = 2 → 1 other co-signer required.
+        let mut component = DKGProgressComponent::new("session".into(), 3, 2);
+        component.set_ceremony(Ceremony::Signing { chain: None });
+        assert_eq!(
+            component.expected_other_participants(),
+            1,
+            "2-of-3 signing must wait on threshold-1 = 1 peer, not total-1 = 2",
+        );
+        assert_eq!(component.ceremony_title(), "🖊️  Signing");
+    }
+
+    #[test]
+    fn signing_carries_chain_label_through_ceremony() {
+        let mut component = DKGProgressComponent::new("session".into(), 3, 2);
+        component.set_ceremony(Ceremony::Signing {
+            chain: Some("ethereum".into()),
+        });
+        match &component.ceremony {
+            Ceremony::Signing { chain } => assert_eq!(chain.as_deref(), Some("ethereum")),
+            other => panic!("expected Signing ceremony, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn placeholder_count_uses_threshold_for_signing() {
+        // Indirect check: when no peers have been added, the
+        // expected-others count drives both the placeholder roster
+        // length AND the P2P denominator. We assert the count itself
+        // here since render_participants reads from a Frame we don't
+        // have in unit tests.
+        let mut component = DKGProgressComponent::new("session".into(), 5, 3);
+        assert_eq!(
+            component.expected_other_participants(),
+            4,
+            "DKG with total=5 wants 4 others",
+        );
+        component.set_ceremony(Ceremony::Signing { chain: None });
+        assert_eq!(
+            component.expected_other_participants(),
+            2,
+            "3-of-5 signing wants threshold-1 = 2 others",
+        );
+    }
+
+    #[test]
+    fn larger_threshold_signing_correctly_scales() {
+        // 4-of-7: signing needs 3 others. Confirms the formula isn't
+        // accidentally hard-coded to 1 for the 2-of-3 case.
+        let mut component = DKGProgressComponent::new("session".into(), 7, 4);
+        component.set_ceremony(Ceremony::Signing { chain: None });
+        assert_eq!(component.expected_other_participants(), 3);
+    }
+
+    #[test]
+    fn one_of_one_signing_needs_zero_other_participants() {
+        // Edge case: solo signing, no peer mesh required.
+        let mut component = DKGProgressComponent::new("session".into(), 1, 1);
+        component.set_ceremony(Ceremony::Signing { chain: None });
+        assert_eq!(component.expected_other_participants(), 0);
     }
 }

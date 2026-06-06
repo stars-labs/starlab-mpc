@@ -1,8 +1,43 @@
 # WebRTC Signal Server — Cloudflare Worker
 
 Rust-over-WASM Cloudflare Worker backing the signal-server side of
-the MPC Wallet. Uses a single `Devices` Durable Object class to hold
+the MPC Wallet. Uses the `Devices` Durable Object class to hold
 connected-device + session-announcement state.
+
+## Multi-tenant rooms (Option 3, #31)
+
+Every WebSocket connection is routed to a Durable Object instance
+**named after its room**: the `fetch` handler reads `?room=<id>` from the
+URL and calls `Devices.id_from_name(room)`. Each room is a separate DO
+instance with its **own storage and its own set of connections**, so
+tenants are **fully isolated** — a device in room A never sees room B's
+devices, session announcements, or relays, with no per-message filtering.
+
+**The room name IS the tenant boundary, so it is mandatory and must be
+strong.** There is intentionally **no backward-compatible default** (no
+`"global"` bucket): a connection with a missing or weak room is
+**rejected with HTTP 400**. A room must sanitize to **≥ 16 chars** of
+`[A-Za-z0-9_-]` (≤ 64). This stops two unrelated tenants from colliding
+on a guessable name like `acme`/`test` — use a high-entropy id (UUID /
+128-bit token).
+
+```
+wss://panda.qzz.io/?room=7f3a9c2e-4b1d-4e8a-9c2f-001122334455   # ok (UUID)
+wss://panda.qzz.io/?room=acme    # ✗ rejected (too short / guessable)
+wss://panda.qzz.io               # ✗ rejected (no room)
+```
+
+Clients must include a strong room in the signal URL
+(`--signal-server 'wss://panda.qzz.io/?room=<uuid>'` for CLI/TUI, or the
+extension's signal setting). Generate one with `uuidgen` /
+`python3 -c 'import uuid;print(uuid.uuid4())'`; share the **same** URL
+with all participants of a ceremony. Recommended device-id convention
+within a room: `<role>-<n>`. No new DO binding or migration is required
+(same `Devices` class, more instances). See `docs/MULTI_TENANT.md`.
+
+> ⚠️ Breaking: the previous behavior (no room → shared `global`) is gone.
+> Any client still connecting to a bare `wss://panda.qzz.io` will be
+> rejected and must add `?room=<uuid>`.
 
 ## Features
 

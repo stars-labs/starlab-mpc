@@ -1,4 +1,4 @@
-import { ComboBox, Button, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { ComboBox, Button, VerticalBox, HorizontalBox, LineEdit } from "std-widgets.slint";
 
 export struct WalletInfo {
     id: string,
@@ -15,7 +15,7 @@ export component WalletSelector inherits Rectangle {
     in property <bool> has_keystore: false;
     
     callback wallet_changed(int);
-    callback create_wallet();
+    callback create_wallet(string);
     callback import_wallet();
     callback export_wallet();
     
@@ -131,10 +131,15 @@ export component WalletSelector inherits Rectangle {
         HorizontalBox {
             spacing: 8px;
 
+            wallet-name-input := LineEdit {
+                placeholder-text: "Wallet name (optional)";
+                width: 160px;
+            }
+
             Button {
                 text: "Create";
                 enabled: true;
-                clicked => { create_wallet(); }
+                clicked => { create_wallet(wallet-name-input.text); }
             }
             
             Button {

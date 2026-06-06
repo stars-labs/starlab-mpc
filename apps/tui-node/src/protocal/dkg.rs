@@ -257,9 +257,11 @@ pub async fn process_dkg_round1<C>(
     state: Arc<Mutex<AppState<C>>>,
     from_device_id: String,
     package_bytes: Vec<u8>,
-) 
+)
 where
-    C: Ciphersuite + Send + Sync + 'static,
+    // CurveIdentifier flows through to `handle_trigger_dkg_round2`'s
+    // post-part2 re-feed → `process_dkg_round2`.
+    C: Ciphersuite + Send + Sync + 'static + crate::utils::curve_traits::CurveIdentifier,
 {
     let mut guard = state.lock().await;
     
@@ -320,7 +322,9 @@ pub async fn handle_trigger_dkg_round2<C>(
     self_device_id: String,
 )
 where
-    C: Ciphersuite + Send + Sync + 'static,
+    // CurveIdentifier needed because the post-part2 re-feed path calls
+    // `process_dkg_round2` (which derives the curve name for addresses).
+    C: Ciphersuite + Send + Sync + 'static + crate::utils::curve_traits::CurveIdentifier,
 {
     info!("🔁🔁🔁 handle_trigger_dkg_round2 ENTERED for device={}", self_device_id);
 
@@ -478,6 +482,35 @@ where
             Err(e) => warn!("  round2: ❌ send Round2 package to {} failed: {:?}", receiver_device_id, e),
         }
     }
+
+    // Race fix: a peer's Round 2 package can arrive BEFORE our local part2
+    // ran (common on fast/loopback transports). Those packets were buffered
+    // in `process_dkg_round2` without finalizing because our part2 secret
+    // wasn't stored yet. Now that part2 is done, re-feed any buffered
+    // packages so part3 can complete. `process_dkg_round2` re-inserts the
+    // same package (idempotent) and runs part3 once everything is present.
+    let buffered: Vec<(String, Vec<u8>)> = {
+        let guard = state.lock().await;
+        guard
+            .dkg_round2_packages
+            .iter()
+            .filter_map(|(id, pkg)| {
+                let dev = identifier_to_device_id.get(id)?.clone();
+                let bytes = pkg.serialize().ok()?;
+                Some((dev, bytes))
+            })
+            .collect()
+    };
+    if !buffered.is_empty() {
+        info!(
+            "  round2: re-feeding {} buffered round2 package(s) to finalize",
+            buffered.len()
+        );
+        for (dev, bytes) in buffered {
+            process_dkg_round2(state.clone(), dev, bytes).await;
+        }
+    }
+
     info!("🔁 handle_trigger_dkg_round2 RETURNING for device={}", self_device_id);
 }
 
@@ -497,13 +530,20 @@ where
     C: Ciphersuite + Send + Sync + 'static + crate::utils::curve_traits::CurveIdentifier,
 {
     let mut guard = state.lock().await;
-    
-    // Get session to determine sender's identifier  
+
+    // Idempotency: a peer's round2 package can still arrive after we've
+    // already finalized (e.g. the re-feed path below also ran part3).
+    // Re-running part3 is wasteful and would re-emit completion — skip.
+    if matches!(guard.dkg_state, DkgState::Complete) {
+        return;
+    }
+
+    // Get session to determine sender's identifier
     let session = match &guard.session {
         Some(s) => s.clone(),
         None => return,
     };
-    
+
     // Canonical identifiers — see `canonical_identifier` docstring above.
     let my_identifier = match canonical_identifier::<C>(&session.participants, &guard.device_id) {
         Some(id) => id,
@@ -583,7 +623,15 @@ where
                 }
             },
             None => {
-                guard.dkg_state = DkgState::Failed("Missing round 2 secret package".to_string());
+                // Our local part2 hasn't run yet — on fast transports a
+                // peer's round2 can land first. Don't fail: the package is
+                // already buffered in `dkg_round2_packages` above, and
+                // `handle_trigger_dkg_round2` re-feeds buffered packages once
+                // part2 completes, which is when part3 will actually run.
+                info!(
+                    "  round2: all packages in but local part2 not done yet — \
+                     buffering; will finalize after part2"
+                );
                 return;
             }
         };

@@ -490,12 +490,37 @@ where
                     .map(|s| (s.total, s.threshold))
                     .unwrap_or((3, 2));
 
+                // Resolve a chain label for the header. Joiners get the
+                // proposer-supplied `blockchain` from the announce
+                // (`SessionType::Signing`); creators don't have a
+                // session yet of that variant, so fall back to the
+                // running curve type. Either way we surface
+                // *something* — "no chain shown" was the visible
+                // half of this bug report.
+                let chain = self
+                    .model
+                    .active_session
+                    .as_ref()
+                    .and_then(|s| match &s.session_type {
+                        crate::protocal::signal::SessionType::Signing {
+                            blockchain,
+                            ..
+                        } => Some(blockchain.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        let c = self.model.wallet_state.curve_type;
+                        if c.is_empty() { None } else { Some(c.to_string()) }
+                    });
+
                 let mut progress = crate::elm::components::DKGProgressComponent::new(
                     request_id.clone(),
                     total_participants,
                     threshold,
                 );
-                progress.set_ceremony_label("🖊️  Signing");
+                progress.set_ceremony(
+                    crate::elm::components::dkg_progress::Ceremony::Signing { chain },
+                );
                 progress.set_round(self.model.wallet_state.dkg_round.clone());
                 progress.set_websocket_connected(self.model.network_state.connected);
                 if let Some(ref session) = self.model.active_session {

@@ -1,0 +1,32 @@
+[package]
+name = "mpc-wallet-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "mpc-wallet-cli"
+path = "src/main.rs"
+
+[dependencies]
+tui-node = { path = "../tui-node" }
+webrtc-signal-server = { path = "../signal-server/server" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = "1.0"
+hex = "0.4"
+frost-core = { version = "2.2.0", features = ["serde"] }
+frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
+frost-ed25519 = { version = "2.2.0", features = ["serde"] }
+clap = { version = "4.5.21", features = ["derive"] }
+anyhow = "1.0.99"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tempfile = "3.14.0"
+
+[dev-dependencies]
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+# Test-only recording WebSocket proxy for the L2 wire-frame golden.
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.31"

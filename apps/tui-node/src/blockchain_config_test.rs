@@ -41,6 +41,20 @@ mod tests {
     }
     
     #[test]
+    fn test_signing_caveat() {
+        // EVM EOAs verify with ECDSA → FROST Schnorr needs a contract account.
+        for evm in ["ethereum", "bsc", "polygon", "avalanche"] {
+            let c = signing_caveat(evm).expect("EVM chains must carry a caveat");
+            assert!(c.contains("ECDSA"));
+            assert!(c.contains("smart-contract account"));
+        }
+        // Chains that verify Schnorr/Ed25519 natively carry no caveat.
+        for native in ["bitcoin", "solana", "sui", "aptos", "near"] {
+            assert!(signing_caveat(native).is_none(), "{native} should be native");
+        }
+    }
+
+    #[test]
     fn test_curve_type_parsing() {
         assert_eq!(CurveType::from_string("secp256k1"), Some(CurveType::Secp256k1));
         assert_eq!(CurveType::from_string("ed25519"), Some(CurveType::Ed25519));

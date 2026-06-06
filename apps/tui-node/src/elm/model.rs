@@ -79,12 +79,18 @@ impl Model {
 impl WalletState {
     /// Zero-out the PasswordPrompt draft buffers + associated UI state.
     /// Called on every exit from `Screen::PasswordPrompt` (Esc, go_home,
-    /// successful submit) so cleartext never outlives the screen.
+    /// successful submit) so cleartext never outlives the screen. Also
+    /// resets `password_prompt_purpose` so the next push starts from the
+    /// `SetNew` default — the cold-start-sign path explicitly overrides
+    /// this to `Unlock` right before its `push_screen`.
     pub fn clear_password_draft(&mut self) {
         self.password_draft.clear();
         self.confirm_draft.clear();
         self.password_error = None;
         self.password_focus_confirm = false;
+        self.wallet_name_draft.clear();
+        self.wallet_name_focus = false;
+        self.password_prompt_purpose = PasswordPromptPurpose::default();
     }
 
     /// Zero-out the SignTransaction draft. Called on exit + on successful
@@ -119,6 +125,16 @@ pub struct WalletState {
     /// memory any longer than necessary. `None` outside the wallet-creation
     /// window.
     pub pending_password: Option<String>,
+    /// Live input buffer for the optional wallet-name field shown on
+    /// `Screen::PasswordPrompt` in the `SetNew` (wallet-creation) flow.
+    /// Persisted as the keystore's `metadata.label` at finalize time;
+    /// empty → the UI falls back to the deterministic wallet id. Never
+    /// shown in the `Unlock` flow.
+    pub wallet_name_draft: String,
+    /// `true` iff the wallet-name field currently has keyboard focus.
+    /// When set it overrides `password_focus_confirm`. Only meaningful in
+    /// the `SetNew` flow; reset to `false` for `Unlock`.
+    pub wallet_name_focus: bool,
     /// Live input buffer for the password field on `Screen::PasswordPrompt`.
     /// Mutated keystroke-by-keystroke through the `Password*` messages and
     /// cleared the moment `PasswordSubmitDraft` validates — the cleartext
@@ -135,6 +151,15 @@ pub struct WalletState {
     /// the moment the user types anything (stale errors are worse than
     /// none).
     pub password_error: Option<String>,
+    /// Why the `PasswordPrompt` screen is currently mounted.
+    /// Defaults to `SetNew` (creator/joiner DKG paths) and is flipped to
+    /// `Unlock` only by `Message::ConfirmSigningRequest` when a cold-start
+    /// signing flow lands on a wallet whose key share is still on disk.
+    /// Drives both rendering (single field + different copy in `Unlock`)
+    /// and validation (`PasswordSubmitDraft` skips the confirm-match
+    /// check in `Unlock`). Reset to default on every exit from the
+    /// screen via `clear_password_draft`.
+    pub password_prompt_purpose: PasswordPromptPurpose,
     /// Snapshot of the most recently finalised wallet, populated by
     /// `Message::DKGFinalized` and rendered by the `WalletComplete`
     /// screen. We keep this on `WalletState` rather than re-deriving at
@@ -208,6 +233,22 @@ pub struct WalletState {
     /// has landed. Tracks the second ceremony phase; shown on the
     /// progress screen as "✓✓" to differentiate from commit-only.
     pub signing_shares_received: std::collections::HashSet<String>,
+}
+
+/// Discriminator for the three flows that share `Screen::PasswordPrompt`.
+/// `SetNew` covers creator + joiner DKG (collecting a new password to
+/// encrypt this device's freshly-generated key share). `Unlock` covers
+/// cold-start signing, where the wallet exists on disk and the user
+/// must enter the password they originally chose at DKG time.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum PasswordPromptPurpose {
+    /// Two-field "Set + Confirm" flow used by DKG. This is the default
+    /// because the screen has historically only existed for DKG; the
+    /// signing path opted in by setting `Unlock` before its push.
+    #[default]
+    SetNew,
+    /// Single-field unlock flow used by cold-start signing.
+    Unlock,
 }
 
 /// Ephemeral snapshot of a signing request that's awaiting user
@@ -307,6 +348,7 @@ impl std::fmt::Debug for WalletState {
             .field("confirm_draft_len", &self.confirm_draft.len())
             .field("password_focus_confirm", &self.password_focus_confirm)
             .field("password_error", &self.password_error)
+            .field("password_prompt_purpose", &self.password_prompt_purpose)
             .finish()
     }
 }
@@ -329,7 +371,7 @@ impl Default for NetworkState {
         Self {
             connected: false,
             peers: Vec::new(),
-            websocket_url: "wss://xiongchenyu.dpdns.org".to_string(),
+            websocket_url: "wss://panda.qzz.io".to_string(),
             connection_status: ConnectionStatus::Disconnected,
             last_ping: None,
             reconnect_attempts: 0,

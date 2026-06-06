@@ -111,6 +111,31 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
     config
 }
 
+/// Signing-scheme compatibility caveat for a chain, if one applies.
+///
+/// FROST produces **Schnorr** signatures. Bitcoin Taproot and the ed25519
+/// chains verify those natively, but a standard Ethereum-family **EOA**
+/// transaction verifies with **ECDSA** and will reject a Schnorr signature —
+/// EVM use needs a smart-contract account (ERC-4337 / a Schnorr verifier).
+///
+/// This is the single source of truth for that warning so the TUI / native /
+/// CLI surface one consistent message (the extension mirrors it in TS). See
+/// `docs/SIGNATURE_CHAIN_COMPATIBILITY.md`.
+///
+/// Returns `None` when the chain verifies FROST signatures natively.
+pub fn signing_caveat(chain: &str) -> Option<&'static str> {
+    match chain {
+        "ethereum" | "bsc" | "polygon" | "avalanche" => Some(
+            "Threshold-Schnorr wallet: a standard Ethereum-family EOA \
+             transaction verifies with ECDSA and will not accept this \
+             signature. EVM use requires a smart-contract account (ERC-4337 / \
+             a Schnorr-verifier contract). Receiving is fine; spending via a \
+             normal EOA transaction is not supported.",
+        ),
+        _ => None,
+    }
+}
+
 /// Get compatible blockchains for a given curve
 pub fn get_compatible_chains(curve: &CurveType) -> Vec<(&'static str, BlockchainInfo)> {
     let config = get_blockchain_config();
@@ -146,14 +171,46 @@ pub fn generate_address_for_chain(
     match (chain, &curve) {
         // Ethereum-compatible chains with secp256k1
         ("ethereum" | "bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
-            // Use keccak256 hash of the public key for Ethereum-style addresses
+            // Ethereum addresses are keccak256(uncompressed pubkey X‖Y)[12..].
+            // FROST serializes the group verifying key COMPRESSED (33 bytes,
+            // 0x02/0x03 ‖ X), so we MUST decompress first: hashing the
+            // compressed bytes — or, as a previous version did, the 32-byte X
+            // coordinate after stripping the prefix — yields an address that
+            // does NOT correspond to the signing key (e.g. generator G gave the
+            // bogus 0x51cbf46… instead of the canonical 0x7e5f4552…).
+            // `from_sec1_bytes` accepts both compressed (33) and uncompressed
+            // (65) encodings, so this is robust to either input.
+            use k256::elliptic_curve::sec1::ToEncodedPoint;
             use sha3::{Digest, Keccak256};
+            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
+                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
+            let point = pk.to_encoded_point(false); // 0x04 ‖ X ‖ Y
+            let xy = &point.as_bytes()[1..]; // X ‖ Y, 64 bytes
             let mut hasher = Keccak256::new();
-            hasher.update(&group_public_key[1..]); // Skip the first byte (format indicator)
+            hasher.update(xy);
             let hash = hasher.finalize();
             Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
         }
         
+        // Bitcoin native SegWit (P2WPKH) with secp256k1
+        ("bitcoin", CurveType::Secp256k1) => {
+            // P2WPKH = bech32 segwit-v0 of hash160(compressed pubkey), where
+            // hash160 = ripemd160(sha256(pubkey)). P2WPKH mandates the
+            // COMPRESSED pubkey — which is exactly how FROST serializes the
+            // group key — so we hash it as-is (re-compressing via k256 to
+            // normalize in case an uncompressed key is ever passed).
+            use k256::elliptic_curve::sec1::ToEncodedPoint;
+            use ripemd::Ripemd160;
+            use sha2::{Digest as _, Sha256};
+            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
+                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
+            let compressed = pk.to_encoded_point(true); // 0x02/0x03 ‖ X
+            let sha = Sha256::digest(compressed.as_bytes());
+            let h160 = Ripemd160::digest(sha);
+            bech32::segwit::encode_v0(bech32::hrp::BC, &h160)
+                .map_err(|e| format!("bech32 encode failed: {e}"))
+        }
+
         // Solana with ed25519
         ("solana", CurveType::Ed25519) => {
             // Solana addresses are base58 encoded public keys

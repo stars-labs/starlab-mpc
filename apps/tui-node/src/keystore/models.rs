@@ -255,9 +255,18 @@ pub struct WalletMetadata {
     /// ISO 8601 timestamp when created
     pub created_at: String,
     
-    /// ISO 8601 timestamp when last modified  
+    /// ISO 8601 timestamp when last modified
     pub last_modified: String,
-    
+
+    /// Optional user-friendly display name. Purely local — it is NOT part
+    /// of the DKG wire protocol and may differ per device. The wallet's
+    /// cross-device identity stays `session_id` (kept deterministic so all
+    /// participants agree). UIs render `label` when set, else `session_id`.
+    /// `#[serde(default)]` keeps wallets written before this field
+    /// deserializable (they come through as `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+
     // === Legacy fields for backward compatibility (will be removed in v3.0) ===
     
     /// User-friendly device name (deprecated, use device_id)
@@ -342,6 +351,7 @@ impl WalletMetadata {
             participants,
             created_at: now.clone(),
             last_modified: now,
+            label: None,
             // All legacy fields set to None
             device_name: None,
             blockchains: Vec::new(),
@@ -351,6 +361,12 @@ impl WalletMetadata {
             tags: None,
             description: None,
         }
+    }
+
+    /// User-facing name: the optional `label` if set, otherwise the
+    /// deterministic `session_id`. Use this everywhere a wallet is shown.
+    pub fn display_name(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.session_id)
     }
 
     /// Derives Ethereum address from the group public key (for secp256k1)

@@ -54,6 +54,11 @@ export global AppState {
     in-out property <string> device_id: "";
     in-out property <string> status_message: "Ready";
     in-out property <[string]> log_messages: [];
+
+    // Password used to encrypt this device's key share at DKG create/join
+    // time. Bound to the "Keystore password" field; read on the Rust side
+    // before kicking off a real DKG.
+    in-out property <string> dkg_password: "";
 }
 
 // Enhanced main window
@@ -65,7 +70,7 @@ export component MainWindow inherits Window {
     
     // Callbacks
     callback connect_websocket(string);
-    callback create_wallet();
+    callback create_wallet(string);
     // import_wallet / export_wallet: second arg is the keystore
     // password. The caller reads it out of the "Keystore password"
     // LineEdit in Settings; for passwordless keystores pass "".
@@ -202,7 +207,7 @@ export component MainWindow inherits Window {
                     selected_index <=> AppState.active_wallet_index;
                     has_keystore: AppState.has_keystore;
                     
-                    create_wallet => { root.create_wallet(); }
+                    create_wallet(name) => { root.create_wallet(name); }
                     // WalletSelector's own inline Import/Export
                     // buttons fire with an empty password — use
                     // them for unencrypted / dev keystores. For
@@ -359,6 +364,7 @@ export component MainWindow inherits Window {
                                     keystore-pw := LineEdit {
                                         placeholder-text: "Keystore password";
                                         input-type: password;
+                                        text <=> AppState.dkg-password;
                                     }
 
                                     HorizontalBox {

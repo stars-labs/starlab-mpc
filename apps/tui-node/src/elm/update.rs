@@ -221,7 +221,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Any typing clears the stale error so the user isn't left
             // staring at a complaint about input they've already changed.
             model.wallet_state.password_error = None;
-            if model.wallet_state.password_focus_confirm {
+            if model.wallet_state.wallet_name_focus {
+                model.wallet_state.wallet_name_draft.push(c);
+            } else if model.wallet_state.password_focus_confirm {
                 model.wallet_state.confirm_draft.push(c);
             } else {
                 model.wallet_state.password_draft.push(c);
@@ -231,7 +233,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::PasswordBackspace => {
             model.wallet_state.password_error = None;
-            if model.wallet_state.password_focus_confirm {
+            if model.wallet_state.wallet_name_focus {
+                model.wallet_state.wallet_name_draft.pop();
+            } else if model.wallet_state.password_focus_confirm {
                 model.wallet_state.confirm_draft.pop();
             } else {
                 model.wallet_state.password_draft.pop();
@@ -240,8 +244,25 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         Message::PasswordToggleField => {
-            model.wallet_state.password_focus_confirm =
-                !model.wallet_state.password_focus_confirm;
+            // Unlock mode renders a single field — Tab / BackTab is a no-op
+            // there. (Without this guard, toggling would route subsequent
+            // keystrokes to a hidden buffer the unlock path never reads.)
+            if matches!(
+                model.wallet_state.password_prompt_purpose,
+                crate::elm::model::PasswordPromptPurpose::Unlock
+            ) {
+                return None;
+            }
+            // SetNew renders three fields: cycle name → password → confirm.
+            if model.wallet_state.wallet_name_focus {
+                model.wallet_state.wallet_name_focus = false;
+                model.wallet_state.password_focus_confirm = false;
+            } else if !model.wallet_state.password_focus_confirm {
+                model.wallet_state.password_focus_confirm = true;
+            } else {
+                model.wallet_state.password_focus_confirm = false;
+                model.wallet_state.wallet_name_focus = true;
+            }
             None
         }
 
@@ -250,29 +271,55 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // exercised by the same test harness as every other state
             // transition and can't silently drift if the component's
             // `on()` is ever re-enabled.
-            const MIN_PW_LEN: usize = 8;
             let pw = model.wallet_state.password_draft.clone();
-            let cf = model.wallet_state.confirm_draft.clone();
+            let purpose = model.wallet_state.password_prompt_purpose.clone();
 
-            if pw.len() < MIN_PW_LEN {
-                model.wallet_state.password_error = Some(format!(
-                    "Password must be at least {MIN_PW_LEN} characters"
-                ));
-                return None;
-            }
-            if pw != cf {
-                model.wallet_state.password_error =
-                    Some("Confirm does not match password".to_string());
-                return None;
+            match purpose {
+                crate::elm::model::PasswordPromptPurpose::SetNew => {
+                    // Setting a brand-new password for DKG: enforce a
+                    // minimum length and require the confirm field to
+                    // match.
+                    const MIN_PW_LEN: usize = 8;
+                    let cf = model.wallet_state.confirm_draft.clone();
+                    if pw.len() < MIN_PW_LEN {
+                        model.wallet_state.password_error = Some(format!(
+                            "Password must be at least {MIN_PW_LEN} characters"
+                        ));
+                        return None;
+                    }
+                    if pw != cf {
+                        model.wallet_state.password_error =
+                            Some("Confirm does not match password".to_string());
+                        return None;
+                    }
+                }
+                crate::elm::model::PasswordPromptPurpose::Unlock => {
+                    // Unlocking an existing wallet — backend
+                    // `UnlockWallet` returns "Invalid password" if it's
+                    // wrong, so we only reject the obviously-empty
+                    // case here. No length check (existing wallets'
+                    // passwords were already validated at DKG time)
+                    // and no confirm-match (the screen renders one
+                    // field only).
+                    if pw.is_empty() {
+                        model.wallet_state.password_error =
+                            Some("Enter the wallet password".to_string());
+                        return None;
+                    }
+                }
             }
 
             // Valid: wipe the drafts immediately so the cleartext doesn't
             // outlive the handoff. `SubmitPassword` stashes it on
-            // `pending_password` and drives the DKG flow forward.
+            // `pending_password` and drives the DKG-or-unlock flow
+            // forward.
             model.wallet_state.password_draft.clear();
             model.wallet_state.confirm_draft.clear();
             model.wallet_state.password_error = None;
             model.wallet_state.password_focus_confirm = false;
+            // Keep `wallet_name_draft` — it's consumed later at finalize
+            // (DKGKeyGenerated). Just drop focus from the name field.
+            model.wallet_state.wallet_name_focus = false;
             Some(Command::SendMessage(Message::SubmitPassword { value: pw }))
         }
 
@@ -291,6 +338,90 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // The password stashed here is later consumed by the keystore-
         // write in the `DKGKeyGenerated` handler (line ~1382), which
         // clears `pending_password` after encryption.
+        // Headless creator entry: seed the same state ThresholdConfig +
+        // PasswordPrompt would have set, then hand off to SubmitPassword's
+        // creator branch (which builds the config + announces the session).
+        Message::HeadlessCreateWallet { config, password, label } => {
+            model.wallet_state.creating_wallet =
+                Some(crate::elm::model::CreateWalletState {
+                    mode: Some(config.mode.clone()),
+                    template: None,
+                    custom_config: Some(config),
+                });
+            model.wallet_state.wallet_name_draft = label;
+            Some(Command::SendMessage(Message::SubmitPassword { value: password }))
+        }
+
+        // Headless joiner entry: pick the discovered invite by id, mark it
+        // active (the joiner signal SubmitPassword keys off), then hand off.
+        Message::HeadlessJoinSession { session_id, password, label } => {
+            match model
+                .session_invites
+                .iter()
+                .find(|s| s.session_id == session_id)
+                .cloned()
+            {
+                Some(invite) => {
+                    model.active_session = Some(invite);
+                    model.wallet_state.wallet_name_draft = label;
+                    Some(Command::SendMessage(Message::SubmitPassword {
+                        value: password,
+                    }))
+                }
+                None => {
+                    warn!(
+                        "HeadlessJoinSession: no discovered session with id {}",
+                        session_id
+                    );
+                    None
+                }
+            }
+        }
+
+        // Headless initiator-side signing. Mirrors SignSubmit's cold path:
+        // compute the payload (EIP-191 hash for secp256k1, raw otherwise),
+        // stash pending_sign_* (no session_id → "we're announcing one"),
+        // then hand off to SubmitPassword which unlocks + InitiateSigning.
+        Message::HeadlessSign { wallet_id, message, encoding, password } => {
+            let raw = if encoding.eq_ignore_ascii_case("hex") {
+                match hex::decode(message.trim().trim_start_matches("0x")) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!("HeadlessSign: bad hex message: {}", e);
+                        return None;
+                    }
+                }
+            } else {
+                message.into_bytes()
+            };
+            let curve = model.wallet_state.curve_type;
+            let bytes_to_sign = if curve == "secp256k1" {
+                crate::utils::eth_helper::eip191_hash(&raw).to_vec()
+            } else {
+                raw.clone()
+            };
+            model.wallet_state.pending_sign_message = Some(bytes_to_sign);
+            model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
+            model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_raw_message =
+                if curve == "secp256k1" { Some(raw) } else { None };
+            // Clear any leftover DKG-creation/join state so SubmitPassword's
+            // cold-start *sign* gate (creating_wallet.is_none() &&
+            // active_session.is_none()) is taken — otherwise a wallet we just
+            // created would re-route into the creator/joiner DKG branch.
+            model.wallet_state.creating_wallet = None;
+            model.active_session = None;
+            model.wallet_state.password_prompt_purpose =
+                crate::elm::model::PasswordPromptPurpose::Unlock;
+            Some(Command::SendMessage(Message::SubmitPassword { value: password }))
+        }
+
+        // Headless cold-start session replay: ask the server to resend every
+        // active session so a node that connected after an announcement can
+        // still discover it. Maps straight to the same discovery command the
+        // Join-Session screen uses.
+        Message::HeadlessRefreshSessions => Some(Command::LoadSessions),
+
         Message::SubmitPassword { value } => {
             info!(
                 "Password submitted ({} chars) — routing to DKG/sign",
@@ -369,7 +500,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             .selected_indices
                             .entry(crate::elm::model::ComponentId::DKGProgress)
                             .or_insert(0);
-                        Some(Command::JoinDKG { session_id })
+                        // Pass the discovered session's real shape so the
+                        // joiner agrees on `total` immediately (no default-3 race).
+                        Some(Command::JoinDKG {
+                            session_id,
+                            total: session.total,
+                            threshold: session.threshold,
+                            proposer_id: session.proposer_id.clone(),
+                            curve_type: session.curve_type.clone(),
+                        })
                     }
                     crate::protocal::signal::SessionType::Signing {
                         wallet_name, ..
@@ -908,6 +1047,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 model.wallet_state.pending_sign_message = Some(preview.bytes_to_sign);
                 model.wallet_state.pending_sign_wallet_id = Some(preview.wallet_id);
                 model.wallet_state.pending_sign_session_id = None;
+                // The screen is shared with creator/joiner DKG, which set
+                // a new password. Cold-start sign instead UNLOCKS an
+                // existing wallet — flip the purpose so the component
+                // renders single-field "Unlock Wallet" and validation
+                // skips the confirm-match check.
+                model.wallet_state.password_prompt_purpose =
+                    crate::elm::model::PasswordPromptPurpose::Unlock;
                 model.push_screen(Screen::PasswordPrompt);
                 model.ui_state.focus = crate::elm::model::ComponentId::PasswordPrompt;
                 None
@@ -1392,16 +1538,25 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     .as_ref()
                     .map(|s| format!("wallet-{}", &s.session_id[..8.min(s.session_id.len())]));
 
+                // Optional user-chosen display label (creator typed it on the
+                // password screen). Empty → None → UI falls back to the id.
+                let wallet_label = {
+                    let s = model.wallet_state.wallet_name_draft.trim().to_string();
+                    model.wallet_state.wallet_name_draft.clear();
+                    if s.is_empty() { None } else { Some(s) }
+                };
+
                 match (password, wallet_name) {
                     (Some(password), Some(wallet_name)) if !keystore_path.is_empty() => {
                         info!(
-                            "Auto-dispatching FinalizeWalletFromDkg (keystore={}, name={})",
-                            keystore_path, wallet_name
+                            "Auto-dispatching FinalizeWalletFromDkg (keystore={}, name={}, label={:?})",
+                            keystore_path, wallet_name, wallet_label
                         );
                         Some(Command::FinalizeWalletFromDkg {
                             password,
                             keystore_path,
                             wallet_name,
+                            wallet_label,
                         })
                     }
                     (None, _) => {
@@ -2274,6 +2429,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // which is where session announcement + StartDKG
                     // kick in.
                     info!("ThresholdConfig confirmed — routing to PasswordPrompt");
+                    // Creator sets a new password + optional wallet name.
+                    model.wallet_state.password_prompt_purpose =
+                        crate::elm::model::PasswordPromptPurpose::SetNew;
+                    model.wallet_state.wallet_name_draft.clear();
+                    model.wallet_state.wallet_name_focus = true;
                     model.push_screen(Screen::PasswordPrompt);
                     model.ui_state.focus = crate::elm::model::ComponentId::PasswordPrompt;
                     None
@@ -2317,6 +2477,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         // actually joining. This ensures the local key-share
                         // encryption password is staged before the DKG
                         // starts producing a KeyPackage we need to persist.
+                        // Joiners may also set a local wallet name (label).
+                        model.wallet_state.password_prompt_purpose =
+                            crate::elm::model::PasswordPromptPurpose::SetNew;
+                        model.wallet_state.wallet_name_draft.clear();
+                        model.wallet_state.wallet_name_focus = true;
                         model.push_screen(Screen::PasswordPrompt);
                         model.ui_state.focus = crate::elm::model::ComponentId::PasswordPrompt;
                         None
@@ -2868,6 +3033,209 @@ mod tests {
         assert!(matches!(cmd, Some(Command::SendMessage(Message::NavigateBack))));
     }
     
+    #[test]
+    fn password_submit_set_new_requires_min_length() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::SetNew;
+        model.wallet_state.password_draft = "short".to_string();
+        model.wallet_state.confirm_draft = "short".to_string();
+
+        let cmd = update(&mut model, Message::PasswordSubmitDraft);
+
+        assert!(cmd.is_none(), "short password must not dispatch SubmitPassword");
+        assert!(
+            model
+                .wallet_state
+                .password_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("at least"),
+            "expected min-length error, got {:?}",
+            model.wallet_state.password_error,
+        );
+        // Drafts preserved so the user keeps what they typed.
+        assert_eq!(model.wallet_state.password_draft, "short");
+    }
+
+    #[test]
+    fn password_submit_set_new_requires_confirm_match() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::SetNew;
+        model.wallet_state.password_draft = "longenough1".to_string();
+        model.wallet_state.confirm_draft = "differs!!!!".to_string();
+
+        let cmd = update(&mut model, Message::PasswordSubmitDraft);
+
+        assert!(cmd.is_none(), "mismatched confirm must not dispatch");
+        assert_eq!(
+            model.wallet_state.password_error.as_deref(),
+            Some("Confirm does not match password"),
+        );
+    }
+
+    #[test]
+    fn password_submit_unlock_skips_confirm_match() {
+        // Reproduces the reported bug: cold-start sign lands on
+        // PasswordPrompt with only the Password field rendered. Without
+        // the purpose discriminator the validator demanded confirm == pw
+        // and silently rejected the submit.
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::Unlock;
+        model.wallet_state.password_draft = "hunter2".to_string();
+        model.wallet_state.confirm_draft = String::new();
+
+        let cmd = update(&mut model, Message::PasswordSubmitDraft);
+
+        match cmd {
+            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+                assert_eq!(value, "hunter2");
+            }
+            other => panic!(
+                "expected SubmitPassword command in Unlock mode, got {:?}",
+                other
+            ),
+        }
+        assert!(model.wallet_state.password_error.is_none());
+        // Drafts cleared on successful handoff so cleartext doesn't
+        // outlive the screen.
+        assert!(model.wallet_state.password_draft.is_empty());
+        assert!(model.wallet_state.confirm_draft.is_empty());
+    }
+
+    #[test]
+    fn password_submit_unlock_rejects_empty() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::Unlock;
+        model.wallet_state.password_draft = String::new();
+
+        let cmd = update(&mut model, Message::PasswordSubmitDraft);
+
+        assert!(cmd.is_none());
+        assert_eq!(
+            model.wallet_state.password_error.as_deref(),
+            Some("Enter the wallet password"),
+        );
+    }
+
+    #[test]
+    fn headless_create_wallet_seeds_state_and_hands_off() {
+        let mut model = Model::new("dev".to_string());
+        let config = WalletConfig {
+            name: "Treasury".to_string(),
+            total_participants: 3,
+            threshold: 2,
+            mode: WalletMode::Online,
+        };
+        let cmd = update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config,
+                password: "hunter2hunter2".to_string(),
+                label: "Treasury".to_string(),
+            },
+        );
+        // Seeds the same state the interactive ThresholdConfig screen would.
+        assert!(model.wallet_state.creating_wallet.is_some());
+        assert_eq!(model.wallet_state.wallet_name_draft, "Treasury");
+        // Hands off to the creator SubmitPassword path.
+        match cmd {
+            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+                assert_eq!(value, "hunter2hunter2");
+            }
+            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn headless_sign_seeds_pending_state_and_hands_off() {
+        let mut model = Model::new("dev".to_string());
+        let cmd = update(
+            &mut model,
+            Message::HeadlessSign {
+                wallet_id: "wallet-ab12".to_string(),
+                message: "hello".to_string(),
+                encoding: "utf8".to_string(),
+                password: "pw".to_string(),
+            },
+        );
+        assert!(model.wallet_state.pending_sign_message.is_some());
+        assert_eq!(
+            model.wallet_state.pending_sign_wallet_id.as_deref(),
+            Some("wallet-ab12")
+        );
+        assert!(model.wallet_state.pending_sign_session_id.is_none());
+        match cmd {
+            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+                assert_eq!(value, "pw");
+            }
+            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn headless_join_unknown_session_is_noop() {
+        let mut model = Model::new("dev".to_string());
+        // No discovered invites → join is a no-op (no command, no active session).
+        let cmd = update(
+            &mut model,
+            Message::HeadlessJoinSession {
+                session_id: "nope".to_string(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        );
+        assert!(cmd.is_none());
+        assert!(model.active_session.is_none());
+    }
+
+    #[test]
+    fn password_toggle_field_is_no_op_in_unlock() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::Unlock;
+        model.wallet_state.password_focus_confirm = false;
+
+        update(&mut model, Message::PasswordToggleField);
+
+        assert!(
+            !model.wallet_state.password_focus_confirm,
+            "Tab in Unlock mode must not move focus — there is no second field"
+        );
+    }
+
+    #[test]
+    fn password_toggle_field_still_toggles_in_set_new() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::SetNew;
+        model.wallet_state.password_focus_confirm = false;
+
+        update(&mut model, Message::PasswordToggleField);
+
+        assert!(model.wallet_state.password_focus_confirm);
+    }
+
+    #[test]
+    fn clear_password_draft_resets_purpose_to_default() {
+        let mut model = Model::new("test".to_string());
+        model.wallet_state.password_prompt_purpose =
+            crate::elm::model::PasswordPromptPurpose::Unlock;
+        model.wallet_state.password_draft = "x".into();
+
+        model.wallet_state.clear_password_draft();
+
+        assert_eq!(
+            model.wallet_state.password_prompt_purpose,
+            crate::elm::model::PasswordPromptPurpose::SetNew,
+            "exiting the screen must reset purpose so the next push starts fresh"
+        );
+        assert!(model.wallet_state.password_draft.is_empty());
+    }
+
     #[test]
     fn test_modal_closes_on_esc() {
         let mut model = Model::new("test".to_string());

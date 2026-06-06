@@ -2,6 +2,7 @@
 
 use slint::Weak;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 use tui_node::core::{
     connection_manager::ConnectionManager,
     dkg_manager::DkgManager,
@@ -9,11 +10,22 @@ use tui_node::core::{
     session_manager::SessionManager,
     signing_manager::SigningManager,
     wallet_manager::WalletManager,
-    CoreState, UICallback,
+    CoreState, UICallback, WalletInfo,
 };
+use tui_node::elm::headless::{spawn_ed25519, spawn_secp256k1};
+use tui_node::elm::model::{WalletConfig, WalletMode};
+use tui_node::elm::{Message, Model};
 
 use crate::slint_generatedMainWindow::MainWindow;
 use crate::ui_callback::NativeUICallback;
+
+/// Default DKG shape for the native "Create wallet" button. The native UI
+/// doesn't yet collect threshold/total/curve, so we default to a 2-of-3
+/// secp256k1 (Ethereum) wallet — same shape the old placeholder used. The
+/// session is announced; real completion needs the other 2 participants to
+/// join over the signal server.
+const DEFAULT_TOTAL: u16 = 3;
+const DEFAULT_THRESHOLD: u16 = 2;
 
 /// Core adapter that manages all the shared business logic
 pub struct CoreAdapter {
@@ -25,14 +37,94 @@ pub struct CoreAdapter {
     pub offline_manager: Arc<OfflineManager>,
     pub signing_manager: Arc<SigningManager>,
     ui_callback: Arc<dyn UICallback>,
+    /// Sender into the headless Elm runner — the REAL backend for
+    /// connect / create-wallet / join-session (the managers above remain
+    /// in place for the not-yet-ported features: signing, SD-card, etc.).
+    runner_tx: UnboundedSender<Message>,
+    /// Keystore password used to encrypt this device's share at DKG time.
+    /// Set from the UI's "Keystore password" field before create/join.
+    dkg_password: Arc<std::sync::Mutex<String>>,
+}
+
+/// Map an Elm `Model` into the core `WalletInfo` list the Slint UI renders.
+/// The on-disk address isn't stored in metadata (only the group key), so we
+/// leave `address` blank for now — the wallet still shows its name/threshold,
+/// which is the signal that a real DKG completed and persisted.
+fn model_wallets(model: &Model) -> Vec<WalletInfo> {
+    model
+        .wallet_state
+        .wallets
+        .iter()
+        .map(|m| WalletInfo {
+            id: m.session_id.clone(),
+            name: m.display_name().to_string(),
+            // Derive the primary chain address from the group key (#18).
+            address: {
+                let chain = if m.curve_type == "ed25519" { "solana" } else { "ethereum" };
+                hex::decode(&m.group_public_key)
+                    .ok()
+                    .and_then(|b| {
+                        tui_node::blockchain_config::generate_address_for_chain(
+                            &b, &m.curve_type, chain,
+                        )
+                        .ok()
+                    })
+                    .unwrap_or_default()
+            },
+            balance: String::new(),
+            chain: if m.curve_type == "ed25519" {
+                "Solana".to_string()
+            } else {
+                "Ethereum".to_string()
+            },
+            threshold: format!("{}/{}", m.threshold, m.total_participants),
+            participants: m.participants.clone(),
+        })
+        .collect()
 }
 
 impl CoreAdapter {
-    /// Create new core adapter with native UI callback
-    pub fn new(window: Weak<MainWindow>) -> Self {
+    /// Create new core adapter with native UI callback + a real headless
+    /// Elm backend. `device_id`/`keystore_path`/`signal_url` configure the
+    /// runner. Must be called from within a Tokio runtime.
+    /// `curve` selects the runner's ciphersuite for this launch:
+    /// `"ed25519"` (Solana/Sui/Aptos/NEAR) or anything else ⇒ secp256k1
+    /// (Ethereum-family + Bitcoin). Like the CLI `serve`, a single native
+    /// instance is one curve; launch again with a different curve for the other
+    /// family.
+    pub fn new(
+        window: Weak<MainWindow>,
+        device_id: String,
+        keystore_path: String,
+        signal_url: String,
+        curve: String,
+    ) -> Self {
         let state = Arc::new(CoreState::new());
         let ui_callback: Arc<dyn UICallback> = Arc::new(NativeUICallback::new(window));
-        
+
+        // on_sync: mirror the runner's model into the Slint UI after every
+        // message. Reuses NativeUICallback's Slint conversions; the async
+        // pushes are spawned since on_sync itself is synchronous. Curve-agnostic
+        // (operates on Model), so it's shared by both spawn fns below.
+        let cb_for_sync = ui_callback.clone();
+        let on_sync = move |model: &Model, _msg: Option<&tui_node::elm::Message>| {
+            let cb = cb_for_sync.clone();
+            let wallets = model_wallets(model);
+            let connected = model.network_state.connected;
+            let dkg_active = model.active_session.is_some();
+            tokio::spawn(async move {
+                cb.update_wallets(wallets).await;
+                cb.update_connection_status(connected, false).await;
+                cb.update_dkg_status(dkg_active, 0, if dkg_active { 0.5 } else { 0.0 })
+                    .await;
+            });
+        };
+        let runner_tx = if curve == "ed25519" {
+            spawn_ed25519(device_id.clone(), keystore_path, signal_url, on_sync)
+        } else {
+            spawn_secp256k1(device_id.clone(), keystore_path, signal_url, on_sync)
+        };
+
         Self {
             connection_manager: Arc::new(ConnectionManager::new(state.clone(), ui_callback.clone())),
             session_manager: Arc::new(SessionManager::new(state.clone(), ui_callback.clone())),
@@ -42,7 +134,24 @@ impl CoreAdapter {
             signing_manager: Arc::new(SigningManager::new(state.clone(), ui_callback.clone())),
             state,
             ui_callback,
+            runner_tx,
+            dkg_password: Arc::new(std::sync::Mutex::new(String::new())),
         }
+    }
+
+    /// Set the password used to encrypt this device's key share when the
+    /// next create/join DKG runs. Called from the UI before create/join.
+    pub fn set_dkg_password(&self, password: String) {
+        if let Ok(mut p) = self.dkg_password.lock() {
+            *p = password;
+        }
+    }
+
+    fn dkg_password(&self) -> String {
+        self.dkg_password
+            .lock()
+            .map(|p| p.clone())
+            .unwrap_or_default()
     }
 
     /// Create a new signing request. Typically called from a
@@ -239,25 +348,39 @@ impl CoreAdapter {
     }
     
     /// Connect to WebSocket server
-    pub async fn connect_websocket(&self, url: String) -> Result<(), String> {
-        self.connection_manager
-            .connect_websocket(url)
-            .await
+    pub async fn connect_websocket(&self, _url: String) -> Result<(), String> {
+        // Real WebSocket dial via the headless Elm runner (reads the signal
+        // server URL configured at startup). The `_url` arg is ignored — the
+        // runner owns the connection config.
+        self.runner_tx
+            .send(Message::TriggerReconnect)
             .map_err(|e| e.to_string())
     }
-    
-    /// Create a new wallet
-    pub async fn create_wallet(&self) -> Result<(), String> {
-        // For demo, create with default parameters
-        self.wallet_manager
-            .create_wallet(
-                "New Wallet".to_string(),
-                2,
-                vec!["Alice".to_string(), "Bob".to_string(), "Charlie".to_string()],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(())
+
+    /// Create a new wallet via a REAL FROST DKG. Announces a session on the
+    /// signal server and runs the ceremony once the other participants join;
+    /// on completion the encrypted share is persisted to the keystore and the
+    /// wallet appears in the list (under `name`). `name` is the local display
+    /// label. Defaults to {DEFAULT_THRESHOLD}-of-{DEFAULT_TOTAL} secp256k1.
+    pub async fn create_wallet(&self, name: String) -> Result<(), String> {
+        let label = name.trim().to_string();
+        let config = WalletConfig {
+            name: if label.is_empty() {
+                "Wallet".to_string()
+            } else {
+                label.clone()
+            },
+            total_participants: DEFAULT_TOTAL,
+            threshold: DEFAULT_THRESHOLD,
+            mode: WalletMode::Online,
+        };
+        self.runner_tx
+            .send(Message::HeadlessCreateWallet {
+                config,
+                password: self.dkg_password(),
+                label,
+            })
+            .map_err(|e| e.to_string())
     }
     
     /// Import a keystore from disk. Opens a native file-picker for
@@ -350,11 +473,15 @@ impl CoreAdapter {
     
     /// Join an existing session
     pub async fn join_session(&self, session_id: String) -> Result<(), String> {
-        let device_id = "native-node-001".to_string();
-        
-        self.session_manager
-            .join_session(session_id, device_id)
-            .await
+        // Real join via the headless Elm runner: contributes this device's
+        // share to the DKG (or signing) ceremony for `session_id`, then
+        // persists the resulting key share to the keystore.
+        self.runner_tx
+            .send(Message::HeadlessJoinSession {
+                session_id,
+                password: self.dkg_password(),
+                label: String::new(),
+            })
             .map_err(|e| e.to_string())
     }
     

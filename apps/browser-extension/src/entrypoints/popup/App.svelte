@@ -1,7 +1,17 @@
 <script lang="ts">
-    import svelteLogo from "../../assets/svelte.svg";
     // Removed single-party WASM functions - this is now an MPC-only wallet
     import { onMount, onDestroy } from "svelte";
+    import {
+        themeMode,
+        setTheme,
+        initTheme,
+        type ThemeMode,
+    } from "../../lib/theme";
+    import Icon from "../../lib/ui/Icon.svelte";
+    import Button from "../../lib/ui/Button.svelte";
+    import Modal from "../../lib/ui/Modal.svelte";
+    import CopyButton from "../../lib/ui/CopyButton.svelte";
+    import Collapsible from "../../lib/ui/Collapsible.svelte";
     import { storage } from "#imports";
     import type { AppState } from "@mpc-wallet/types/appstate";
     import { MeshStatusType } from "@mpc-wallet/types/mesh";
@@ -15,6 +25,61 @@
     import CreateWalletForm from "../../components/CreateWalletForm.svelte";
     import { MESSAGE_TYPES } from "@mpc-wallet/types/messages";
     import { hashMessage } from "viem";
+
+    // Theme (system | light | dark). initTheme() applies the saved mode
+    // and live-tracks the OS preference while in "system". The cycle
+    // button in the header rotates system → light → dark → system.
+    let themeModeValue: ThemeMode = "system";
+    const unsubTheme = themeMode.subscribe((v) => (themeModeValue = v));
+    function cycleTheme() {
+        const next: ThemeMode =
+            themeModeValue === "system"
+                ? "light"
+                : themeModeValue === "light"
+                  ? "dark"
+                  : "system";
+        setTheme(next);
+    }
+    const themeIcon: Record<ThemeMode, string> = {
+        system: "monitor",
+        light: "sun",
+        dark: "moon",
+    };
+
+    // Developer/advanced section toggle (Peer ID, device list, manual
+    // session proposal, import/export, test actions). Collapsed by
+    // default so the main surface stays product-focused.
+    let showDeveloper = false;
+
+    onMount(() => initTheme());
+    onDestroy(() => unsubTheme());
+
+    // Hero card: reveal the raw group public key on demand + a tiny
+    // copy-confirmation flag for the address (CopyButton's surface
+    // styling is wrong on the gradient, so the hero copies inline).
+    let showGroupKey = false;
+    let addrCopied = false;
+    async function copyAddress(addr: string | undefined) {
+        if (!addr) return;
+        try {
+            await navigator.clipboard.writeText(addr);
+            addrCopied = true;
+            setTimeout(() => (addrCopied = false), 1600);
+        } catch (e) {
+            console.warn("[UI] Address copy failed:", e);
+        }
+    }
+
+    // Productized labels for the active blockchain/curve.
+    function chainLabel(chain: string | undefined): string {
+        return chain === "solana" ? "Solana" : "Ethereum";
+    }
+    function shortAddr(addr: string | undefined): string {
+        if (!addr) return "";
+        return addr.length > 14
+            ? `${addr.slice(0, 8)}…${addr.slice(-6)}`
+            : addr;
+    }
 
     // Ext-1b: toggled when the user clicks "+ Create Wallet". Shows
     // the CreateWalletForm overlay until they submit or cancel.
@@ -1291,11 +1356,12 @@
                 keystoreStatus = response.status;
                 console.log("[UI] Keystore status:", keystoreStatus);
                 
-                // Check if we need to prompt for password
-                if (keystoreStatus.initialized && keystoreStatus.locked) {
-                    showUnlockPrompt();
-                }
-                
+                // Do NOT auto-pop the Unlock modal on popup open — it was
+                // forcing a password prompt every time the popup opened with a
+                // locked wallet, blocking the UI (incl. Settings). The user
+                // unlocks on demand via the header unlock (🔓) button, or when
+                // an action that needs the key prompts for it.
+
                 // Check for pending imports
                 checkPendingImports();
             }
@@ -1347,8 +1413,8 @@
                 checkPendingImports();
             } else {
                 console.error("[UI] Failed to unlock keystore:", response?.error);
-                // Show error and prompt again
-                setTimeout(() => showUnlockPrompt(), 500);
+                // Don't auto-re-pop the modal (it created an inescapable loop on
+                // a wrong password). The user can retry via the header 🔓 button.
             }
         });
     }
@@ -1438,12 +1504,53 @@
     }
 </script>
 
-<main class="p-4 max-w-2xl mx-auto">
-    <div class="text-center mb-6 flex justify-between items-center">
-        <img src={svelteLogo} class="logo svelte mb-2" alt="Svelte Logo" />
-        <h1 class="text-3xl font-bold flex-grow text-center">MPC Wallet</h1>
+<main class="flex min-h-[600px] flex-col">
+    <!-- Header -->
+    <header
+        class="sticky top-0 z-30 flex items-center gap-1.5 border-b border-line bg-surface px-4 py-3"
+    >
+        <div
+            class="flex h-8 w-8 items-center justify-center rounded-xl text-sm font-black text-white"
+            style="background:var(--grad-brand)"
+            aria-hidden="true"
+        >
+            S
+        </div>
+        <h1 class="flex-1 text-base font-bold tracking-tight">MPC Wallet</h1>
+
         <button
-            class="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-full"
+            class="icon-btn"
+            on:click={cycleTheme}
+            title={`Theme: ${themeModeValue}`}
+            aria-label="Toggle theme"
+        >
+            <Icon name={themeIcon[themeModeValue]} size={18} />
+        </button>
+
+        {#if keystoreStatus.initialized && !keystoreStatus.locked}
+            <button
+                class="icon-btn"
+                on:click={lockKeystore}
+                title="Lock wallet"
+                aria-label="Lock wallet"
+            >
+                <Icon name="lock" size={18} />
+            </button>
+        {:else if keystoreStatus.initialized && keystoreStatus.locked}
+            <!-- On-demand unlock — we no longer auto-pop the password modal on
+                 open, so this is how you unlock when you actually want to. -->
+            <button
+                class="icon-btn"
+                on:click={showUnlockPrompt}
+                title="Unlock wallet"
+                aria-label="Unlock wallet"
+            >
+                <Icon name="lock-open" size={18} />
+            </button>
+        {/if}
+
+        <button
+            class="icon-btn"
             on:click={() => {
                 appState.showSettings = !appState.showSettings;
                 appState = { ...appState };
@@ -1451,42 +1558,11 @@
             aria-label="Settings"
             title="Settings"
         >
-            <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-            >
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                />
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                />
-            </svg>
+            <Icon name="settings" size={18} />
         </button>
-    </div>
-    
-    <!-- Wallet Selector -->
-    {#if keystoreStatus.initialized && !keystoreStatus.locked && keystoreStatus.wallets.length > 0}
-        <div class="mb-4">
-            <WalletSelector
-                wallets={keystoreStatus.wallets}
-                activeWallet={keystoreStatus.activeWallet}
-                on:select={handleWalletSelect}
-                on:add={() => console.log("[UI] Add wallet clicked")}
-                on:manage={() => console.log("[UI] Manage wallets clicked")}
-            />
-        </div>
-    {/if}
+    </header>
 
+    <div class="flex-1 space-y-4 px-4 py-4">
     {#if appState.showSettings}
         <Settings
             on:backToWallet={({ detail }) => {
@@ -1524,43 +1600,217 @@
             }}
         />
     {:else if !keystoreStatus.initialized}
-        <!-- Keystore not initialized -->
-        <div class="text-center py-8">
-            <h2 class="text-xl font-semibold mb-4">Welcome to MPC Wallet</h2>
-            <p class="text-gray-600 mb-6">Create a secure keystore to get started</p>
-            <button
-                class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium"
-                on:click={showCreateKeystorePrompt}
+        <!-- Keystore not initialized: first-run welcome -->
+        <div class="card card-pad mt-6 text-center">
+            <div
+                class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl text-white"
+                style="background:var(--grad-brand)"
             >
-                Create Keystore
-            </button>
+                <Icon name="shield" size={26} />
+            </div>
+            <h2 class="text-lg font-bold">Welcome to MPC Wallet</h2>
+            <p class="mx-auto mt-1.5 max-w-[16rem] text-sm text-muted">
+                Set a password to create your wallet. Your keys are split
+                across devices — no single device can sign on its own.
+            </p>
+            <Button class="mt-5" block on:click={showCreateKeystorePrompt}>
+                <Icon name="plus" size={16} /> Get started
+            </Button>
         </div>
     {:else}
-        <!-- Ext-1b: Create Wallet entry point. Shown whenever we're
-             not already in a DKG session or settings overlay. Clicking
-             opens the CreateWalletForm above which announces a TUI-
-             compatible `announce_session` broadcast. -->
-        {#if !appState.sessionInfo || appState.dkgState === DkgState.Complete || appState.dkgState === DkgState.KeystoreImported}
-            <div class="mb-3 flex justify-end">
+        <!-- ===================== Main wallet view ===================== -->
+
+        {#if keystoreStatus.wallets.length > 0}
+            <WalletSelector
+                wallets={keystoreStatus.wallets}
+                activeWallet={keystoreStatus.activeWallet}
+                on:select={handleWalletSelect}
+                on:add={() => console.log("[UI] Add wallet clicked")}
+                on:manage={() => console.log("[UI] Manage wallets clicked")}
+            />
+        {/if}
+
+        <div class="flex items-center justify-between">
+            <span class="section-title">Overview</span>
+            <span
+                class="badge {appState.wsConnected
+                    ? 'badge-success'
+                    : 'badge-danger'}"
+            >
+                <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
+                {appState.wsConnected ? "Online" : "Offline"}
+            </span>
+        </div>
+
+        <!-- Hero: address card (shown once a wallet's keys exist) -->
+        {#if appState.dkgState === DkgState.Complete && appState.dkgAddress}
+            <div class="hero">
+                <div class="relative flex items-center justify-between">
+                    <span
+                        class="text-xs font-semibold uppercase tracking-wide text-white/80"
+                    >
+                        {chainLabel(appState.chain)}
+                    </span>
+                    {#if appState.sessionInfo}
+                        <span
+                            class="rounded-full bg-white/20 px-2 py-0.5 text-xs font-semibold"
+                        >
+                            {appState.sessionInfo.threshold}-of-{appState
+                                .sessionInfo.total}
+                        </span>
+                    {/if}
+                </div>
                 <button
-                    type="button"
-                    class="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-                    on:click={() => (showCreateWallet = true)}
-                    disabled={!appState.wsConnected}
-                    title={appState.wsConnected
-                        ? "Initiate a new DKG ceremony"
-                        : "Signal server not connected"}
+                    class="relative mt-3 flex items-center gap-2"
+                    on:click={() => copyAddress(appState.dkgAddress)}
+                    title="Copy address"
                 >
-                    + Create Wallet
+                    <span class="mono text-lg font-semibold tracking-tight">
+                        {shortAddr(appState.dkgAddress)}
+                    </span>
+                    <Icon name={addrCopied ? "check" : "copy"} size={15} />
                 </button>
+                <div class="relative mt-3 flex gap-2">
+                    <button
+                        class="rounded-lg bg-white/20 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/30"
+                        on:click={() => copyAddress(appState.dkgAddress)}
+                    >
+                        {addrCopied ? "Copied" : "Copy address"}
+                    </button>
+                    {#if appState.dkgGroupPublicKey}
+                        <button
+                            class="rounded-lg bg-white/20 px-2.5 py-1.5 text-xs font-semibold text-white backdrop-blur transition hover:bg-white/30"
+                            on:click={() => (showGroupKey = !showGroupKey)}
+                        >
+                            Group key
+                        </button>
+                    {/if}
+                </div>
+                {#if showGroupKey && appState.dkgGroupPublicKey}
+                    <div
+                        class="relative mt-2 break-all rounded-lg bg-black/15 p-2 font-mono text-[10px] text-white/90"
+                    >
+                        {appState.dkgGroupPublicKey}
+                    </div>
+                {/if}
             </div>
         {/if}
 
-        <!-- Ext-1e: Join Session. Render every discovered DKG invite
-             we could join: session_type is DKG, we're a listed
-             participant intent or the session has room, we're NOT
-             the proposer, and we haven't already joined (dkgState
-             is Idle or we'd already be mid-ceremony). -->
+        <!-- Primary actions -->
+        {@const canCreate =
+            !appState.sessionInfo ||
+            appState.dkgState === DkgState.Complete ||
+            appState.dkgState === DkgState.KeystoreImported}
+        {@const canSign =
+            keystoreStatus.initialized &&
+            !keystoreStatus.locked &&
+            (keystoreStatus.wallets?.length ?? 0) > 0 &&
+            !appState.sessionInfo}
+        {#if canCreate || canSign}
+            <div class="grid grid-cols-2 gap-2.5">
+                {#if canCreate}
+                    <button
+                        class="group flex flex-col items-start gap-2 rounded-xl border border-line bg-surface p-3 text-left transition hover:border-primary disabled:opacity-50 disabled:hover:border-line"
+                        on:click={() => (showCreateWallet = true)}
+                        disabled={!appState.wsConnected}
+                        title={appState.wsConnected
+                            ? "Create a new shared wallet"
+                            : "Not connected to the signal server"}
+                    >
+                        <span
+                            class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-soft text-primary"
+                        >
+                            <Icon name="plus" size={18} />
+                        </span>
+                        <span class="text-sm font-semibold">Create wallet</span>
+                        <span class="text-xs text-muted">New shared wallet</span>
+                    </button>
+                {/if}
+                {#if canSign}
+                    <button
+                        class="group flex flex-col items-start gap-2 rounded-xl border border-line bg-surface p-3 text-left transition hover:border-primary disabled:opacity-50 disabled:hover:border-line"
+                        on:click={() => {
+                            showSignForm = true;
+                            signError = "";
+                            signMessage = "";
+                            signWalletId =
+                                keystoreStatus.activeWallet?.id ??
+                                keystoreStatus.wallets[0].id;
+                        }}
+                        disabled={!appState.wsConnected}
+                        title={appState.wsConnected
+                            ? "Start a threshold signing request"
+                            : "Not connected to the signal server"}
+                    >
+                        <span
+                            class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-soft text-primary"
+                        >
+                            <Icon name="edit" size={17} />
+                        </span>
+                        <span class="text-sm font-semibold">Sign message</span>
+                        <span class="text-xs text-muted">Request signatures</span>
+                    </button>
+                {/if}
+            </div>
+        {/if}
+
+        <!-- Sign message: inline form (opened from the action above) -->
+        {#if canSign && showSignForm}
+            <form
+                class="card card-pad space-y-3"
+                on:submit|preventDefault={buildSignPreview}
+            >
+                <p class="text-sm font-semibold">Sign a message</p>
+                <div>
+                    <label class="label" for="sign-wallet">Wallet</label>
+                    <select
+                        id="sign-wallet"
+                        bind:value={signWalletId}
+                        class="select"
+                        disabled={signing_}
+                    >
+                        {#each keystoreStatus.wallets as w}
+                            <option value={w.id}>
+                                {w.name ?? w.id} · {chainLabel(w.blockchain)}
+                            </option>
+                        {/each}
+                    </select>
+                </div>
+                <div>
+                    <label class="label" for="sign-msg">Message</label>
+                    <textarea
+                        id="sign-msg"
+                        bind:value={signMessage}
+                        class="textarea"
+                        rows="3"
+                        placeholder="Type the message to sign…"
+                        disabled={signing_}
+                    ></textarea>
+                </div>
+                {#if signError}
+                    <p class="text-xs text-danger-fg">{signError}</p>
+                {/if}
+                <div class="flex gap-2">
+                    <Button type="submit" block disabled={signing_}>
+                        {signing_ ? "Working…" : "Review"}
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        disabled={signing_}
+                        on:click={() => {
+                            showSignForm = false;
+                            signMessage = "";
+                            signError = "";
+                            signPreview = null;
+                        }}
+                    >
+                        Cancel
+                    </Button>
+                </div>
+            </form>
+        {/if}
+
+        <!-- Discovered shared-wallet sessions you can join -->
         {#if !appState.sessionInfo && appState.invites && appState.invites.length > 0}
             {@const joinable = appState.invites.filter(
                 (inv) =>
@@ -1570,339 +1820,214 @@
                         (inv.total ?? Number.POSITIVE_INFINITY),
             )}
             {#if joinable.length > 0}
-                <div class="mb-4 rounded border border-gray-200 bg-white p-3">
-                    <h3 class="mb-2 text-sm font-semibold">Discovered DKG Sessions</h3>
-                    {#each joinable as inv (inv.session_id)}
-                        <div class="mb-2 flex items-center justify-between rounded bg-gray-50 p-2">
-                            <div class="min-w-0 pr-3">
-                                <p class="text-sm font-medium">
-                                    {inv.threshold}-of-{inv.total}
-                                    {inv.curve_type ?? "secp256k1"}
-                                </p>
-                                <p class="truncate text-xs text-gray-600 font-mono">
-                                    {inv.session_id}
-                                </p>
-                                <p class="text-xs text-gray-500">
-                                    from {inv.proposer_id}
-                                    • {inv.participants?.length ?? 0}/{inv.total} joined
-                                </p>
-                            </div>
-                            <button
-                                type="button"
-                                class="rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
-                                on:click={async () => {
-                                    try {
-                                        const response = await chrome.runtime.sendMessage(
-                                            {
-                                                type: MESSAGE_TYPES.JOIN_DKG_SESSION,
-                                                session_id: inv.session_id,
-                                            },
-                                        );
-                                        if (!response?.success) {
+                <div class="card card-pad">
+                    <h3 class="mb-2 text-sm font-semibold">
+                        Wallet invitations
+                    </h3>
+                    <div class="space-y-2">
+                        {#each joinable as inv (inv.session_id)}
+                            <div class="list-row">
+                                <div class="min-w-0 pr-2">
+                                    <p class="text-sm font-medium">
+                                        {inv.threshold}-of-{inv.total}
+                                        {chainLabel(
+                                            inv.curve_type === "ed25519"
+                                                ? "solana"
+                                                : "ethereum",
+                                        )}
+                                    </p>
+                                    <p class="truncate text-xs text-muted">
+                                        from {inv.proposer_id} ·
+                                        {inv.participants?.length ?? 0}/{inv.total}
+                                        joined
+                                    </p>
+                                </div>
+                                <Button
+                                    size="sm"
+                                    variant="success"
+                                    disabled={!appState.wsConnected}
+                                    on:click={async () => {
+                                        try {
+                                            const response =
+                                                await chrome.runtime.sendMessage(
+                                                    {
+                                                        type: MESSAGE_TYPES.JOIN_DKG_SESSION,
+                                                        session_id:
+                                                            inv.session_id,
+                                                    },
+                                                );
+                                            if (!response?.success) {
+                                                console.error(
+                                                    "[UI] Join failed:",
+                                                    response?.error,
+                                                );
+                                                alert(
+                                                    `Join failed: ${response?.error ?? "unknown error"}`,
+                                                );
+                                            } else {
+                                                console.log(
+                                                    "[UI] Joined session",
+                                                    inv.session_id,
+                                                );
+                                            }
+                                        } catch (e) {
                                             console.error(
-                                                "[UI] Join failed:",
-                                                response?.error,
-                                            );
-                                            alert(
-                                                `Join failed: ${response?.error ?? "unknown error"}`,
-                                            );
-                                        } else {
-                                            console.log(
-                                                "[UI] Joined session",
-                                                inv.session_id,
+                                                "[UI] Join exception:",
+                                                e,
                                             );
                                         }
-                                    } catch (e) {
-                                        console.error("[UI] Join exception:", e);
-                                    }
-                                }}
-                                disabled={!appState.wsConnected}
-                            >
-                                Join
-                            </button>
-                        </div>
-                    {/each}
+                                    }}
+                                >
+                                    Join
+                                </Button>
+                            </div>
+                        {/each}
+                    </div>
                 </div>
             {/if}
         {/if}
 
-        <!-- Ext-2a/b: Sign Transaction entry point. Rendered when we
-             have at least one saved wallet AND no active ceremony
-             (would conflict with the wallet-status banner below).
-             Clicking expands an inline form → background builds the
-             EIP-191 (or raw, per curve) hash and announces a
-             signing session. -->
-        {#if keystoreStatus.initialized && !keystoreStatus.locked && keystoreStatus.wallets?.length > 0 && !appState.sessionInfo}
-            <div class="mb-4 rounded border border-purple-200 bg-purple-50 p-3">
-                {#if !showSignForm}
-                    <div class="flex items-center justify-between">
-                        <p class="text-sm font-medium text-purple-900">Sign with an existing wallet</p>
-                        <button
-                            type="button"
-                            class="rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700"
-                            on:click={() => {
-                                showSignForm = true;
-                                signError = "";
-                                signMessage = "";
-                                signWalletId = keystoreStatus.activeWallet?.id ?? keystoreStatus.wallets[0].id;
-                            }}
-                            disabled={!appState.wsConnected}
-                            title={appState.wsConnected ? "Initiate a threshold signing ceremony" : "Signal server not connected"}
-                        >
-                            ✍️ Sign Message
-                        </button>
-                    </div>
-                {:else}
-                    <form
-                        class="space-y-2"
-                        on:submit|preventDefault={buildSignPreview}
-                    >
-                        <p class="text-sm font-semibold text-purple-900">Sign Message</p>
-                        <select
-                            bind:value={signWalletId}
-                            class="w-full rounded border px-2 py-1 text-xs"
-                            disabled={signing_}
-                        >
-                            {#each keystoreStatus.wallets as w}
-                                <option value={w.id}>
-                                    {w.name ?? w.id} · {w.blockchain}
-                                </option>
-                            {/each}
-                        </select>
-                        <textarea
-                            bind:value={signMessage}
-                            class="w-full rounded border px-2 py-1 font-mono text-xs"
-                            rows="3"
-                            placeholder={`Message to sign (EIP-191 wrapped for Ethereum, raw UTF-8 for Solana)`}
-                            disabled={signing_}
-                        ></textarea>
-                        {#if signError}
-                            <p class="text-xs text-red-600">{signError}</p>
-                        {/if}
-                        <div class="flex gap-2">
-                            <button
-                                type="submit"
-                                class="flex-1 rounded bg-purple-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-purple-700 disabled:bg-purple-300"
-                                disabled={signing_}
-                            >
-                                {signing_ ? "Announcing…" : "Preview"}
-                            </button>
-                            <button
-                                type="button"
-                                class="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
-                                on:click={() => {
-                                    showSignForm = false;
-                                    signMessage = "";
-                                    signError = "";
-                                    signPreview = null;
-                                }}
-                                disabled={signing_}
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    </form>
-                {/if}
-            </div>
-        {/if}
-
-        <!-- Ext-2c: Confirm-before-broadcast modal. Shows when user
-             hits Preview on the sign form. Mirrors TUI Stage 3
-             Modal::Confirm — wallet / message / EIP-191 hash (for
-             secp256k1 only) / explicit broadcast question. The hash
-             shown here is computed client-side for display; background
-             recomputes before signing so a tampered popup can't
-             deceive the confirmation. -->
+        <!-- Confirm before broadcasting a signing request. The hash
+             shown is computed client-side for display only; the
+             background recomputes it before signing. -->
         {#if signPreview}
-            <div
-                class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="sign-preview-title"
-            >
-                <div class="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
-                    <h3
-                        id="sign-preview-title"
-                        class="mb-3 text-sm font-bold text-purple-900"
-                    >
-                        Confirm signing request
-                    </h3>
-                    <dl class="space-y-2 text-xs">
-                        <div>
-                            <dt class="font-semibold text-gray-700">Wallet</dt>
-                            <dd class="text-gray-900">
-                                {signPreview.walletName}
-                                <span class="text-gray-500">·</span>
-                                <span class="text-gray-500"
-                                    >{signPreview.walletBlockchain}</span
-                                >
-                            </dd>
-                            <dd
-                                class="break-all font-mono text-[10px] text-gray-500"
+            <Modal title="Confirm signing request" on:close={cancelSignPreview}>
+                <dl class="space-y-3 text-sm">
+                    <div>
+                        <dt class="label mb-1">Wallet</dt>
+                        <dd>
+                            {signPreview.walletName}
+                            <span class="text-muted">
+                                · {chainLabel(signPreview.walletBlockchain)}</span
                             >
-                                {signPreview.walletAddress}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="font-semibold text-gray-700">Message</dt>
-                            <dd
-                                class="max-h-24 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-50 p-2 font-mono text-[11px] text-gray-900"
-                            >
-                                {signPreview.message}
-                            </dd>
-                        </div>
-                        {#if signPreview.eip191Hash}
-                            <div>
-                                <dt class="font-semibold text-gray-700">
-                                    EIP-191 hash
-                                    <span class="text-gray-500"
-                                        >(ecrecover-compatible)</span
-                                    >
-                                </dt>
-                                <dd
-                                    class="break-all rounded bg-amber-50 p-2 font-mono text-[10px] text-amber-900"
-                                >
-                                    {signPreview.eip191Hash}
-                                </dd>
-                            </div>
-                        {/if}
-                    </dl>
-                    <p class="mt-3 text-xs text-gray-600">
-                        Broadcast this signing request to co-signers? Once
-                        announced, the ceremony cannot be revoked.
-                    </p>
-                    {#if signError}
-                        <p class="mt-2 text-xs text-red-600">{signError}</p>
-                    {/if}
-                    <div class="mt-4 flex gap-2">
-                        <button
-                            type="button"
-                            class="flex-1 rounded bg-purple-600 px-3 py-2 text-xs font-medium text-white hover:bg-purple-700 disabled:bg-purple-300"
-                            on:click={confirmSignPreview}
-                            disabled={signing_}
-                        >
-                            {signing_ ? "Broadcasting…" : "Confirm & Broadcast"}
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded border border-gray-300 px-3 py-2 text-xs hover:bg-gray-50"
-                            on:click={cancelSignPreview}
-                            disabled={signing_}
-                        >
-                            Cancel
-                        </button>
+                        </dd>
+                        <dd class="mono break-all text-[11px] text-muted">
+                            {signPreview.walletAddress}
+                        </dd>
                     </div>
-                </div>
-            </div>
-        {/if}
-
-        <!-- Ext-3b: TUI Stage 1 auto-modal for incoming signing
-             invites. Pops when a signing session_available broadcast
-             arrives for which we're a listed participant but not
-             proposer. Review → join the ceremony (routes through
-             the existing JOIN_DKG_SESSION path which handles signing
-             too). Later → dismiss this specific session_id; stays
-             in invites list but won't re-pop on status updates. -->
-        {#if incomingSigningInvite}
-            <div
-                class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="incoming-sign-title"
-            >
-                <div class="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
-                    <h3
-                        id="incoming-sign-title"
-                        class="mb-3 text-sm font-bold text-orange-900"
-                    >
-                        🔏 Signing request from co-signer
-                    </h3>
-                    <dl class="space-y-2 text-xs">
+                    <div>
+                        <dt class="label mb-1">Message</dt>
+                        <dd
+                            class="mono max-h-28 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-2 p-2 text-xs"
+                        >
+                            {signPreview.message}
+                        </dd>
+                    </div>
+                    {#if signPreview.eip191Hash}
                         <div>
-                            <dt class="font-semibold text-gray-700">From</dt>
-                            <dd class="break-all font-mono text-gray-900">
-                                {incomingSigningInvite.proposer_id}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="font-semibold text-gray-700">Wallet</dt>
-                            <dd class="text-gray-900">
-                                {incomingSigningInvite.wallet_name ?? "(unnamed)"}
-                                <span class="text-gray-500">·</span>
-                                <span class="text-gray-500">
-                                    {incomingSigningInvite.blockchain ?? "?"}
-                                </span>
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="font-semibold text-gray-700">
-                                Threshold
+                            <dt class="label mb-1">
+                                EIP-191 hash
+                                <span class="font-normal text-faint"
+                                    >(ecrecover-ready)</span
+                                >
                             </dt>
-                            <dd class="text-gray-900">
-                                {incomingSigningInvite.threshold} of
-                                {incomingSigningInvite.total}
-                            </dd>
-                        </div>
-                        <div>
-                            <dt class="font-semibold text-gray-700">Message</dt>
                             <dd
-                                class="max-h-20 overflow-auto break-all rounded bg-gray-50 p-2 font-mono text-[10px] text-gray-900"
+                                class="mono break-all rounded-lg bg-warning-soft p-2 text-[10px] text-warning-fg"
                             >
-                                {signingMessagePreview(
-                                    incomingSigningInvite.signing_message_hex,
-                                    incomingSigningInvite.blockchain,
-                                )}
+                                {signPreview.eip191Hash}
                             </dd>
                         </div>
-                    </dl>
-                    <p class="mt-3 text-xs text-gray-600">
-                        Joining contributes your FROST share to reach
-                        threshold. The aggregated signature is visible to
-                        all participants.
-                    </p>
-                    <div class="mt-4 flex gap-2">
-                        <button
-                            type="button"
-                            class="flex-1 rounded bg-orange-600 px-3 py-2 text-xs font-medium text-white hover:bg-orange-700"
-                            on:click={reviewSigningInvite}
-                        >
-                            Review + Join
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded border border-red-300 px-3 py-2 text-xs text-red-700 hover:bg-red-50"
-                            on:click={declineSigningInvite}
-                            title="Notify the proposer that you decline — they see a toast + roster ✗"
-                        >
-                            Decline
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded border border-gray-300 px-3 py-2 text-xs hover:bg-gray-50"
-                            on:click={laterSigningInvite}
-                            title="Dismiss without notifying — you can still join later from the invites list"
-                        >
-                            Later
-                        </button>
-                    </div>
+                    {/if}
+                </dl>
+                <p class="mt-3 text-xs text-muted">
+                    Once broadcast to your co-signers, the request can't be
+                    revoked.
+                </p>
+                {#if signError}
+                    <p class="mt-2 text-xs text-danger-fg">{signError}</p>
+                {/if}
+                <div class="mt-4 flex gap-2">
+                    <Button block on:click={confirmSignPreview} disabled={signing_}>
+                        {signing_ ? "Broadcasting…" : "Confirm & broadcast"}
+                    </Button>
+                    <Button
+                        variant="secondary"
+                        on:click={cancelSignPreview}
+                        disabled={signing_}
+                    >
+                        Cancel
+                    </Button>
                 </div>
-            </div>
+            </Modal>
         {/if}
 
-        <!-- Ext-3c: peer-decline toast. Proposer sees this when a
-             co-signer relays SigningDecline via the signal server.
-             Amber + transient (auto-dismisses after 6s, handled in
-             the case handler). Stacked if multiple declines arrive. -->
-        {#if peerDeclineToasts.length > 0}
-            <div class="fixed top-4 right-4 z-40 space-y-2">
-                {#each peerDeclineToasts as toast (toast.expiresAt)}
-                    <div
-                        class="rounded border border-amber-300 bg-amber-50 p-2 shadow-md"
+        <!-- Incoming signing request from a co-signer (auto-popped) -->
+        {#if incomingSigningInvite}
+            <Modal
+                title="Signing request"
+                subtitle="From a co-signer"
+                dismissable={false}
+            >
+                <dl class="space-y-3 text-sm">
+                    <div>
+                        <dt class="label mb-1">From</dt>
+                        <dd class="mono break-all">
+                            {incomingSigningInvite.proposer_id}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="label mb-1">Wallet</dt>
+                        <dd>
+                            {incomingSigningInvite.wallet_name ?? "(unnamed)"}
+                            <span class="text-muted"
+                                >· {chainLabel(
+                                    incomingSigningInvite.blockchain,
+                                )}</span
+                            >
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="label mb-1">Threshold</dt>
+                        <dd>
+                            {incomingSigningInvite.threshold} of
+                            {incomingSigningInvite.total}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="label mb-1">Message</dt>
+                        <dd
+                            class="mono max-h-24 overflow-auto break-all rounded-lg bg-surface-2 p-2 text-[10px]"
+                        >
+                            {signingMessagePreview(
+                                incomingSigningInvite.signing_message_hex,
+                                incomingSigningInvite.blockchain,
+                            )}
+                        </dd>
+                    </div>
+                </dl>
+                <p class="mt-3 text-xs text-muted">
+                    Joining contributes your share toward the threshold. The
+                    final signature is visible to all participants.
+                </p>
+                <div class="mt-4 flex gap-2">
+                    <Button block variant="success" on:click={reviewSigningInvite}>
+                        Review &amp; join
+                    </Button>
+                    <Button
+                        variant="danger"
+                        on:click={declineSigningInvite}
+                        title="Tell the proposer you decline"
                     >
-                        <p class="text-xs font-semibold text-amber-900">
-                            ✗ Peer declined
-                        </p>
-                        <p class="text-[10px] text-amber-800 font-mono">
+                        Decline
+                    </Button>
+                    <Button
+                        variant="ghost"
+                        on:click={laterSigningInvite}
+                        title="Dismiss; you can still join later"
+                    >
+                        Later
+                    </Button>
+                </div>
+            </Modal>
+        {/if}
+
+        <!-- Peer-decline toasts (auto-dismiss after 6s) -->
+        {#if peerDeclineToasts.length > 0}
+            <div class="fixed right-4 top-4 z-40 space-y-2">
+                {#each peerDeclineToasts as toast (toast.expiresAt)}
+                    <div class="alert alert-warning shadow-lg">
+                        <p class="font-semibold">A co-signer declined</p>
+                        <p class="mono text-[10px] opacity-80">
                             {toast.declinerId}
                         </p>
                     </div>
@@ -1910,784 +2035,668 @@
             </div>
         {/if}
 
-        <!-- Ext-2d-progress: live signing roster. Renders while the
-             ceremony is running (between InitiateSigning and
-             AggregatedSignature). Each selected signer gets a row
-             with two checkmarks: ✓ = they submitted their round-1
-             commitment, ✓✓ = they also submitted their round-2
-             share. Mirrors TUI's DkgProgressComponent overlay
-             (051cdbc). Disappears when signingCompleted fires. -->
+        <!-- Live signing roster: ✓ = commitment, ✓✓ = signature share -->
         {#if signingProgress && !signatureBanner}
-            <div
-                class="mb-4 rounded border border-blue-300 bg-blue-50 p-3"
-            >
-                <p class="mb-2 text-sm font-semibold text-blue-900">
-                    Signing Progress
-                    <span class="ml-2 text-xs font-normal text-blue-700">
-                        {signingProgress.state}
-                    </span>
+            <div class="card card-pad">
+                <p class="mb-2 flex items-center gap-2 text-sm font-semibold">
+                    Signing in progress
+                    <span class="badge badge-info">{signingProgress.state}</span>
                 </p>
-                <ul class="space-y-1">
+                <ul class="space-y-1.5">
                     {#each signingProgress.selectedSigners as signer (signer)}
                         {@const hasCommit =
-                            signingProgress.commitmentsReceived.includes(
-                                signer,
-                            )}
+                            signingProgress.commitmentsReceived.includes(signer)}
                         {@const hasShare =
                             signingProgress.sharesReceived.includes(signer)}
                         {@const isSelf = signer === appState.deviceId}
-                        <li
-                            class="flex items-center justify-between rounded bg-white px-2 py-1 text-xs border border-blue-100"
-                        >
-                            <span
-                                class="truncate font-mono"
-                                class:font-semibold={isSelf}
-                            >
+                        <li class="list-row py-1.5 text-xs">
+                            <span class="mono truncate" class:font-semibold={isSelf}>
                                 {signer}
                                 {#if isSelf}
-                                    <span class="text-blue-600">(you)</span>
+                                    <span class="text-primary">(you)</span>
                                 {/if}
                             </span>
-                            <span class="ml-2 flex items-center gap-1.5">
-                                <span
-                                    class="rounded px-1.5 py-0.5 text-[10px] font-medium"
-                                    class:bg-gray-100={!hasCommit}
-                                    class:text-gray-400={!hasCommit}
-                                    class:bg-blue-100={hasCommit && !hasShare}
-                                    class:text-blue-800={hasCommit && !hasShare}
-                                    class:bg-green-100={hasShare}
-                                    class:text-green-800={hasShare}
-                                    title={hasShare
-                                        ? "Commitment + share received"
-                                        : hasCommit
-                                          ? "Commitment received"
-                                          : "Waiting for commitment"}
-                                >
-                                    {hasShare
-                                        ? "✓✓"
-                                        : hasCommit
-                                          ? "✓"
-                                          : "…"}
-                                </span>
+                            <span
+                                class="badge {hasShare
+                                    ? 'badge-success'
+                                    : hasCommit
+                                      ? 'badge-info'
+                                      : 'badge-muted'}"
+                                title={hasShare
+                                    ? "Commitment + share received"
+                                    : hasCommit
+                                      ? "Commitment received"
+                                      : "Waiting"}
+                            >
+                                {hasShare ? "✓✓" : hasCommit ? "✓" : "…"}
                             </span>
                         </li>
                     {/each}
                 </ul>
-                <p class="mt-2 text-[10px] text-blue-700">
-                    ✓ = commitment sent · ✓✓ = signature share sent · … =
-                    waiting
+                <p class="mt-2 text-[10px] text-muted">
+                    ✓ = commitment sent · ✓✓ = signature share sent · … = waiting
                 </p>
             </div>
         {/if}
 
-        <!-- Ext-2e: Signature Complete banner. Renders when the
-             FROST ceremony finalizes (signingCompleted message
-             from background). Green on purpose — DKG complete is
-             green too, keeping the "big success state" visual
-             language consistent. EIP-191 badge for secp256k1 so
-             the user knows the hex is directly ecrecover-ready. -->
+        <!-- Signature complete -->
         {#if signatureBanner}
-            <div
-                class="mb-4 rounded border border-green-300 bg-green-50 p-3"
-            >
+            <div class="card card-pad">
                 <div class="mb-2 flex items-center justify-between">
-                    <p class="text-sm font-semibold text-green-900">
-                        ✓ Signature complete
+                    <p
+                        class="flex items-center gap-1.5 text-sm font-semibold text-success-fg"
+                    >
+                        <Icon name="check" size={16} /> Signature complete
                     </p>
                     <button
-                        type="button"
-                        class="text-xs text-green-700 hover:text-green-900"
+                        class="icon-btn"
+                        style="width:1.8rem;height:1.8rem"
                         on:click={dismissSignatureBanner}
                         aria-label="Dismiss"
                     >
-                        ✕
+                        <Icon name="x" size={15} />
                     </button>
                 </div>
-                <dl class="space-y-1.5 text-xs">
-                    {#if signatureBanner.blockchain === "ethereum"}
-                        <dd>
-                            <span
-                                class="inline-block rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
+                <dl class="space-y-2 text-xs">
+                    <dd>
+                        {#if signatureBanner.blockchain === "ethereum"}
+                            <span class="badge badge-warning"
+                                >EIP-191 · ecrecover-ready</span
                             >
-                                EIP-191 · ecrecover-compatible
-                            </span>
-                        </dd>
-                    {:else}
-                        <dd>
-                            <span
-                                class="inline-block rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-900"
-                            >
-                                ed25519 · Solana
-                            </span>
-                        </dd>
-                    {/if}
+                        {:else}
+                            <span class="badge badge-info">ed25519 · Solana</span>
+                        {/if}
+                    </dd>
                     <div>
-                        <dt class="font-semibold text-gray-700">Signature</dt>
+                        <dt class="label mb-1">Signature</dt>
                         <dd
-                            class="break-all rounded bg-white p-2 font-mono text-[10px] text-gray-900 border border-green-200"
+                            class="mono break-all rounded-lg bg-surface-2 p-2 text-[10px]"
                         >
                             0x{signatureBanner.signature.replace(/^0x/, "")}
                         </dd>
                     </div>
                     <div>
-                        <dt class="font-semibold text-gray-700">Message hash</dt>
-                        <dd
-                            class="break-all font-mono text-[10px] text-gray-600"
-                        >
+                        <dt class="label mb-1">Message hash</dt>
+                        <dd class="mono break-all text-[10px] text-muted">
                             0x{signatureBanner.messageHex.replace(/^0x/, "")}
                         </dd>
                     </div>
                 </dl>
-                <div class="mt-3 flex gap-2">
-                    <button
-                        type="button"
-                        class="flex-1 rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
-                        on:click={copySignatureToClipboard}
+                <Button
+                    class="mt-3"
+                    block
+                    variant="success"
+                    on:click={copySignatureToClipboard}
+                >
+                    {signatureCopied ? "✓ Copied" : "Copy signature"}
+                </Button>
+            </div>
+        {/if}
+
+        <!-- Wallet / ceremony status (the address itself lives in the
+             hero card above; this block carries the save form + the
+             in-progress states). -->
+        {#if appState.sessionInfo && appState.dkgState === DkgState.Complete}
+            <!-- Save flow: only when the WASM actually exported a
+                 keystore (pendingKeystoreReady). On SW restart the flag
+                 is force-reset, so a stale reload won't offer to save
+                 empty data. -->
+            {#if appState.pendingKeystoreReady}
+                <form
+                    class="card card-pad space-y-3"
+                    on:submit|preventDefault={async () => {
+                        saveError = "";
+                        if (!savePassword || savePassword.length < 8) {
+                            saveError =
+                                "Password must be at least 8 characters";
+                            return;
+                        }
+                        if (savePassword !== saveConfirm) {
+                            saveError = "Passwords don't match";
+                            return;
+                        }
+                        saving = true;
+                        try {
+                            const response = await chrome.runtime.sendMessage({
+                                type: MESSAGE_TYPES.SAVE_DKG_WALLET,
+                                password: savePassword,
+                                walletName:
+                                    saveWalletName.trim() || undefined,
+                            });
+                            if (response?.success) {
+                                console.log(
+                                    "[UI] Wallet saved:",
+                                    response.walletId,
+                                );
+                                savePassword = "";
+                                saveConfirm = "";
+                                saveWalletName = "";
+                            } else {
+                                saveError =
+                                    response?.error ??
+                                    "Save failed (no error returned)";
+                            }
+                        } catch (e) {
+                            saveError = (e as Error).message ?? String(e);
+                        } finally {
+                            saving = false;
+                        }
+                    }}
+                >
+                    <p class="flex items-center gap-1.5 text-sm font-semibold">
+                        <Icon name="download" size={15} /> Save this wallet
+                    </p>
+                    <p class="-mt-1 text-xs text-muted">
+                        Encrypt your key share with a password so it survives
+                        restarts.
+                    </p>
+                    <input
+                        type="text"
+                        placeholder="Wallet name (optional)"
+                        bind:value={saveWalletName}
+                        class="input"
+                        disabled={saving}
+                    />
+                    <input
+                        type="password"
+                        placeholder="Password (at least 8 characters)"
+                        bind:value={savePassword}
+                        class="input"
+                        disabled={saving}
+                        autocomplete="new-password"
+                    />
+                    <input
+                        type="password"
+                        placeholder="Confirm password"
+                        bind:value={saveConfirm}
+                        class="input"
+                        disabled={saving}
+                        autocomplete="new-password"
+                    />
+                    {#if saveError}
+                        <p class="text-xs text-danger-fg">{saveError}</p>
+                    {/if}
+                    <Button type="submit" block variant="success" disabled={saving}>
+                        {saving ? "Encrypting…" : "Encrypt & save"}
+                    </Button>
+                </form>
+            {/if}
+        {:else if appState.sessionInfo && appState.dkgState === DkgState.KeystoreImported}
+            <div class="alert alert-warning">
+                Keystore imported — waiting for co-signers to come online before
+                signing.
+            </div>
+        {:else if appState.sessionInfo && appState.dkgState === DkgState.Initializing}
+            <!-- Creator-side: waiting for joiners to discover the session -->
+            {@const needed =
+                (appState.sessionInfo.total ?? 0) -
+                (appState.sessionInfo.participants?.length ?? 0)}
+            <div class="card card-pad">
+                <p class="flex items-center gap-1.5 text-sm font-semibold">
+                    <Icon name="users" size={15} /> Waiting for people to join
+                </p>
+                <p class="mt-2 text-xs text-muted">
+                    {appState.sessionInfo.threshold}-of-{appState.sessionInfo
+                        .total} · share this session so others can join:
+                </p>
+                <div class="mt-1 flex items-center gap-2">
+                    <code
+                        class="mono min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-2 py-1 text-xs"
+                        >{appState.sessionInfo.session_id}</code
                     >
-                        {signatureCopied ? "✓ Copied" : "Copy signature"}
-                    </button>
+                    <CopyButton
+                        value={appState.sessionInfo.session_id}
+                        variant="icon"
+                    />
+                </div>
+                <ul class="mt-3 space-y-1">
+                    {#each appState.sessionInfo.participants ?? [] as pid}
+                        <li class="flex items-center gap-2 text-xs">
+                            <span
+                                class="h-1.5 w-1.5 rounded-full {pid ===
+                                appState.deviceId
+                                    ? 'bg-success'
+                                    : 'bg-faint'}"
+                            ></span>
+                            <span class="mono truncate"
+                                >{pid}{pid === appState.deviceId
+                                    ? " (you)"
+                                    : ""}</span
+                            >
+                        </li>
+                    {/each}
+                </ul>
+                {#if needed > 0}
+                    <p class="mt-2 text-xs text-muted">
+                        Need {needed} more participant{needed === 1 ? "" : "s"}.
+                    </p>
+                {/if}
+            </div>
+        {:else if appState.sessionInfo && appState.dkgState !== DkgState.Idle}
+            <div class="alert alert-info">
+                Generating keys — your wallet address will appear when complete.
+            </div>
+        {/if}
+
+        <!-- Multi-account support -->
+        {#if appState.dkgState === DkgState.Complete || appState.dkgState === DkgState.KeystoreImported}
+            <AccountManager blockchain={appState.chain} />
+        {/if}
+
+        <!-- dApp signature requests -->
+        {#if signatureRequests.length > 0}
+            <div>
+                <h2 class="section-title mb-2">Signature requests</h2>
+                <div class="space-y-2">
+                    {#each signatureRequests as request (request.signingId)}
+                        <SignatureRequest
+                            signingId={request.signingId}
+                            message={request.message}
+                            origin={request.origin}
+                            fromAddress={request.fromAddress}
+                            on:complete={handleSignatureRequestComplete}
+                        />
+                    {/each}
                 </div>
             </div>
         {/if}
 
-        <!-- Wallet Status Banner -->
-        <div class="mb-4 p-3 border rounded">
-            <div class="mb-2">
-                <div class="font-bold">Current Network:</div>
+    <!-- Active shared-wallet session (DKG ceremony in progress / done) -->
+    {#if appState.sessionInfo}
+        <div class="card card-pad">
+            <div class="mb-3 flex items-center justify-between">
+                <h3 class="flex items-center gap-1.5 text-sm font-bold">
+                    <Icon name="users" size={16} /> Session
+                </h3>
+                {#if appState.dkgState === DkgState.Complete}
+                    <span class="badge badge-success">Ready to sign</span>
+                {:else if appState.dkgState === DkgState.KeystoreImported}
+                    <span class="badge badge-warning">Connect co-signers</span>
+                {:else if appState.dkgState === DkgState.Initializing || appState.dkgState === DkgState.Round1InProgress || appState.dkgState === DkgState.Round1Complete || appState.dkgState === DkgState.Round2InProgress || appState.dkgState === DkgState.Round2Complete || appState.dkgState === DkgState.Finalizing}
+                    <span class="badge badge-info">Generating keys…</span>
+                {:else if appState.dkgState === DkgState.Failed}
+                    <span class="badge badge-danger">Failed</span>
+                {:else if appState.meshStatus?.type === MeshStatusType.Ready}
+                    <span class="badge badge-warning">Ready to start</span>
+                {:else}
+                    <span class="badge badge-muted">Connecting…</span>
+                {/if}
             </div>
 
-            <div class="p-2 bg-blue-50 border border-blue-200 rounded mb-2">
-                <p class="text-blue-700">
-                    {appState.chain === "ethereum"
-                        ? "Ethereum (secp256k1)"
-                        : "Solana (ed25519)"}
-                </p>
-            </div>
-
-            {#if appState.sessionInfo && appState.dkgState === DkgState.Complete}
-                <div class="p-2 bg-green-50 border border-green-200 rounded">
-                    <p class="text-sm font-medium text-green-900 mb-1">
-                        ✓ DKG Complete
+            <div class="grid grid-cols-2 gap-2 text-xs">
+                <div class="rounded-lg bg-surface-2 p-2">
+                    <span class="text-faint">Threshold</span>
+                    <p class="text-sm font-bold">
+                        {appState.sessionInfo.threshold} of {appState.sessionInfo
+                            .total}
                     </p>
-                    {#if appState.dkgAddress}
-                        <p class="text-xs text-green-800">
-                            <span class="font-semibold">
-                                {appState.chain === "ethereum" ? "Ethereum" : "Solana"} address:
-                            </span>
-                        </p>
-                        <p class="text-xs font-mono break-all text-green-900 bg-white rounded px-1.5 py-0.5 border border-green-200">
-                            {appState.dkgAddress}
-                        </p>
-                    {/if}
-                    {#if appState.dkgGroupPublicKey}
-                        <p class="text-xs text-green-800 mt-1">
-                            <span class="font-semibold">Group public key:</span>
-                        </p>
-                        <p class="text-xs font-mono break-all text-green-900 bg-white rounded px-1.5 py-0.5 border border-green-200">
-                            {appState.dkgGroupPublicKey}
-                        </p>
-                    {/if}
+                </div>
+                <div class="rounded-lg bg-surface-2 p-2">
+                    <span class="text-faint">Stage</span>
+                    <p class="text-sm font-semibold">
+                        {DkgState[appState.dkgState] || "Unknown"}
+                    </p>
+                </div>
+            </div>
 
-                    <!-- Ext-1d save flow: only show when the WASM
-                         actually exported a keystore (pendingKeystoreReady).
-                         On SW restart the flag is force-reset by arch
-                         reminder #1's cleanup, so a stale popup reload
-                         won't offer to "save" empty data. -->
-                    {#if appState.pendingKeystoreReady}
-                        <form
-                            class="mt-3 space-y-2 rounded border border-green-300 bg-white p-2"
-                            on:submit|preventDefault={async () => {
-                                saveError = "";
-                                if (!savePassword || savePassword.length < 8) {
-                                    saveError = "Password must be at least 8 characters";
-                                    return;
-                                }
-                                if (savePassword !== saveConfirm) {
-                                    saveError = "Passwords don't match";
-                                    return;
-                                }
-                                saving = true;
-                                try {
-                                    const response = await chrome.runtime.sendMessage({
-                                        type: MESSAGE_TYPES.SAVE_DKG_WALLET,
-                                        password: savePassword,
-                                        walletName: saveWalletName.trim() || undefined,
-                                    });
-                                    if (response?.success) {
-                                        console.log(
-                                            "[UI] Wallet saved:",
-                                            response.walletId,
-                                        );
-                                        savePassword = "";
-                                        saveConfirm = "";
-                                        saveWalletName = "";
-                                    } else {
-                                        saveError =
-                                            response?.error ?? "Save failed (no error returned)";
-                                    }
-                                } catch (e) {
-                                    saveError = (e as Error).message ?? String(e);
-                                } finally {
-                                    saving = false;
-                                }
-                            }}
-                        >
-                            <p class="text-xs font-semibold text-green-900">
-                                Save this wallet
-                            </p>
-                            <input
-                                type="text"
-                                placeholder="Wallet name (optional)"
-                                bind:value={saveWalletName}
-                                class="w-full rounded border px-2 py-1 text-xs"
-                                disabled={saving}
-                            />
-                            <input
-                                type="password"
-                                placeholder="Password (≥8 chars)"
-                                bind:value={savePassword}
-                                class="w-full rounded border px-2 py-1 text-xs"
-                                disabled={saving}
-                                autocomplete="new-password"
-                            />
-                            <input
-                                type="password"
-                                placeholder="Confirm password"
-                                bind:value={saveConfirm}
-                                class="w-full rounded border px-2 py-1 text-xs"
-                                disabled={saving}
-                                autocomplete="new-password"
-                            />
-                            {#if saveError}
-                                <p class="text-xs text-red-600">{saveError}</p>
-                            {/if}
-                            <button
-                                type="submit"
-                                class="w-full rounded bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700 disabled:bg-green-300"
-                                disabled={saving}
+            <div class="mt-2 flex items-center gap-2">
+                <code
+                    class="mono min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-2 py-1 text-xs"
+                    >{appState.sessionInfo.session_id}</code
+                >
+                <CopyButton value={appState.sessionInfo.session_id} variant="icon" />
+            </div>
+
+            <div class="mt-3">
+                <div class="mb-1.5 flex items-center justify-between">
+                    <span class="label mb-0">Participants</span>
+                    <span class="text-xs text-faint">
+                        {appState.sessionInfo.accepted_devices?.length || 0}/{appState
+                            .sessionInfo.participants.length} accepted
+                    </span>
+                </div>
+                <div class="space-y-1">
+                    {#each appState.sessionInfo.participants as participant}
+                        {@const isAccepted =
+                            appState.sessionInfo.accepted_devices?.includes(
+                                participant,
+                            )}
+                        {@const isConnected =
+                            appState.webrtcConnections[participant]}
+                        <div class="list-row py-1.5 text-xs">
+                            <span
+                                class="mono truncate"
+                                class:font-semibold={participant ===
+                                    appState.deviceId}
                             >
-                                {saving ? "Encrypting + saving…" : "Encrypt & Save Wallet"}
-                            </button>
-                        </form>
-                    {:else}
-                        <p class="text-xs text-green-700 mt-1 italic">
-                            Next: enter a password to encrypt + save this keyshare.
-                        </p>
-                    {/if}
+                                {participant}{participant === appState.deviceId
+                                    ? " (you)"
+                                    : ""}
+                            </span>
+                            <span class="flex items-center gap-1.5">
+                                <span
+                                    class="badge {isAccepted
+                                        ? 'badge-success'
+                                        : 'badge-muted'}"
+                                    >{isAccepted ? "Accepted" : "Pending"}</span
+                                >
+                                {#if participant !== appState.deviceId}
+                                    <span
+                                        class="h-1.5 w-1.5 rounded-full {isConnected
+                                            ? 'bg-success'
+                                            : 'bg-faint'}"
+                                        title={isConnected
+                                            ? "Connected"
+                                            : "Not connected"}
+                                    ></span>
+                                {/if}
+                            </span>
+                        </div>
+                    {/each}
                 </div>
-            {:else if appState.sessionInfo && appState.dkgState === DkgState.KeystoreImported}
-                <div class="p-2 bg-orange-50 border border-orange-200 rounded">
-                    <p class="text-sm text-orange-700">
-                        ⚠ Keystore imported - Waiting for peers to enable signing
+            </div>
+
+            {#if appState.meshStatus?.type === MeshStatusType.Ready && appState.dkgState === DkgState.Idle}
+                <div class="mt-3 border-t border-line pt-3">
+                    <p class="mb-2 text-xs text-muted">
+                        Everyone's connected — ready to generate keys.
                     </p>
+                    <Button block disabled>Start key generation</Button>
                 </div>
-            {:else if appState.sessionInfo && appState.dkgState === DkgState.Initializing}
-                <!-- Ext-1c: creator-side waiting-for-joiners banner.
-                     Matches TUI's DKGProgress screen "waiting for
-                     participants" state. Shows the session id (for
-                     copy-paste / debug), participant list with the
-                     creator and currently-joined peers, and the
-                     outstanding count. When a peer joins via
-                     session_available update, their device id appears
-                     in participants and the counter decrements. -->
-                {@const needed = (appState.sessionInfo.total ?? 0) - (appState.sessionInfo.participants?.length ?? 0)}
-                <div class="p-2 bg-blue-50 border border-blue-200 rounded">
-                    <p class="text-sm font-medium text-blue-900 mb-1">
-                        📡 Waiting for joiners to discover this session
-                    </p>
-                    <p class="text-xs text-blue-700 font-mono break-all">
-                        Session: {appState.sessionInfo.session_id}
-                    </p>
-                    <p class="text-xs text-blue-700 mt-1">
-                        Threshold: {appState.sessionInfo.threshold}-of-{appState.sessionInfo.total}
-                        • Curve: {appState.sessionInfo.curve_type ?? "secp256k1"}
-                    </p>
-                    <div class="mt-2">
-                        <span class="text-xs font-semibold text-blue-900">Participants ({appState.sessionInfo.participants?.length ?? 0}/{appState.sessionInfo.total ?? "?"}):</span>
-                        <ul class="text-xs text-blue-800 font-mono ml-3 mt-1">
-                            {#each appState.sessionInfo.participants ?? [] as pid}
-                                <li>{pid === appState.deviceId ? `● ${pid} (you)` : `○ ${pid}`}</li>
-                            {/each}
-                        </ul>
+            {:else if appState.dkgState === DkgState.Complete}
+                <div class="mt-3 border-t border-line pt-3">
+                    <div class="alert alert-success mb-2">
+                        Wallet ready. Any {appState.sessionInfo.threshold} of {appState
+                            .sessionInfo.total} can sign together.
                     </div>
-                    {#if needed > 0}
-                        <p class="text-xs text-blue-700 mt-2">
-                            Still need {needed} more participant{needed === 1 ? "" : "s"} to reach the total.
-                        </p>
-                    {/if}
+                    <Button
+                        variant="ghost"
+                        block
+                        on:click={testMPCSigning}
+                        title="Developer: run a test signing ceremony"
+                    >
+                        Run test signing
+                    </Button>
                 </div>
-            {:else if appState.sessionInfo && appState.dkgState !== DkgState.Idle}
-                <div class="p-2 bg-yellow-50 border border-yellow-200 rounded">
-                    <p class="text-sm text-yellow-700">
-                        🔄 DKG in progress - MPC addresses will be available
-                        when complete
-                    </p>
+            {:else if appState.dkgState === DkgState.KeystoreImported}
+                <div class="mt-3 border-t border-line pt-3">
+                    <div class="alert alert-warning">
+                        Keystore imported. Get at least {appState.sessionInfo
+                            .threshold - 1} other participant{appState.sessionInfo
+                            .threshold -
+                            1 >
+                        1
+                            ? "s"
+                            : ""} from the original {appState.sessionInfo
+                            .threshold}-of-{appState.sessionInfo.total} setup to
+                        join, then the wallet is ready.
+                    </div>
+                </div>
+            {:else if appState.dkgState === DkgState.Initializing || appState.dkgState === DkgState.Round1InProgress || appState.dkgState === DkgState.Round1Complete || appState.dkgState === DkgState.Round2InProgress || appState.dkgState === DkgState.Round2Complete || appState.dkgState === DkgState.Finalizing}
+                <div class="mt-3 border-t border-line pt-3">
+                    <div class="alert alert-info">
+                        Generating keys — please keep the popup open until it
+                        completes.
+                    </div>
                 </div>
             {/if}
         </div>
-    {/if}
-
-    <!-- Account Manager - Multi-account support -->
-    {#if appState.dkgState === DkgState.Complete || appState.dkgState === DkgState.KeystoreImported}
-        <div class="mb-4">
-            <AccountManager 
-                blockchain={appState.chain}
-            />
-        </div>
-    {/if}
-    
-    <!-- Signature Requests -->
-    {#if signatureRequests.length > 0}
-        <div class="mb-4">
-            <h2 class="text-xl font-semibold mb-3">🔏 Signature Requests</h2>
-            {#each signatureRequests as request (request.signingId)}
-                <SignatureRequest
-                    signingId={request.signingId}
-                    message={request.message}
-                    origin={request.origin}
-                    fromAddress={request.fromAddress}
-                    on:complete={handleSignatureRequestComplete}
-                />
+    {:else if appState.invites && appState.invites.length > 0}
+        <!-- Pending invitations -->
+        <div class="space-y-2">
+            {#each appState.invites as invite}
+                <div class="card card-pad">
+                    <div class="mb-2 flex items-center justify-between">
+                        <h3 class="flex items-center gap-1.5 text-sm font-bold">
+                            <Icon name="users" size={15} /> Invitation
+                        </h3>
+                        <span class="badge badge-warning"
+                            >{invite.threshold} of {invite.total}</span
+                        >
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <code
+                            class="mono min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-2 py-1 text-xs"
+                            >{invite.session_id}</code
+                        >
+                    </div>
+                    <p class="mt-1 text-xs text-muted">
+                        from {invite.proposer_id}{invite.proposer_id ===
+                        appState.deviceId
+                            ? " (you)"
+                            : ""}
+                    </p>
+                    <p class="mt-2 text-xs text-muted">
+                        Join a {invite.threshold}-of-{invite.total} wallet — any
+                        {invite.threshold} participants can sign together.
+                    </p>
+                    <div class="mt-3 flex gap-2">
+                        <Button
+                            block
+                            variant="success"
+                            on:click={() => acceptInvite(invite.session_id)}
+                            disabled={acceptingSession}
+                        >
+                            {acceptingSession ? "Joining…" : "Accept & join"}
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            on:click={() => rejectInvite(invite.session_id)}
+                        >
+                            Decline
+                        </Button>
+                    </div>
+                </div>
             {/each}
         </div>
     {/if}
 
-    <!-- Network Status -->
-    <div class="mb-4 p-3 border rounded">
-        <h2 class="text-xl font-semibold mb-3">Network Status</h2>
-
-        <div class="grid grid-cols-1 gap-3 mb-3">
+    <!-- Developer options (connection, devices, manual sessions) -->
+    <Collapsible
+        title="Developer options"
+        subtitle="Connection, devices & manual sessions"
+        icon="code"
+        bind:open={showDeveloper}
+    >
+        <div class="space-y-4">
+            <!-- Device id -->
             <div>
-                <span class="block font-bold mb-1">Peer ID:</span>
-                <code class="block bg-gray-100 p-2 rounded text-sm">
-                    {appState.deviceId || "Not connected"}
-                </code>
-            </div>
-            <div>
-                <span class="block font-bold mb-1">WebSocket:</span>
-                <span
-                    class="inline-block px-2 py-1 rounded text-sm {appState.wsConnected
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-red-100 text-red-800'}"
-                >
-                    {appState.wsConnected ? "Connected" : "Disconnected"}
-                </span>
-            </div>
-        </div>
-    </div>
-
-    <!-- Connected devices - Combined with session selection when needed -->
-    <div class="mb-4 p-3 border rounded">
-        <h2 class="text-xl font-semibold mb-3">
-            Connected Devices ({appState.connecteddevices.length})
-        </h2>
-
-        {#if appState.connecteddevices && appState.connecteddevices.length > 0}
-            <ul class="space-y-2">
-                {#each appState.connecteddevices as peer}
-                    {@const webrtcStatus = appState.webrtcConnections[peer]}
-                    {@const isOwnDevice = peer === appState.deviceId}
-                    {@const showCheckbox = !isOwnDevice && !appState.invites?.length && !appState.sessionInfo}
-                    {@const isInSession = appState.sessionInfo && appState.sessionInfo.participants.includes(peer)}
-                    <li
-                        class="flex items-center justify-between p-3 bg-gray-50 rounded {showCheckbox ? 'hover:bg-gray-100' : ''}"
+                <span class="label">Your device ID</span>
+                <div class="flex items-center gap-2">
+                    <code
+                        class="mono min-w-0 flex-1 truncate rounded-lg bg-surface-2 px-2 py-1.5 text-xs"
+                        >{appState.deviceId || "Not connected"}</code
                     >
-                        <div class="flex items-center gap-3">
-                            {#if showCheckbox}
-                                <input
-                                    type="checkbox"
-                                    checked={selectedDevices.has(peer)}
-                                    disabled={!selectedDevices.has(peer) && selectedDevices.size >= appState.totalParticipants - 1}
-                                    on:change={(e) => {
-                                        if (e.currentTarget.checked) {
-                                            selectedDevices.add(peer);
-                                        } else {
-                                            selectedDevices.delete(peer);
-                                        }
-                                        selectedDevices = selectedDevices;
-                                    }}
-                                    class="w-4 h-4"
-                                />
-                            {/if}
-                            <code class="text-sm font-mono">{peer}</code>
-                            {#if isOwnDevice}
-                                <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">You</span>
-                            {/if}
-                            {#if isInSession}
-                                <span class="text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">In Session</span>
-                            {/if}
-                        </div>
+                    {#if appState.deviceId}
+                        <CopyButton value={appState.deviceId} variant="icon" />
+                    {/if}
+                </div>
+            </div>
 
-                        {#if !isOwnDevice}
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs text-gray-500">WebRTC:</span>
-                                {#if webrtcStatus === true}
-                                    <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Connected</span>
-                                    {#if appState.sessionInfo && appState.meshStatus?.type === MeshStatusType.Ready && isInSession}
-                                        <button
-                                            class="text-xs bg-blue-500 hover:bg-blue-700 text-white px-2 py-1 rounded"
-                                            on:click={() => sendDirectMessage(peer)}
+            <!-- Signal server -->
+            <div class="flex items-center justify-between">
+                <span class="label mb-0">Signal server</span>
+                <span
+                    class="badge {appState.wsConnected
+                        ? 'badge-success'
+                        : 'badge-danger'}"
+                    >{appState.wsConnected ? "Connected" : "Disconnected"}</span
+                >
+            </div>
+
+            <!-- Connected devices -->
+            <div>
+                <span class="label"
+                    >Connected devices ({appState.connecteddevices.length})</span
+                >
+                {#if appState.connecteddevices && appState.connecteddevices.length > 0}
+                    <ul class="space-y-1.5">
+                        {#each appState.connecteddevices as peer}
+                            {@const webrtcStatus =
+                                appState.webrtcConnections[peer]}
+                            {@const isOwnDevice = peer === appState.deviceId}
+                            {@const showCheckbox =
+                                !isOwnDevice &&
+                                !appState.invites?.length &&
+                                !appState.sessionInfo}
+                            {@const isInSession =
+                                appState.sessionInfo &&
+                                appState.sessionInfo.participants.includes(peer)}
+                            <li class="list-row py-1.5 text-xs">
+                                <div class="flex min-w-0 items-center gap-2">
+                                    {#if showCheckbox}
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedDevices.has(peer)}
+                                            disabled={!selectedDevices.has(
+                                                peer,
+                                            ) &&
+                                                selectedDevices.size >=
+                                                    appState.totalParticipants -
+                                                        1}
+                                            on:change={(e) => {
+                                                if (e.currentTarget.checked) {
+                                                    selectedDevices.add(peer);
+                                                } else {
+                                                    selectedDevices.delete(peer);
+                                                }
+                                                selectedDevices = selectedDevices;
+                                            }}
+                                            class="h-4 w-4 accent-[var(--c-primary)]"
+                                        />
+                                    {/if}
+                                    <code class="mono truncate">{peer}</code>
+                                    {#if isOwnDevice}
+                                        <span class="badge badge-primary">You</span>
+                                    {/if}
+                                    {#if isInSession}
+                                        <span class="badge badge-info"
+                                            >In session</span
                                         >
-                                            Test Message
-                                        </button>
-                                    {/if}
-                                {:else}
-                                    <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded">Disconnected</span>
-                                {/if}
-                            </div>
-                        {/if}
-                    </li>
-                {/each}
-            </ul>
-            
-            {#if selectedDevices.size > 0 && !appState.invites?.length && !appState.sessionInfo}
-                <p class="text-sm text-blue-600 mt-2">
-                    Selected {selectedDevices.size} of {appState.totalParticipants - 1} required participants
-                </p>
-            {/if}
-        {:else}
-            <p class="text-gray-500 text-center py-4">No devices connected</p>
-        {/if}
-    </div>
-
-    <!-- MPC Session Management -->
-    <div class="mb-4 p-3 border rounded">
-        <h2 class="text-xl font-semibold mb-3">MPC Session</h2>
-
-        {#if appState.sessionInfo}
-            <!-- Active Session -->
-            <div class="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-300 rounded-lg p-4 shadow-md">
-                <div class="flex items-center justify-between mb-3">
-                    <h3 class="text-lg font-bold text-green-800 flex items-center">
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                        Active Session
-                    </h3>
-                    <div class="flex items-center space-x-2">
-                        {#if appState.dkgState === DkgState.Complete}
-                            <span class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full font-semibold">
-                                ✓ Ready to Sign
-                            </span>
-                        {:else if appState.dkgState === DkgState.KeystoreImported}
-                            <span class="text-xs bg-orange-100 text-orange-800 px-2 py-1 rounded-full font-semibold">
-                                ⚠ Keystore Imported - Connect Peers
-                            </span>
-                        {:else if appState.dkgState === DkgState.Initializing || 
-                                  appState.dkgState === DkgState.Round1InProgress || 
-                                  appState.dkgState === DkgState.Round1Complete || 
-                                  appState.dkgState === DkgState.Round2InProgress || 
-                                  appState.dkgState === DkgState.Round2Complete || 
-                                  appState.dkgState === DkgState.Finalizing}
-                            <span class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full font-semibold animate-pulse">
-                                DKG in Progress...
-                            </span>
-                        {:else if appState.dkgState === DkgState.Failed}
-                            <span class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded-full font-semibold">
-                                DKG Failed
-                            </span>
-                        {:else if appState.meshStatus?.type === MeshStatusType.Ready}
-                            <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-semibold">
-                                Ready for DKG
-                            </span>
-                        {:else if appState.meshStatus?.type === MeshStatusType.PartiallyReady || appState.sessionInfo.accepted_devices?.length !== appState.sessionInfo.participants.length}
-                            <span class="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full font-semibold animate-pulse">
-                                Waiting for Participants...
-                            </span>
-                        {:else}
-                            <span class="text-xs bg-gray-100 text-gray-800 px-2 py-1 rounded-full font-semibold">
-                                Setting Up... (DKG: {appState.dkgState})
-                            </span>
-                        {/if}
-                    </div>
-                </div>
-                
-                <div class="bg-white bg-opacity-70 rounded p-3 mb-3">
-                    <div class="grid grid-cols-2 gap-3 text-sm">
-                        <div>
-                            <span class="text-gray-600">Session ID:</span>
-                            <p class="font-mono text-xs bg-gray-100 px-2 py-1 rounded mt-1 truncate">
-                                {appState.sessionInfo.session_id}
-                            </p>
-                        </div>
-                        <div>
-                            <span class="text-gray-600">Threshold:</span>
-                            <p class="font-bold text-green-700 text-lg">
-                                {appState.sessionInfo.threshold} of {appState.sessionInfo.total}
-                            </p>
-                        </div>
-                        <div>
-                            <span class="text-gray-600">DKG Status:</span>
-                            <p class="font-semibold {appState.dkgState === DkgState.Complete ? 'text-green-700' : appState.dkgState === DkgState.Failed ? 'text-red-700' : 'text-yellow-700'}">
-                                {DkgState[appState.dkgState] || "Unknown"}
-                            </p>
-                        </div>
-                        <div>
-                            <span class="text-gray-600">Proposer:</span>
-                            <p class="font-mono text-xs truncate {appState.sessionInfo.proposer_id === appState.deviceId ? 'text-blue-700 font-semibold' : ''}">
-                                {appState.sessionInfo.proposer_id}{appState.sessionInfo.proposer_id === appState.deviceId ? ' (you)' : ''}
-                            </p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mb-3">
-                    <div class="flex justify-between items-center mb-2">
-                        <span class="text-sm font-semibold text-gray-700">Participants:</span>
-                        <span class="text-xs text-gray-500">
-                            {appState.sessionInfo.accepted_devices?.length || 0}/{appState.sessionInfo.participants.length} accepted
-                        </span>
-                    </div>
-                    <div class="space-y-1">
-                        {#each appState.sessionInfo.participants as participant}
-                            {@const isAccepted = appState.sessionInfo.accepted_devices?.includes(participant)}
-                            {@const isConnected = appState.webrtcConnections[participant]}
-                            <div class="flex items-center justify-between p-2 rounded {participant === appState.deviceId ? 'bg-blue-50' : 'bg-gray-50'}">
-                                <span class="text-sm font-mono {participant === appState.deviceId ? 'text-blue-700 font-semibold' : ''}">
-                                    {participant}{participant === appState.deviceId ? ' (you)' : ''}
-                                </span>
-                                <div class="flex items-center space-x-2">
-                                    {#if isAccepted}
-                                        <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">
-                                            Accepted
-                                        </span>
-                                    {:else}
-                                        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                                            Pending
-                                        </span>
-                                    {/if}
-                                    {#if participant !== appState.deviceId}
-                                        {#if isConnected}
-                                            <span class="w-2 h-2 bg-green-500 rounded-full" title="Connected"></span>
-                                        {:else}
-                                            <span class="w-2 h-2 bg-gray-300 rounded-full" title="Not connected"></span>
-                                        {/if}
                                     {/if}
                                 </div>
-                            </div>
+                                {#if !isOwnDevice}
+                                    <div class="flex items-center gap-1.5">
+                                        {#if webrtcStatus === true}
+                                            <span class="badge badge-success"
+                                                >P2P</span
+                                            >
+                                            {#if appState.sessionInfo && appState.meshStatus?.type === MeshStatusType.Ready && isInSession}
+                                                <button
+                                                    class="btn btn-ghost btn-sm"
+                                                    on:click={() =>
+                                                        sendDirectMessage(peer)}
+                                                >
+                                                    Ping
+                                                </button>
+                                            {/if}
+                                        {:else}
+                                            <span class="badge badge-muted">—</span>
+                                        {/if}
+                                    </div>
+                                {/if}
+                            </li>
                         {/each}
-                    </div>
-                </div>
-
-                {#if appState.meshStatus?.type === MeshStatusType.Ready && appState.dkgState === DkgState.Idle}
-                    <div class="border-t border-green-200 pt-3">
-                        <p class="text-sm text-gray-600 mb-2">
-                            All participants are connected. Ready to start the Distributed Key Generation process.
+                    </ul>
+                    {#if selectedDevices.size > 0 && !appState.invites?.length && !appState.sessionInfo}
+                        <p class="mt-2 text-xs text-primary">
+                            Selected {selectedDevices.size} of {appState.totalParticipants -
+                                1} required
                         </p>
-                        <button class="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md">
-                            Start DKG Process
-                        </button>
-                    </div>
-                {:else if appState.dkgState === DkgState.Complete}
-                    <div class="border-t border-green-200 pt-3">
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
-                            <p class="text-sm text-green-800 font-semibold flex items-center">
-                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                </svg>
-                                Key Generation Complete
-                            </p>
-                            <p class="text-xs text-green-700 mt-1">
-                                Your MPC wallet is ready. Any {appState.sessionInfo.threshold} of {appState.sessionInfo.total} participants can now sign transactions together.
-                            </p>
-                        </div>
-                        <button
-                            class="w-full bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-bold py-2 px-4 rounded-lg shadow-md flex items-center justify-center"
-                            on:click={testMPCSigning}
-                        >
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path>
-                            </svg>
-                            Test MPC Signing
-                        </button>
-                    </div>
-                {:else if appState.dkgState === DkgState.KeystoreImported}
-                    <div class="border-t border-green-200 pt-3">
-                        <div class="bg-orange-50 border border-orange-200 rounded-lg p-3 mb-3">
-                            <p class="text-sm text-orange-800 font-semibold flex items-center">
-                                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                                </svg>
-                                Keystore Imported - Peer Connection Required
-                            </p>
-                            <p class="text-xs text-orange-700 mt-1">
-                                Your keystore has been imported successfully. To enable signing, you need at least {appState.sessionInfo.threshold - 1} other participant{appState.sessionInfo.threshold - 1 > 1 ? 's' : ''} from the original {appState.sessionInfo.threshold}-of-{appState.sessionInfo.total} setup to connect and join this session.
-                            </p>
-                        </div>
-                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                            <p class="text-sm text-gray-700 font-semibold mb-2">Next Steps:</p>
-                            <ol class="text-xs text-gray-600 space-y-1 list-decimal list-inside">
-                                <li>Share the session ID with other keystore holders</li>
-                                <li>Wait for at least {appState.sessionInfo.threshold - 1} participant{appState.sessionInfo.threshold - 1 > 1 ? 's' : ''} to connect</li>
-                                <li>Once connected, the wallet will be ready for signing</li>
-                            </ol>
-                        </div>
-                    </div>
-                {:else if appState.dkgState === DkgState.Initializing || 
-                          appState.dkgState === DkgState.Round1InProgress || 
-                          appState.dkgState === DkgState.Round1Complete || 
-                          appState.dkgState === DkgState.Round2InProgress || 
-                          appState.dkgState === DkgState.Round2Complete || 
-                          appState.dkgState === DkgState.Finalizing}
-                    <div class="border-t border-green-200 pt-3">
-                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <p class="text-sm text-blue-800 font-semibold flex items-center">
-                                <svg class="animate-spin h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Generating Keys...
-                            </p>
-                            <p class="text-xs text-blue-700 mt-1">
-                                Please wait while the distributed key generation protocol completes.
-                            </p>
-                        </div>
-                    </div>
+                    {/if}
+                {:else}
+                    <p class="py-2 text-center text-xs text-muted">
+                        No devices connected
+                    </p>
                 {/if}
             </div>
-        {:else if appState.invites && appState.invites.length > 0}
-            <!-- Pending Invitations -->
-            <div class="space-y-3">
-                {#each appState.invites as invite}
-                    <div class="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-300 rounded-lg p-4 shadow-lg">
-                        <div class="flex items-center justify-between mb-3">
-                            <h3 class="text-lg font-bold text-yellow-900 flex items-center">
-                                <svg class="w-5 h-5 mr-2 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
-                                </svg>
-                                New Session Invitation
-                            </h3>
-                            <span class="text-xs text-gray-500">
-                                {new Date().toLocaleTimeString()}
-                            </span>
-                        </div>
-                        
-                        <div class="bg-white bg-opacity-70 rounded p-3 mb-3">
-                            <div class="text-sm space-y-2">
-                                <div class="flex justify-between">
-                                    <span class="font-semibold text-gray-600">Session ID:</span>
-                                    <span class="font-mono text-xs bg-gray-100 px-2 py-1 rounded">{invite.session_id}</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="font-semibold text-gray-600">Proposer:</span>
-                                    <span class="font-mono text-xs {invite.proposer_id === appState.deviceId ? 'bg-blue-100 text-blue-800' : 'bg-gray-100'} px-2 py-1 rounded">
-                                        {invite.proposer_id}{invite.proposer_id === appState.deviceId ? ' (you)' : ''}
-                                    </span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="font-semibold text-gray-600">Threshold:</span>
-                                    <span class="font-bold text-orange-600">{invite.threshold} of {invite.total}</span>
-                                </div>
-                            </div>
-                        </div>
 
-                        <div class="mb-3">
-                            <p class="text-sm font-semibold text-gray-700 mb-2">Participants ({invite.participants?.length || 0}):</p>
-                            <div class="flex flex-wrap gap-1">
-                                {#each invite.participants || [] as participant}
-                                    <span class="text-xs px-2 py-1 rounded-full {participant === appState.deviceId ? 'bg-blue-100 text-blue-800 font-semibold' : 'bg-gray-100 text-gray-700'}">
-                                        {participant}{participant === appState.deviceId ? ' (you)' : ''}
-                                    </span>
-                                {/each}
-                            </div>
-                        </div>
+            <!-- Manual session + keystore import/export -->
+            {#if !appState.sessionInfo && !(appState.invites && appState.invites.length)}
+                <div class="divider"></div>
 
-                        <div class="border-t border-yellow-200 pt-3">
-                            <p class="text-sm text-gray-600 mb-3">
-                                You have been invited to join a {invite.threshold}-of-{invite.total} threshold signature session. 
-                                This will allow any {invite.threshold} participants to create valid signatures together.
-                            </p>
-                            
-                            <div class="flex gap-2">
-                                <button
-                                    class="flex-1 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transform transition hover:scale-105 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                                    on:click={() => acceptInvite(invite.session_id)}
-                                    disabled={acceptingSession}
-                                >
-                                    {#if acceptingSession}
-                                        <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                        </svg>
-                                        Processing...
-                                    {:else}
-                                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                        </svg>
-                                        Accept & Join
-                                    {/if}
-                                </button>
-                                <button
-                                    class="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 font-bold py-2 px-4 rounded-lg shadow-md transform transition hover:scale-105"
-                                    on:click={() => rejectInvite(invite.session_id)}
-                                >
-                                    <svg class="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                    </svg>
-                                    Decline
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                {/each}
-            </div>
-        {:else}
-            <!-- Create New Session -->
-            <div class="space-y-3">
-                <p class="text-sm text-gray-600">
-                    Select devices from the list above to create a new MPC session, or import an existing keystore.
-                </p>
-                
-                <!-- Import/Export Keystore Buttons -->
-                <div class="mb-4 space-y-2">
-                    <!-- Import Keystore Button -->
+                <div class="space-y-2">
+                    <span class="label">Keystore</span>
                     <button
-                        class="w-full bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center"
+                        class="btn btn-secondary btn-block btn-sm"
                         on:click={() => {
-                            const input = document.createElement('input');
-                            input.type = 'file';
-                            input.accept = '.json';
+                            const input = document.createElement("input");
+                            input.type = "file";
+                            input.accept = ".json";
                             input.onchange = async (e) => {
-                                const file = (e.target as HTMLInputElement).files?.[0];
+                                const file = (e.target as HTMLInputElement)
+                                    .files?.[0];
                                 if (file) {
                                     const reader = new FileReader();
                                     reader.onload = async (event) => {
-                                        const keystoreData = event.target?.result as string;
+                                        const keystoreData = event.target
+                                            ?.result as string;
                                         try {
-                                            // Parse to check if encrypted
-                                            const parsedKeystore = JSON.parse(keystoreData);
+                                            const parsedKeystore =
+                                                JSON.parse(keystoreData);
                                             let password = undefined;
-                                            
-                                            // Check if keystore is encrypted
-                                            if (parsedKeystore.encrypted === true) {
-                                                password = prompt("This keystore is encrypted. Please enter the password:");
+                                            if (
+                                                parsedKeystore.encrypted === true
+                                            ) {
+                                                password = prompt(
+                                                    "This keystore is encrypted. Please enter the password:",
+                                                );
                                                 if (!password) {
-                                                    alert("Password is required for encrypted keystores");
+                                                    alert(
+                                                        "Password is required for encrypted keystores",
+                                                    );
                                                     return;
                                                 }
                                             }
-                                            
-                                            chrome.runtime.sendMessage({
-                                                type: "importKeystore",
-                                                keystoreData,
-                                                password,
-                                                chain: appState.chain
-                                            }, (response) => {
-                                                if (chrome.runtime.lastError) {
-                                                    console.error("[UI] Error importing keystore:", chrome.runtime.lastError.message);
-                                                    alert("Failed to import keystore: " + chrome.runtime.lastError.message);
-                                                    return;
-                                                }
-                                                if (response.success) {
-                                                    console.log("[UI] Keystore imported successfully");
-                                                    alert("Keystore imported successfully!");
-                                                } else {
-                                                    console.error("[UI] Failed to import keystore:", response.error);
-                                                    alert("Failed to import keystore: " + response.error);
-                                                }
-                                            });
+                                            chrome.runtime.sendMessage(
+                                                {
+                                                    type: "importKeystore",
+                                                    keystoreData,
+                                                    password,
+                                                    chain: appState.chain,
+                                                },
+                                                (response) => {
+                                                    if (
+                                                        chrome.runtime.lastError
+                                                    ) {
+                                                        console.error(
+                                                            "[UI] Error importing keystore:",
+                                                            chrome.runtime
+                                                                .lastError
+                                                                .message,
+                                                        );
+                                                        alert(
+                                                            "Failed to import keystore: " +
+                                                                chrome.runtime
+                                                                    .lastError
+                                                                    .message,
+                                                        );
+                                                        return;
+                                                    }
+                                                    if (response.success) {
+                                                        console.log(
+                                                            "[UI] Keystore imported successfully",
+                                                        );
+                                                        alert(
+                                                            "Keystore imported successfully!",
+                                                        );
+                                                    } else {
+                                                        console.error(
+                                                            "[UI] Failed to import keystore:",
+                                                            response.error,
+                                                        );
+                                                        alert(
+                                                            "Failed to import keystore: " +
+                                                                response.error,
+                                                        );
+                                                    }
+                                                },
+                                            );
                                         } catch (err) {
-                                            console.error("[UI] Error reading keystore file:", err);
+                                            console.error(
+                                                "[UI] Error reading keystore file:",
+                                                err,
+                                            );
                                             alert("Invalid keystore file");
                                         }
                                     };
@@ -2697,162 +2706,174 @@
                             input.click();
                         }}
                     >
-                        <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
-                        </svg>
-                        Import Keystore from CLI
+                        <Icon name="upload" size={15} /> Import keystore from CLI
                     </button>
-                    
-                    <!-- Export Keystore Button - Only show when DKG is complete -->
+
                     {#if appState.dkgState === DkgState.Complete}
                         <button
-                            class="w-full bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded flex items-center justify-center"
+                            class="btn btn-secondary btn-block btn-sm"
                             on:click={() => {
-                                chrome.runtime.sendMessage({
-                                    type: "exportKeystore",
-                                    chain: appState.chain
-                                }, (response) => {
-                                    if (chrome.runtime.lastError) {
-                                        console.error("[UI] Error exporting keystore:", chrome.runtime.lastError.message);
-                                        alert("Failed to export keystore: " + chrome.runtime.lastError.message);
-                                        return;
-                                    }
-                                    if (response.success && response.keystoreData) {
-                                        // Create a blob and download link
-                                        const blob = new Blob([response.keystoreData], { type: 'application/json' });
-                                        const url = URL.createObjectURL(blob);
-                                        const a = document.createElement('a');
-                                        a.href = url;
-                                        a.download = `mpc-wallet-keystore-${appState.chain}-${Date.now()}.json`;
-                                        document.body.appendChild(a);
-                                        a.click();
-                                        document.body.removeChild(a);
-                                        URL.revokeObjectURL(url);
-                                        console.log("[UI] Keystore exported successfully");
-                                    } else {
-                                        console.error("[UI] Failed to export keystore:", response.error);
-                                        alert("Failed to export keystore: " + response.error);
-                                    }
-                                });
+                                chrome.runtime.sendMessage(
+                                    {
+                                        type: "exportKeystore",
+                                        chain: appState.chain,
+                                    },
+                                    (response) => {
+                                        if (chrome.runtime.lastError) {
+                                            console.error(
+                                                "[UI] Error exporting keystore:",
+                                                chrome.runtime.lastError.message,
+                                            );
+                                            alert(
+                                                "Failed to export keystore: " +
+                                                    chrome.runtime.lastError
+                                                        .message,
+                                            );
+                                            return;
+                                        }
+                                        if (
+                                            response.success &&
+                                            response.keystoreData
+                                        ) {
+                                            const blob = new Blob(
+                                                [response.keystoreData],
+                                                { type: "application/json" },
+                                            );
+                                            const url =
+                                                URL.createObjectURL(blob);
+                                            const a =
+                                                document.createElement("a");
+                                            a.href = url;
+                                            a.download = `mpc-wallet-keystore-${appState.chain}-${Date.now()}.json`;
+                                            document.body.appendChild(a);
+                                            a.click();
+                                            document.body.removeChild(a);
+                                            URL.revokeObjectURL(url);
+                                            console.log(
+                                                "[UI] Keystore exported successfully",
+                                            );
+                                        } else {
+                                            console.error(
+                                                "[UI] Failed to export keystore:",
+                                                response.error,
+                                            );
+                                            alert(
+                                                "Failed to export keystore: " +
+                                                    response.error,
+                                            );
+                                        }
+                                    },
+                                );
                             }}
                         >
-                            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 10l3-3m0 0l3 3m-3-3v12"></path>
-                            </svg>
-                            Export Keystore for Backup
+                            <Icon name="download" size={15} /> Export keystore backup
                         </button>
                     {/if}
                 </div>
-                
-                <div class="relative">
-                    <div class="absolute inset-0 flex items-center">
-                        <div class="w-full border-t border-gray-300"></div>
-                    </div>
-                    <div class="relative flex justify-center text-sm">
-                        <span class="px-2 bg-white text-gray-500">OR</span>
-                    </div>
-                </div>
-                
-                <div>
-                    <label for="session-id-input" class="block font-bold mb-1"
-                        >Session ID (optional):</label
-                    >
+
+                <div class="space-y-2">
+                    <span class="label">Create session manually</span>
                     <input
                         id="session-id-input"
                         type="text"
                         bind:value={appState.proposedSessionIdInput}
-                        class="w-full border p-2 rounded"
-                        placeholder="Auto-generated if empty"
+                        class="input"
+                        placeholder="Session ID (auto-generated if empty)"
                     />
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <div>
-                        <label
-                            for="total-participants"
-                            class="block font-bold mb-1"
-                            >Total Participants:</label
-                        >
-                        <input
-                            id="total-participants"
-                            type="number"
-                            bind:value={appState.totalParticipants}
-                            min="2"
-                            max={appState.connecteddevices.length}
-                            class="w-full border p-2 rounded"
-                            on:change={() => {
-                                // Clear selection when total participants changes
-                                selectedDevices.clear();
-                                selectedDevices = selectedDevices;
-                            }}
-                        />
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="label" for="total-participants"
+                                >Total</label
+                            >
+                            <input
+                                id="total-participants"
+                                type="number"
+                                bind:value={appState.totalParticipants}
+                                min="2"
+                                max={appState.connecteddevices.length}
+                                class="input"
+                                on:change={() => {
+                                    selectedDevices.clear();
+                                    selectedDevices = selectedDevices;
+                                }}
+                            />
+                        </div>
+                        <div>
+                            <label class="label" for="threshold-input"
+                                >Threshold</label
+                            >
+                            <input
+                                id="threshold-input"
+                                type="number"
+                                bind:value={appState.threshold}
+                                min="1"
+                                max={appState.totalParticipants}
+                                class="input"
+                            />
+                        </div>
                     </div>
-                    <div>
-                        <label
-                            for="threshold-input"
-                            class="block font-bold mb-1">Threshold:</label
-                        >
-                        <input
-                            id="threshold-input"
-                            type="number"
-                            bind:value={appState.threshold}
-                            min="1"
-                            max={appState.totalParticipants}
-                            class="w-full border p-2 rounded"
-                        />
-                    </div>
+                    <Button
+                        block
+                        on:click={proposeSession}
+                        disabled={!appState.wsConnected ||
+                            selectedDevices.size !==
+                                appState.totalParticipants - 1 ||
+                            appState.threshold > appState.totalParticipants ||
+                            appState.threshold < 1}
+                    >
+                        Propose ({appState.threshold}-of-{appState.totalParticipants})
+                    </Button>
+                    {#if !appState.wsConnected}
+                        <p class="text-center text-xs text-danger-fg">
+                            Not connected to the signal server
+                        </p>
+                    {:else if appState.connecteddevices.filter((p) => p !== appState.deviceId).length < appState.totalParticipants - 1}
+                        <p class="text-center text-xs text-muted">
+                            Need at least {appState.totalParticipants - 1} other device{appState.totalParticipants -
+                                1 >
+                            1
+                                ? "s"
+                                : ""}
+                        </p>
+                    {:else if appState.threshold > appState.totalParticipants || appState.threshold < 1}
+                        <p class="text-center text-xs text-danger-fg">
+                            Threshold must be between 1 and {appState.totalParticipants}
+                        </p>
+                    {:else if selectedDevices.size !== appState.totalParticipants - 1}
+                        <p class="text-center text-xs text-warning-fg">
+                            Select {appState.totalParticipants - 1} device{appState.totalParticipants -
+                                1 >
+                            1
+                                ? "s"
+                                : ""} above to include
+                        </p>
+                    {/if}
                 </div>
+            {/if}
+        </div>
+    </Collapsible>
 
+        <!-- Connection error -->
+        {#if appState.wsError}
+            <div
+                class="alert alert-danger flex items-center justify-between gap-2"
+            >
+                <span class="min-w-0 flex-1">{appState.wsError}</span>
                 <button
-                    class="w-full bg-indigo-500 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-400 disabled:cursor-not-allowed"
-                    on:click={proposeSession}
-                    disabled={!appState.wsConnected ||
-                        selectedDevices.size !== appState.totalParticipants - 1 ||
-                        appState.threshold > appState.totalParticipants ||
-                        appState.threshold < 1}
-                >
-                    Propose New Session ({appState.threshold}-of-{appState.totalParticipants})
-                </button>
-
-                {#if !appState.wsConnected}
-                    <p class="text-sm text-red-500 text-center">
-                        WebSocket not connected
-                    </p>
-                {:else if appState.connecteddevices.filter((p) => p !== appState.deviceId).length < appState.totalParticipants - 1}
-                    <p class="text-sm text-gray-500 text-center">
-                        Need at least {appState.totalParticipants - 1} other devices
-                        for a {appState.totalParticipants}-participant session
-                    </p>
-                {:else if appState.threshold > appState.totalParticipants || appState.threshold < 1}
-                    <p class="text-sm text-red-500 text-center">
-                        Invalid threshold: must be between 1 and {appState.totalParticipants}
-                    </p>
-                {:else if selectedDevices.size !== appState.totalParticipants - 1}
-                    <p class="text-sm text-yellow-500 text-center">
-                        Please select {appState.totalParticipants - 1} device{appState.totalParticipants - 1 > 1 ? 's' : ''} to include in the session
-                    </p>
-                {/if}
-            </div>
-        {/if}
-    </div>
-
-    <!-- WebSocket Error Display -->
-    {#if appState.wsError}
-        <div class="mb-4 p-3 bg-red-50 border border-red-200 rounded">
-            <div class="flex justify-between items-center">
-                <span class="text-red-600">{appState.wsError}</span>
-                <button
-                    class="text-sm bg-red-100 hover:bg-red-200 px-2 py-1 rounded"
+                    class="icon-btn shrink-0"
+                    style="width:1.8rem;height:1.8rem"
                     on:click={() => {
                         appState.wsError = "";
                         appState = { ...appState };
                     }}
+                    aria-label="Dismiss"
                 >
-                    ×
+                    <Icon name="x" size={15} />
                 </button>
             </div>
-        </div>
+        {/if}
     {/if}
+    </div>
 </main>
 
 <!-- Password Prompt Modal. Handler slot wrappers coerce the
@@ -2873,88 +2894,5 @@
     />
 {/if}
 
-<style>
-    :global(body) {
-        width: 400px;
-        height: 600px;
-        overflow: auto;
-    }
-
-    /* Dark mode styles */
-    :global(.dark) {
-        color-scheme: dark;
-    }
-
-    :global(.dark body) {
-        background-color: #1a1a1a;
-        color: #e5e5e5;
-    }
-
-    :global(.dark .border) {
-        border-color: #333333;
-    }
-
-    :global(.dark .bg-gray-50) {
-        background-color: #262626;
-    }
-
-    :global(.dark .bg-gray-100) {
-        background-color: #333333;
-    }
-
-    :global(.dark .bg-green-50) {
-        background-color: #064e3b;
-        color: #a7f3d0;
-    }
-
-    :global(.dark .bg-yellow-50) {
-        background-color: #78350f;
-        color: #fde68a;
-    }
-
-    :global(.dark .bg-blue-50) {
-        background-color: #082f49;
-        color: #bae6fd;
-    }
-
-    :global(.dark .text-green-700) {
-        color: #a7f3d0;
-    }
-
-    :global(.dark .text-yellow-700) {
-        color: #fde68a;
-    }
-
-    :global(.dark .text-blue-700) {
-        color: #bae6fd;
-    }
-
-    :global(.dark .text-blue-600) {
-        color: #60a5fa;
-    }
-
-    :global(.dark .bg-blue-500) {
-        background-color: #2563eb;
-    }
-
-    :global(.dark .bg-blue-600) {
-        background-color: #1d4ed8;
-    }
-
-    :global(.dark .border-green-200) {
-        border-color: #065f46;
-    }
-
-    :global(.dark .border-yellow-200) {
-        border-color: #92400e;
-    }
-
-    :global(.dark .border-blue-200) {
-        border-color: #0c4a6e;
-    }
-
-    .logo {
-        height: 40px;
-        width: 40px;
-    }
-</style>
+<!-- All styling now lives in the design system (src/entrypoints/popup/app.css)
+     + reusable components in src/lib/ui. No per-screen <style> needed. -->

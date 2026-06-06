@@ -59,6 +59,11 @@ pub struct UnifiedDkg {
     total: u16,
     threshold: u16,
     participant_indices: Vec<u16>,
+
+    /// BIP-44-style account index: one root secret can yield multiple
+    /// independent wallets per curve via the domain-separated derivation
+    /// (`frost-dkg/v1/<curve>/<account>`). Defaults to 0.
+    account: u32,
 }
 
 impl Default for UnifiedDkg {
@@ -95,15 +100,37 @@ impl UnifiedDkg {
             total: 0,
             threshold: 0,
             participant_indices: Vec::new(),
+            account: 0,
         }
     }
 
-    /// Initialize DKG parameters.
+    /// Initialize DKG parameters (account 0).
     pub fn init_dkg(&mut self, participant_index: u16, total: u16, threshold: u16) {
+        self.init_dkg_with_account(participant_index, total, threshold, 0);
+    }
+
+    /// Initialize DKG parameters for a specific BIP-44-style account index.
+    ///
+    /// All participants of one ceremony MUST agree on the same `account` (it
+    /// selects which domain-separated derivation each node uses); a mismatch
+    /// yields incompatible round-1 packages and DKG fails.
+    pub fn init_dkg_with_account(
+        &mut self,
+        participant_index: u16,
+        total: u16,
+        threshold: u16,
+        account: u32,
+    ) {
         self.participant_index = participant_index;
         self.total = total;
         self.threshold = threshold;
         self.participant_indices = (1..=total).collect();
+        self.account = account;
+    }
+
+    /// The account index this DKG derives under.
+    pub fn account(&self) -> u32 {
+        self.account
     }
 
     /// Get reference to the root secret.
@@ -113,9 +140,9 @@ impl UnifiedDkg {
 
     /// Generate round 1 packages for both curves using RNGs derived from the root secret.
     pub fn generate_round1(&mut self) -> Result<UnifiedRound1Package> {
-        // Derive deterministic RNGs from root secret
-        let mut ed_rng = self.root_secret.derive_ed25519_rng()?;
-        let mut secp_rng = self.root_secret.derive_secp256k1_rng()?;
+        // Derive deterministic, account-scoped RNGs from the root secret.
+        let mut ed_rng = self.root_secret.derive_ed25519_rng_for_account(self.account)?;
+        let mut secp_rng = self.root_secret.derive_secp256k1_rng_for_account(self.account)?;
 
         // Ed25519 round 1
         let ed_identifier = Ed25519Curve::identifier_from_u16(self.participant_index)?;

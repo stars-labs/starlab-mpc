@@ -1105,3 +1105,32 @@ describe('WebRTCManager DKG Process', () => {
         expect(manager.dkgState).toBe(DkgState.Failed);
     });
 });
+
+describe('#29 canonical participant ordering (ext↔CLI interop)', () => {
+    // FROST identifiers must come from SORTED participant order to match the
+    // Rust core's canonical_identifier (dkg.rs: participants.sort() then pos+1).
+    it('sorts participants when a session is assigned', () => {
+        const m = new WebRTCManager('m', dummySend) as any;
+        const sorted = m._withSortedParticipants({
+            session_id: 's', participants: ['z', 'a', 'm'], accepted_devices: [],
+        });
+        expect(sorted.participants).toEqual(['a', 'm', 'z']);
+        // canonical identifier for 'm' = sorted position + 1 = 2 (NOT 3, its
+        // index in the original join-order array).
+        expect(sorted.participants.indexOf('m') + 1).toBe(2);
+    });
+
+    it('is null/empty safe', () => {
+        const m = new WebRTCManager('m', dummySend) as any;
+        expect(m._withSortedParticipants(null)).toBeNull();
+        const empty = m._withSortedParticipants({ session_id: 's', participants: [], accepted_devices: [] });
+        expect(empty.participants).toEqual([]);
+    });
+
+    it('does not mutate the input array', () => {
+        const m = new WebRTCManager('m', dummySend) as any;
+        const input = { session_id: 's', participants: ['z', 'a'], accepted_devices: [] };
+        m._withSortedParticipants(input);
+        expect(input.participants).toEqual(['z', 'a']); // original untouched
+    });
+});

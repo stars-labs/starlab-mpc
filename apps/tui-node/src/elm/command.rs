@@ -59,7 +59,19 @@ pub enum Command {
     /// Calls `protocal::dkg::process_dkg_round2` which finalises the key with
     /// `part3` once all Round 2 packages for us have arrived.
     ProcessDKGRound2 { from_device: String, package_bytes: Vec<u8> },
-    JoinDKG { session_id: String },
+    JoinDKG {
+        session_id: String,
+        /// Session shape known to the joiner from the discovered announcement.
+        /// Seeded into `AppState.session` so the joiner agrees on `total`
+        /// immediately, rather than defaulting to 3 and racing on a later
+        /// `SessionAvailable` re-broadcast (the headless joiner has already
+        /// consumed that broadcast to discover the session). Curve falls back
+        /// to the `available_sessions` lookup when empty.
+        total: u16,
+        threshold: u16,
+        proposer_id: String,
+        curve_type: String,
+    },
     CancelDKG,
     /// Encrypt the just-produced FROST key share with `password` and
     /// persist it to the keystore, then emit `Message::DKGFinalized`.
@@ -77,6 +89,9 @@ pub enum Command {
         password: String,
         keystore_path: String,
         wallet_name: String,
+        /// Optional user-chosen display label (creator only). Persisted as
+        /// keystore `metadata.label`; `None` → UI falls back to wallet_name.
+        wallet_label: Option<String>,
     },
     /// Hot-load an existing wallet: decrypt the keystore file with
     /// `password`, deserialize the `(KeyPackage, PublicKeyPackage)` tuple
@@ -618,17 +633,12 @@ impl Command {
                             let total_participants = config_clone.total_participants;
                             let device_id_clone = device_id.clone();
 
-                            // Get session info before spawning
-                            let our_session_id = {
-                                let state = app_state.lock().await;
-                                state.session.as_ref().map(|s| s.session_id.clone())
-                            };
-
-                            // Clone app_state for the spawned task
-                            let app_state_clone = app_state.clone();
                             // Subscribe to the shared server-message fan-out owned by
                             // `Command::ReconnectWebSocket`. We see every parsed frame
-                            // without maintaining our own socket.
+                            // without maintaining our own socket. Relay frames (peer
+                            // WebRTC signals + participant_update) are handled by the
+                            // always-on relay handler (spawn_relay_handler_task), not
+                            // here — this loop only mirrors display/roster updates.
                             let mut broadcast_rx = broadcast_tx.subscribe();
 
                             tokio::spawn(async move {
@@ -684,17 +694,8 @@ impl Command {
                                                         });
                                                         let _ = &total_participants; // silence unused capture
                                                     }
-                                                    webrtc_signal_server::ServerMsg::Relay { from, data } => {
-                                                        crate::elm::webrtc_signaling::handle_relay(
-                                                            from.clone(),
-                                                            data.clone(),
-                                                            app_state_clone.clone(),
-                                                            tx_msg.clone(),
-                                                            device_id_clone.clone(),
-                                                            our_session_id.clone(),
-                                                        )
-                                                        .await;
-                                                    }
+                                        // Relay frames handled by the always-on
+                                        // relay handler, not this loop.
                                         _ => {}
                                     }
                                 }
@@ -833,8 +834,24 @@ impl Command {
                 )
                 .await;
                 // `process_dkg_round1` internally transitions to Round 2 and
-                // calls `handle_trigger_dkg_round2` when it has received all
-                // `session.total` packages, so nothing else to do here.
+                // calls `handle_trigger_dkg_round2`. On fast transports the
+                // round2 re-feed inside that path can complete DKG right here
+                // (peer round2 arrived before our part2), so check for the
+                // finished key and notify the UI — same detection as
+                // ProcessDKGRound2 below.
+                let group_key_hex = {
+                    let state = app_state.lock().await;
+                    state
+                        .public_key_package
+                        .as_ref()
+                        .and_then(|pkg| pkg.verifying_key().serialize().ok())
+                        .map(hex::encode)
+                };
+                if let Some(hex) = group_key_hex {
+                    let _ = tx.send(Message::DKGKeyGenerated {
+                        group_pubkey_hex: hex,
+                    });
+                }
             }
 
             Command::ProcessDKGRound2 {
@@ -870,8 +887,8 @@ impl Command {
                 }
             }
 
-            Command::JoinDKG { session_id } => {
-                info!("Joining DKG session: {}", session_id);
+            Command::JoinDKG { session_id, total: known_total, threshold: known_threshold, proposer_id: known_proposer, curve_type: known_curve } => {
+                info!("Joining DKG session: {} ({}-of-{})", session_id, known_threshold, known_total);
                 let _ = tx.send(Message::Info {
                     message: format!("🔗 Joining DKG session: {}", session_id)
                 });
@@ -935,17 +952,30 @@ impl Command {
                 // as soon as the creator's SessionAvailable arrives on the broadcast.
                 {
                     let mut state = app_state.lock().await;
-                    let curve_type = state.available_sessions.iter()
-                        .find(|s| s.session_code == session_id)
-                        .map(|s| s.curve_type.clone())
-                        .unwrap_or_else(|| "Ed25519".to_string());
-                    info!("📊 Joining session with curve type: {}", curve_type);
+                    // Prefer the curve the joiner already learned from the
+                    // announcement; fall back to the available_sessions lookup.
+                    let curve_type = if !known_curve.is_empty() {
+                        known_curve.clone()
+                    } else {
+                        state.available_sessions.iter()
+                            .find(|s| s.session_code == session_id)
+                            .map(|s| s.curve_type.clone())
+                            .unwrap_or_else(|| "Ed25519".to_string())
+                    };
+                    info!("📊 Joining session with curve type: {}, total {}", curve_type, known_total);
                     state.session = Some(crate::protocal::signal::SessionInfo {
                         session_id: session_id.clone(),
-                        proposer_id: "unknown".to_string(),
+                        proposer_id: if known_proposer.is_empty() {
+                            "unknown".to_string()
+                        } else {
+                            known_proposer.clone()
+                        },
                         participants: vec![device_id.clone()],
-                        threshold: 2,
-                        total: 3,
+                        // Seed the REAL shape from the discovered announcement so
+                        // `session.total` is correct from the start (no race on a
+                        // later SessionAvailable re-broadcast).
+                        threshold: known_threshold,
+                        total: known_total,
                         session_type: crate::protocal::signal::SessionType::DKG,
                         curve_type,
                         coordination_type: "Network".to_string(),
@@ -957,11 +987,7 @@ impl Command {
                 let tx_msg = tx_clone.clone();
                 let session_id_clone = session_id.clone();
                 let device_id_clone = device_id.clone();
-                let session_total = 3u16; // Will be updated from SessionAvailable.
-                let our_session_id = {
-                    let state = app_state.lock().await;
-                    state.session.as_ref().map(|s| s.session_id.clone())
-                };
+                let session_total = known_total; // Known from the discovered announcement.
                 let app_state_clone = app_state.clone();
                 let mut broadcast_rx = broadcast_tx.subscribe();
 
@@ -1102,17 +1128,9 @@ impl Command {
                                                         });
                                                     }
                                                 }
-                                                webrtc_signal_server::ServerMsg::Relay { from, data } => {
-                                                    crate::elm::webrtc_signaling::handle_relay(
-                                                        from.clone(),
-                                                        data.clone(),
-                                                        app_state_clone.clone(),
-                                                        tx_msg.clone(),
-                                                        device_id_clone.clone(),
-                                                        our_session_id.clone(),
-                                                    )
-                                                    .await;
-                                                }
+                                    // Relay frames (peer WebRTC signals +
+                                    // participant_update) are handled by the
+                                    // always-on relay handler, not this loop.
                                     _ => {}
                                 }
                             }
@@ -1456,7 +1474,7 @@ impl Command {
                 });
             }
 
-            Command::FinalizeWalletFromDkg { password, keystore_path, wallet_name } => {
+            Command::FinalizeWalletFromDkg { password, keystore_path, wallet_name, wallet_label } => {
                 // Runs right after `Message::DKGKeyGenerated`. Pulls the
                 // FROST output from AppState, serializes the key share,
                 // encrypts it with `password`, and writes the wallet file.
@@ -1621,6 +1639,7 @@ impl Command {
                     None,                // description (deprecated)
                     participant_index,
                     participants_sorted,
+                    wallet_label,        // optional user-chosen display label
                 ) {
                     Ok(id) => id,
                     Err(e) => {
@@ -1918,6 +1937,32 @@ impl Command {
                             .map(|s| s.participants.clone())
                             .unwrap_or_default()
                     };
+                    // The `blockchain` field must be a real chain name (the
+                    // extension's session-parse.ts reads it), not the curve.
+                    // `request.chain` is set to the curve upstream (the headless
+                    // sign API has no per-chain context), so resolve the wallet's
+                    // actual primary chain from keystore metadata, falling back
+                    // to the curve's canonical chain. (#32)
+                    let announce_blockchain = {
+                        let state = app_state.lock().await;
+                        state
+                            .keystore
+                            .as_ref()
+                            .and_then(|ks| ks.get_wallet(&request.wallet_id))
+                            .and_then(|w| {
+                                w.blockchains
+                                    .first()
+                                    .map(|b| b.blockchain.clone())
+                                    .or_else(|| w.blockchain.clone())
+                            })
+                            .unwrap_or_else(|| {
+                                if announced_curve == "ed25519" {
+                                    "solana".to_string()
+                                } else {
+                                    "ethereum".to_string()
+                                }
+                            })
+                    };
                     let session_info = serde_json::json!({
                         "session_id": session_id.clone(),
                         "total": n_participants,
@@ -1929,7 +1974,7 @@ impl Command {
                         "coordination_type": "Network",
                         "wallet_name": request.wallet_id.clone(),
                         "group_public_key": group_pubkey_hex,
-                        "blockchain": request.chain.clone(),
+                        "blockchain": announce_blockchain,
                         // Joiners need the exact bytes to sign — embed them in
                         // the announce rather than requiring an extra round.
                         "signing_message_hex": hex::encode(&request.transaction_data),
@@ -2197,6 +2242,16 @@ impl Command {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
 
+                // Always-on relay handler (peer WebRTC signals +
+                // participant_update) for the whole connection — subscribe
+                // BEFORE the reader publishes. This is what lets a cold-started
+                // signer receive offers without a DKG driver loop running.
+                ws_runtime::spawn_relay_handler_task(
+                    channels.broadcast_tx.clone(),
+                    app_state.clone(),
+                    tx.clone(),
+                    params.device_id.clone(),
+                );
                 ws_runtime::spawn_sender_task(sink, channels.ws_msg_rx);
                 ws_runtime::spawn_reader_task(rx, tx.clone(), channels.broadcast_tx);
 

@@ -216,6 +216,76 @@ pub(crate) fn spawn_reader_task(
     });
 }
 
+/// Spawn the always-on relay handler for the whole connection lifetime.
+///
+/// Peer WebRTC signals (offer/answer/ICE) and the server's `participant_update`
+/// arrive as `ServerMsg::Relay` on the inbound broadcast. Relay handling used
+/// to live ONLY inside the DKG driver loops (`StartDKG`/`JoinDKG`), so it was
+/// alive only while a DKG ran — or, since those loops persist for the
+/// connection, while a DKG had run *this session*. A cold-started signer (load
+/// keystore → sign, no DKG this session) therefore had no relay handler when
+/// the initiator's offer arrived, and the offer — published to a broadcast with
+/// no live subscriber — was silently dropped, stalling the signing mesh. This
+/// task subscribes once at connect so relay frames are always handled.
+///
+/// It reads the current session id from `AppState` per frame (rather than
+/// capturing one) so `participant_update` filtering tracks whatever session
+/// we're in. It exits when the broadcast closes (i.e. on reconnect, when the
+/// previous socket's channels are replaced), so handlers never stack.
+pub(crate) fn spawn_relay_handler_task<C>(
+    broadcast_tx: broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>,
+    app_state: Arc<Mutex<AppState<C>>>,
+    tx_elm: mpsc::UnboundedSender<Message>,
+    self_device_id: String,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+    <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
+    <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
+{
+    // Subscribe synchronously (before the reader starts publishing) so no early
+    // frame is missed.
+    let mut rx = broadcast_tx.subscribe();
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(shared) => {
+                    if let webrtc_signal_server::ServerMsg::Relay { from, data } = &*shared {
+                        // `our_session_id` is ONLY needed to filter
+                        // server-originated `participant_update` frames; peer
+                        // WebRTC signals (offer/answer/the high-volume ICE
+                        // candidates) don't use it. Avoid an app_state lock per
+                        // candidate — that lock contends with the FROST
+                        // ceremony and badly slows large meshes.
+                        let our_session_id = if from == "server" {
+                            app_state
+                                .lock()
+                                .await
+                                .session
+                                .as_ref()
+                                .map(|s| s.session_id.clone())
+                        } else {
+                            None
+                        };
+                        crate::elm::webrtc_signaling::handle_relay(
+                            from.clone(),
+                            data.clone(),
+                            app_state.clone(),
+                            tx_elm.clone(),
+                            self_device_id.clone(),
+                            our_session_id,
+                        )
+                        .await;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    warn!("relay handler lagged {} messages; continuing", n);
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 fn dispatch_frame(
     txt: &str,
     tx_elm: &mpsc::UnboundedSender<Message>,

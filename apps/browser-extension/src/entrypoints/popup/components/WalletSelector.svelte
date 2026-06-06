@@ -126,9 +126,9 @@
     .wallet-selector-button {
         width: 100%;
         padding: 12px 16px;
-        background: var(--color-surface-secondary, #f5f5f5);
-        border: 1px solid var(--color-border, #e0e0e0);
-        border-radius: 12px;
+        background: var(--c-surface);
+        border: 1px solid var(--c-line);
+        border-radius: 14px;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -136,10 +136,10 @@
         transition: all 0.2s;
         font-family: inherit;
     }
-    
+
     .wallet-selector-button:hover {
-        background: var(--color-surface-hover, #ebebeb);
-        border-color: var(--color-border-hover, #d0d0d0);
+        background: var(--c-surface-2);
+        border-color: var(--c-line-strong);
     }
     
     .wallet-info {
@@ -160,40 +160,40 @@
     }
     
     .wallet-name {
-        font-weight: 500;
-        color: var(--color-text, #333);
+        font-weight: 600;
+        color: var(--c-text);
         font-size: 14px;
     }
-    
+
     .wallet-address {
-        color: var(--color-text-secondary, #666);
+        color: var(--c-muted);
         font-size: 13px;
-        font-family: monospace;
+        font-family: var(--font-mono, monospace);
     }
-    
+
     .no-wallet {
-        color: var(--color-text-secondary, #666);
+        color: var(--c-muted);
         font-size: 14px;
     }
-    
+
     .dropdown-arrow {
         transition: transform 0.2s;
-        color: var(--color-text-secondary, #666);
+        color: var(--c-muted);
     }
-    
+
     .dropdown-arrow.open {
         transform: rotate(180deg);
     }
-    
+
     .wallet-dropdown {
         position: absolute;
         top: calc(100% + 8px);
         left: 0;
         right: 0;
-        background: var(--color-surface, #fff);
-        border: 1px solid var(--color-border, #e0e0e0);
-        border-radius: 12px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+        background: var(--c-surface);
+        border: 1px solid var(--c-line);
+        border-radius: 14px;
+        box-shadow: var(--shadow-pop);
         z-index: 100;
         overflow: hidden;
         animation: slideDown 0.2s ease-out;
@@ -211,33 +211,34 @@
     }
     
     .dropdown-header {
-        padding: 16px;
-        border-bottom: 1px solid var(--color-border, #e0e0e0);
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--c-line);
         display: flex;
         align-items: center;
         justify-content: space-between;
     }
-    
+
     .dropdown-header h3 {
         margin: 0;
-        font-size: 16px;
-        font-weight: 600;
-        color: var(--color-text, #333);
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--c-text);
     }
-    
+
     .add-wallet-button {
         padding: 6px 12px;
-        background: var(--color-primary, #007bff);
-        color: white;
+        background: var(--c-primary);
+        color: var(--c-primary-fg);
         border: none;
-        border-radius: 6px;
+        border-radius: 8px;
         font-size: 13px;
+        font-weight: 600;
         cursor: pointer;
-        transition: background 0.2s;
+        transition: filter 0.2s;
     }
-    
+
     .add-wallet-button:hover {
-        background: var(--color-primary-hover, #0056b3);
+        filter: brightness(1.06);
     }
     
     .wallet-list {
@@ -259,11 +260,11 @@
     }
     
     .wallet-item:hover {
-        background: var(--color-surface-hover, #f5f5f5);
+        background: var(--c-surface-2);
     }
-    
+
     .wallet-item.active {
-        background: var(--color-surface-active, #e8f0fe);
+        background: var(--c-primary-soft);
     }
     
     .wallet-details {
@@ -282,47 +283,29 @@
     }
     
     .active-indicator {
-        color: var(--color-success, #28a745);
+        color: var(--c-success);
         font-size: 16px;
     }
-    
+
     .dropdown-footer {
         padding: 12px 16px;
-        border-top: 1px solid var(--color-border, #e0e0e0);
+        border-top: 1px solid var(--c-line);
     }
-    
+
     .manage-button {
         width: 100%;
         padding: 8px;
         background: none;
-        border: 1px solid var(--color-border, #e0e0e0);
-        border-radius: 6px;
-        color: var(--color-text, #333);
+        border: 1px solid var(--c-line);
+        border-radius: 8px;
+        color: var(--c-text);
         font-size: 13px;
         cursor: pointer;
         transition: all 0.2s;
     }
-    
+
     .manage-button:hover {
-        background: var(--color-surface-hover, #f5f5f5);
-        border-color: var(--color-border-hover, #d0d0d0);
-    }
-    
-    /* Scrollbar styling */
-    .wallet-list::-webkit-scrollbar {
-        width: 6px;
-    }
-    
-    .wallet-list::-webkit-scrollbar-track {
-        background: var(--color-surface-secondary, #f5f5f5);
-    }
-    
-    .wallet-list::-webkit-scrollbar-thumb {
-        background: var(--color-border, #e0e0e0);
-        border-radius: 3px;
-    }
-    
-    .wallet-list::-webkit-scrollbar-thumb:hover {
-        background: var(--color-border-hover, #d0d0d0);
+        background: var(--c-surface-2);
+        border-color: var(--c-line-strong);
     }
 </style>

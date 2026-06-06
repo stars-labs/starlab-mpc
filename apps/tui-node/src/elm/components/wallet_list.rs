@@ -162,10 +162,13 @@ impl Component for WalletList {
                     // prefix (first 10 hex chars), and the creation
                     // date. Two wallets from the same minute on the
                     // same device will still differ by group key.
-                    let sid = if wallet.session_id.len() > 24 {
-                        format!("{}…", &wallet.session_id[..23])
+                    // Prefer the user's display label (falls back to the
+                    // session id when unset), truncated for the list row.
+                    let display = wallet.display_name();
+                    let sid = if display.chars().count() > 24 {
+                        format!("{}…", display.chars().take(23).collect::<String>())
                     } else {
-                        wallet.session_id.clone()
+                        display.to_string()
                     };
                     let key_prefix = wallet
                         .group_public_key

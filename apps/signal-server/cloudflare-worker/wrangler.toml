@@ -7,11 +7,11 @@ account_id = "2764ae0fd9a5cb92c9ac67708620e54c"
 # URL for debugging when a custom-domain route is misbehaving.
 workers_dev = true
 
-# Bind the Worker to the apex of the xiongchenyu.dpdns.org zone.
+# Bind the Worker to the apex of the panda.qzz.io zone.
 # `custom_domain = true` makes Cloudflare auto-manage the DNS record
 # (an AAAA pointing at the Worker) and issue the edge certificate.
 routes = [
-  { pattern = "xiongchenyu.dpdns.org", custom_domain = true }
+  { pattern = "panda.qzz.io", custom_domain = true }
 ]
 
 [build]

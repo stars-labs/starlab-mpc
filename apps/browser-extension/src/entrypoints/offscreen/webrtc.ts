@@ -201,8 +201,24 @@ export class WebRTCManager {
     return JSON.stringify(error);
   }
 
+  /**
+   * FROST participant identifiers are derived from the SORTED participant
+   * device-id order — this MUST match the Rust core's `canonical_identifier`
+   * (apps/tui-node/src/protocal/dkg.rs), which does `participants.sort()` then
+   * `position + 1`. The signal server grows the participant list in *join*
+   * order, which is generally NOT sorted; if we used it as-is, our `indexOf`
+   * based identifiers would disagree with the Rust nodes and a mixed
+   * extension↔CLI/TUI ceremony would fail. Normalizing here (a plain
+   * lexicographic sort, matching Rust `Vec<String>::sort()`) makes every
+   * identifier in this class canonical regardless of join order. (#29)
+   */
+  private _withSortedParticipants(info: SessionInfo | null): SessionInfo | null {
+    if (!info || !Array.isArray(info.participants)) return info;
+    return { ...info, participants: [...info.participants].sort() };
+  }
+
   private _updateSession(newSessionInfo: SessionInfo | null) {
-    this.sessionInfo = newSessionInfo;
+    this.sessionInfo = this._withSortedParticipants(newSessionInfo);
     this.onSessionUpdate(this.sessionInfo, this.invites);
   }
 
@@ -738,10 +754,14 @@ export class WebRTCManager {
       // Reset DKG state
       this._resetDkgState();
 
-      // Set participant index either from params or from session info
-      const participants_list = participants.length > 0 ?
+      // Set participant index either from params or from session info.
+      // Sort the list so the 1-based index matches the Rust core's
+      // canonical_identifier (sorted order). If participants come from
+      // sessionInfo they're already sorted (_withSortedParticipants), but a
+      // direct `participants` arg may not be — sort defensively. (#29)
+      const participants_list = (participants.length > 0 ?
         participants :
-        this.sessionInfo?.participants || [];
+        this.sessionInfo?.participants || []).slice().sort();
 
       const threshold_count = threshold > 0 ?
         threshold :
@@ -749,7 +769,7 @@ export class WebRTCManager {
 
       this.participantIndex = participantIndex > 0 ?
         participantIndex :
-        (this.sessionInfo?.participants.indexOf(this.localPeerId) ?? -1) + 1 || 0; // 1-based indexing
+        (participants_list.indexOf(this.localPeerId) + 1) || 0; // 1-based, sorted
 
       if (this.participantIndex <= 0 || this.participantIndex > participants_list.length) {
         throw new Error(`Invalid participant index: ${this.participantIndex}`);
@@ -2129,8 +2149,10 @@ export class WebRTCManager {
       return;
     }
 
+    // Sorted order to match the Rust core's canonical_identifier — signingInfo
+    // participants may come straight off the wire (unsorted). (#29)
     const senderIndex =
-      this.signingInfo.participants.indexOf(fromPeerId) + 1;
+      [...this.signingInfo.participants].sort().indexOf(fromPeerId) + 1;
     if (senderIndex <= 0) {
       this._log(
         `Invalid sender index for ${fromPeerId} (not in participants list)`,
@@ -2201,8 +2223,10 @@ export class WebRTCManager {
       return;
     }
 
+    // Sorted order to match the Rust core's canonical_identifier — signingInfo
+    // participants may come straight off the wire (unsorted). (#29)
     const senderIndex =
-      this.signingInfo.participants.indexOf(fromPeerId) + 1;
+      [...this.signingInfo.participants].sort().indexOf(fromPeerId) + 1;
     if (senderIndex <= 0) {
       this._log(
         `Invalid sender index for ${fromPeerId} (not in participants list)`,
@@ -2600,7 +2624,9 @@ export class WebRTCManager {
     this._log(`Participants: [${sessionInfo.participants.join(', ')}]`);
     this._log(`Accepted devices: [${sessionInfo.accepted_devices.join(', ')}]`);
 
-    this.sessionInfo = sessionInfo;
+    // Canonicalize participant order (sorted) so FROST identifiers match the
+    // Rust core regardless of join order — see _withSortedParticipants (#29).
+    this.sessionInfo = this._withSortedParticipants(sessionInfo)!;
 
     // Trigger mesh status check when session acceptance status changes
     this._checkMeshStatus();

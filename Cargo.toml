@@ -2,6 +2,7 @@
 members = [
     "apps/tui-node",
     "apps/native-node",
+    "apps/cli-node",
     "apps/signal-server/server",
     "apps/signal-server/cloudflare-worker",
     "packages/@mpc-wallet/frost-core",

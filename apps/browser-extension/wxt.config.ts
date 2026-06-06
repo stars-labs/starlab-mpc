@@ -1,7 +1,6 @@
 import { defineConfig } from 'wxt';
 import tailwindcss from '@tailwindcss/vite';
 import wasm from 'vite-plugin-wasm';
-import topLevelAwait from 'vite-plugin-top-level-await';
 
 export default defineConfig({
   srcDir: 'src',
@@ -9,9 +8,19 @@ export default defineConfig({
   vite: () => ({
     plugins: [
       wasm(),
-      topLevelAwait(),
       tailwindcss(),
     ],
+    // Vite 8 + rolldown supports top-level await natively for ESM output
+    // (which the MV3 module background/offscreen entrypoints use), so the
+    // old vite-plugin-top-level-await is gone — under rolldown its
+    // generateBundle hook crashes ("path argument must be of type string").
+    // Pin the build target to esnext so esbuild/rolldown emit native TLA and
+    // destructuring instead of trying (and failing) to down-level them for
+    // WXT's default chrome87/es2020 target. The extension only ever runs in
+    // a modern MV3 runtime, so the lower targets bought us nothing.
+    build: {
+      target: 'esnext',
+    },
   }),
   manifest: {
     name: 'Browser Wallet',
@@ -25,13 +34,8 @@ export default defineConfig({
     permissions: ['storage', 'tabs', 'activeTab', 'offscreen', 'notifications'],
     host_permissions: [
       'https://*/*',
-      // Allow both signal servers. `xiongchenyu.dpdns.org` is the
-      // new default (matches TUI's `model.rs::WEBSOCKET_URL`);
-      // `auto-life.tech` is the legacy endpoint left in place so
-      // users who set a manual override via chrome.storage.local
-      // ['signalServerUrl'] still have host permission for it.
-      'wss://xiongchenyu.dpdns.org/*',
-      'wss://auto-life.tech/*'
+      // The signal server (matches TUI's `model.rs` websocket_url).
+      'wss://panda.qzz.io/*'
     ],
     icons: {
       "16": "assets/icon-16.png",

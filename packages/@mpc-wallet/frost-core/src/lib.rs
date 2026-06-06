@@ -6,6 +6,7 @@ pub mod secp256k1;
 pub mod keystore;
 pub mod errors;
 pub mod root_secret;
+pub mod curve_registry;
 pub mod unified_dkg;
 pub mod hd_derivation;
 

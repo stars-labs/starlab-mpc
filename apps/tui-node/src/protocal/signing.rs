@@ -174,11 +174,45 @@ pub async fn handle_start_signing<C>(
     )
     .await;
 
+    // Re-feed any peer SIGN_COMMITs that arrived before our session existed
+    // (the cold-start race): now that the session AND our own nonces are in
+    // place, they can be decoded, counted toward threshold, and may complete
+    // Round 1. No-op (empty buffer) on the warm path.
+    drain_pre_session_commitments::<C>(state.clone(), self_device_id.clone(), ui_tx.clone()).await;
+
     // Check the threshold-reached edge here too — a 2-of-3 wallet where
     // only this node signs would otherwise sit on its own commitment
     // forever. `try_advance_to_round2` runs Round 2 locally if we
     // already have threshold-many commitments (including our own).
     try_advance_to_round2::<C>(&state, &ui_tx, &self_device_id).await;
+}
+
+/// Re-feed `SIGN_COMMIT`s that arrived before this node had a signing session
+/// (see `AppState::pending_pre_session_commitments`). Called once the session
+/// is established. Drains the buffer and runs each commit through the normal
+/// `process_signing_round1` path (which now resolves the sender Identifier).
+pub async fn drain_pre_session_commitments<C>(
+    state: Arc<Mutex<AppState<C>>>,
+    self_device_id: String,
+    ui_tx: UnboundedSender<Message>,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+{
+    let buffered: Vec<(String, Vec<u8>)> = {
+        let mut guard = state.lock().await;
+        std::mem::take(&mut guard.pending_pre_session_commitments)
+    };
+    if buffered.is_empty() {
+        return;
+    }
+    info!(
+        "signing: re-feeding {} buffered pre-session SIGN_COMMIT(s)",
+        buffered.len()
+    );
+    for (from, bytes) in buffered {
+        process_signing_round1(state.clone(), self_device_id.clone(), from, bytes, ui_tx.clone())
+            .await;
+    }
 }
 
 // -----------------------------------------------------------------
@@ -203,10 +237,20 @@ pub async fn process_signing_round1<C>(
     // Resolve the sender's canonical identifier and decode the commitment
     // in one short lock.
     let decode_result = {
-        let guard = state.lock().await;
+        let mut guard = state.lock().await;
         let Some(session) = guard.session.as_ref() else {
-            // Late arrival with no session — ignore, log.
-            warn!("SIGN_COMMIT from {} but no active session; dropping", from_device_id);
+            // The commit beat our own session setup (a cold-started co-signer
+            // whose JoinSigning hasn't run yet). Buffer the raw bytes — we
+            // can't resolve the sender's Identifier without a participants
+            // list — and re-feed via `drain_pre_session_commitments` once the
+            // session exists. Dropping here is what stalled cold-start signing.
+            info!(
+                "SIGN_COMMIT from {} before session ready; buffering",
+                from_device_id
+            );
+            guard
+                .pending_pre_session_commitments
+                .push((from_device_id.clone(), commitment_bytes.clone()));
             return;
         };
         let sender_id = match canonical_identifier::<C>(&session.participants, &from_device_id) {

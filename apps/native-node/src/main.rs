@@ -21,11 +21,52 @@ async fn main() -> Result<()> {
     let window = MainWindow::new()?;
     
     // Set initial device ID
+    // Device id must be UNIQUE per room (a duplicate collides on the signal
+    // server and breaks the mesh). Env-configurable so multiple native
+    // instances / devices don't all share "native-node-001".
+    let device_id =
+        std::env::var("MPC_DEVICE_ID").unwrap_or_else(|_| "native-node-001".to_string());
     let app_state = window.global::<AppState>();
-    app_state.set_device_id("native-node-001".into());
-    
-    // Create core adapter with shared logic
-    let adapter = Arc::new(CoreAdapter::new(window.as_weak()));
+    app_state.set_device_id(device_id.clone().into());
+
+    // Keystore lives alongside the TUI's (~/.frost_keystore) so wallets
+    // created/imported by either client are visible to the other.
+    let keystore_path = format!(
+        "{}/.frost_keystore",
+        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+    );
+    // Signal server (matches the TUI default + browser extension). Both are
+    // env-configurable so native can join a hosted multi-tenant room: the
+    // hosted worker REQUIRES a strong ?room=<id> (#31), so set MPC_ROOM (or put
+    // it directly in MPC_SIGNAL_SERVER). Without a room the hosted worker
+    // rejects the connection; a local standalone server needs no room.
+    let signal_base =
+        std::env::var("MPC_SIGNAL_SERVER").unwrap_or_else(|_| "wss://panda.qzz.io".to_string());
+    let signal_url = match std::env::var("MPC_ROOM") {
+        Ok(room) if !room.is_empty() && !signal_base.contains("room=") => {
+            if signal_base.contains('?') {
+                format!("{signal_base}&room={room}")
+            } else if signal_base.splitn(2, "://").nth(1).unwrap_or(&signal_base).contains('/') {
+                format!("{signal_base}?room={room}")
+            } else {
+                format!("{signal_base}/?room={room}")
+            }
+        }
+        _ => signal_base,
+    };
+
+    // Ciphersuite for this launch: MPC_CURVE=ed25519 (Solana/Sui/Aptos/NEAR)
+    // or default secp256k1 (Ethereum-family + Bitcoin). One curve per instance.
+    let curve = std::env::var("MPC_CURVE").unwrap_or_else(|_| "secp256k1".to_string());
+
+    // Create core adapter with shared logic (real headless Elm backend).
+    let adapter = Arc::new(CoreAdapter::new(
+        window.as_weak(),
+        device_id,
+        keystore_path,
+        signal_url,
+        curve,
+    ));
     
     // Set up UI callbacks
     {
@@ -43,10 +84,19 @@ async fn main() -> Result<()> {
     
     {
         let adapter = adapter.clone();
-        window.on_create_wallet(move || {
+        let win = window.as_weak();
+        window.on_create_wallet(move |name| {
+            // Read the keystore password on the UI thread (the Slint global
+            // is !Send) before handing off to the async backend.
+            let pw = win
+                .upgrade()
+                .map(|w| w.global::<AppState>().get_dkg_password().to_string())
+                .unwrap_or_default();
             let adapter = adapter.clone();
+            let name = name.to_string();
             tokio::spawn(async move {
-                if let Err(e) = adapter.create_wallet().await {
+                adapter.set_dkg_password(pw);
+                if let Err(e) = adapter.create_wallet(name).await {
                     println!("Failed to create wallet: {}", e);
                 }
             });
@@ -93,10 +143,16 @@ async fn main() -> Result<()> {
     
     {
         let adapter = adapter.clone();
+        let win = window.as_weak();
         window.on_join_session(move |session_id| {
+            let pw = win
+                .upgrade()
+                .map(|w| w.global::<AppState>().get_dkg_password().to_string())
+                .unwrap_or_default();
             let adapter = adapter.clone();
             let session_id = session_id.to_string();
             tokio::spawn(async move {
+                adapter.set_dkg_password(pw);
                 if let Err(e) = adapter.join_session(session_id).await {
                     println!("Failed to join session: {}", e);
                 }

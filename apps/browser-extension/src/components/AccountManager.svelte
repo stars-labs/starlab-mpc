@@ -181,136 +181,145 @@
         position: relative;
         width: 100%;
     }
-    
+
     .current-account {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 12px 16px;
-        background: var(--bg-secondary, #f5f5f5);
-        border-radius: 8px;
+        background: var(--c-surface);
+        border: 1px solid var(--c-line);
+        border-radius: 14px;
         cursor: pointer;
         transition: background-color 0.2s;
     }
-    
+
     .current-account:hover {
-        background: var(--bg-hover, #e8e8e8);
+        background: var(--c-surface-2);
     }
-    
+
     .account-info {
         flex: 1;
+        min-width: 0;
     }
-    
+
     .account-name {
         font-weight: 600;
         font-size: 14px;
-        color: var(--text-primary, #333);
+        color: var(--c-text);
     }
-    
+
     .account-address {
         font-size: 12px;
-        color: var(--text-secondary, #666);
-        font-family: monospace;
+        color: var(--c-muted);
+        font-family: var(--font-mono, monospace);
     }
-    
+
     .account-balance {
-        font-weight: 500;
+        font-weight: 600;
         font-size: 14px;
-        color: var(--text-primary, #333);
+        color: var(--c-text);
         margin-right: 8px;
     }
-    
+
     .no-account {
-        color: var(--text-secondary, #666);
+        color: var(--c-muted);
         font-style: italic;
     }
-    
+
     .chevron {
         transition: transform 0.2s;
+        color: var(--c-muted);
     }
-    
+
     .chevron.rotate {
         transform: rotate(180deg);
     }
-    
+
     .account-dropdown {
         position: absolute;
-        top: calc(100% + 4px);
+        top: calc(100% + 6px);
         left: 0;
         right: 0;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        background: var(--c-surface);
+        border: 1px solid var(--c-line);
+        border-radius: 14px;
+        box-shadow: var(--shadow-pop);
         z-index: 100;
         max-height: 400px;
         overflow: hidden;
         display: flex;
         flex-direction: column;
     }
-    
+
     .dropdown-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border-color, #e0e0e0);
+        border-bottom: 1px solid var(--c-line);
     }
-    
+
     .dropdown-header h3 {
         margin: 0;
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 700;
+        color: var(--c-text);
     }
-    
+
     .icon-button {
         background: none;
         border: none;
         cursor: pointer;
         padding: 4px;
-        border-radius: 4px;
+        border-radius: 8px;
+        color: var(--c-muted);
         transition: background-color 0.2s;
     }
-    
+
     .icon-button:hover {
-        background: var(--bg-hover, #f0f0f0);
+        background: var(--c-surface-2);
+        color: var(--c-text);
     }
-    
+
     .create-account-form {
         display: flex;
         gap: 8px;
         padding: 12px 16px;
-        border-bottom: 1px solid var(--border-color, #e0e0e0);
+        border-bottom: 1px solid var(--c-line);
     }
-    
+
     .create-account-form input {
         flex: 1;
         padding: 8px 12px;
-        border: 1px solid var(--border-color, #e0e0e0);
-        border-radius: 4px;
+        border: 1px solid var(--c-line-strong);
+        border-radius: 8px;
         font-size: 14px;
+        background: var(--c-surface);
+        color: var(--c-text);
     }
-    
+
     .create-button {
         padding: 8px 16px;
-        background: var(--primary-color, #3b82f6);
-        color: white;
+        background: var(--c-primary);
+        color: var(--c-primary-fg);
         border: none;
-        border-radius: 4px;
+        border-radius: 8px;
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
         cursor: pointer;
-        transition: background-color 0.2s;
+        transition: filter 0.2s;
     }
-    
+
     .create-button:hover {
-        background: var(--primary-hover, #2563eb);
+        filter: brightness(1.06);
     }
-    
+
     .accounts-list {
         overflow-y: auto;
         max-height: 300px;
     }
-    
+
     .account-item {
         display: flex;
         justify-content: space-between;
@@ -319,70 +328,59 @@
         cursor: pointer;
         transition: background-color 0.2s;
     }
-    
+
     .account-item:hover {
-        background: var(--bg-hover, #f5f5f5);
+        background: var(--c-surface-2);
     }
-    
+
     .account-item.selected {
-        background: var(--bg-selected, #e3f2fd);
+        background: var(--c-primary-soft);
     }
-    
+
     .account-item-info {
         flex: 1;
+        min-width: 0;
     }
-    
+
     .account-item-name {
-        font-weight: 500;
+        font-weight: 600;
         font-size: 14px;
-        color: var(--text-primary, #333);
+        color: var(--c-text);
     }
-    
+
     .account-item-address {
         display: flex;
         align-items: center;
         gap: 4px;
         font-size: 12px;
-        color: var(--text-secondary, #666);
-        font-family: monospace;
+        color: var(--c-muted);
+        font-family: var(--font-mono, monospace);
     }
-    
+
     .copy-button {
         background: none;
         border: none;
         cursor: pointer;
         padding: 2px;
-        opacity: 0.5;
+        color: var(--c-muted);
+        opacity: 0.7;
         transition: opacity 0.2s;
     }
-    
+
     .copy-button:hover {
         opacity: 1;
+        color: var(--c-text);
     }
-    
+
     .account-item-balance {
         font-size: 14px;
-        color: var(--text-primary, #333);
+        color: var(--c-text);
     }
-    
+
     .no-accounts {
         padding: 24px;
         text-align: center;
-        color: var(--text-secondary, #666);
+        color: var(--c-muted);
         font-size: 14px;
-    }
-    
-    /* Dark mode support */
-    :global(.dark) .account-dropdown {
-        background: var(--bg-primary, #1a1a1a);
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-    }
-    
-    :global(.dark) .current-account {
-        background: var(--bg-secondary, #2a2a2a);
-    }
-    
-    :global(.dark) .current-account:hover {
-        background: var(--bg-hover, #3a3a3a);
     }
 </style>

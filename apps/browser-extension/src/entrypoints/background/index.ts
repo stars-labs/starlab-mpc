@@ -406,9 +406,8 @@ export async function checkAndRestoreKeystores(): Promise<void> {
 async function initializeWebSocket(): Promise<void> {
     try {
         // Resolve from config: user override via chrome.storage.local
-        // ['signalServerUrl'] wins; otherwise the TUI-matching default.
-        // Migrating away from the old hardcoded `auto-life.tech` so TUI
-        // and extension nodes actually land on the same signal server.
+        // ['signalServerUrl'] wins; otherwise the TUI-matching default,
+        // so TUI and extension nodes land on the same signal server.
         const WEBSOCKET_URL = await getSignalServerUrl();
 
         // Generate device ID
@@ -431,8 +430,11 @@ async function initializeWebSocket(): Promise<void> {
 /**
  * Main background script entry point
  */
-export default defineBackground(async () => {
-//     console.log("🚀 [Background] Background script starting...");
+export default defineBackground(() => {
+    // The entrypoint MUST be synchronous: MV3 requires event listeners to be
+    // registered during the initial synchronous run, and WXT warns if main()
+    // returns a promise. So we register all listeners synchronously below and
+    // kick off the async startup work in a fire-and-forget task at the end.
 
     // Initialize all components
     initializeComponents();
@@ -469,22 +471,18 @@ export default defineBackground(async () => {
         });
     }
 
-    // Check for existing keystores and restore state
-    await checkAndRestoreKeystores();
+    // Async startup runs detached so the entrypoint itself stays synchronous.
+    // Order preserved: restore keystores → create offscreen → connect WS.
+    void (async () => {
+        // Check for existing keystores and restore state
+        await checkAndRestoreKeystores();
 
-    // Initialize offscreen document on startup
-    offscreenManager.createOffscreenDocument().then((result: any) => {
-        console.log("🖥️ [Background] Initial offscreen document setup:", result);
-    });
+        // Initialize offscreen document on startup
+        offscreenManager.createOffscreenDocument().then((result: any) => {
+            console.log("🖥️ [Background] Initial offscreen document setup:", result);
+        });
 
-    // Initialize WebSocket connection
-    initializeWebSocket();
-
-    // Start with fresh session state on extension startup
-//     console.log("🔄 [Background] Extension starting up - sessions are ephemeral, starting fresh");
-//     console.log("✅ [Background] Extension ready");
-
-    // No need to clean up session state on shutdown since we don't persist it
-
-//     console.log("🎉 [Background] Background script initialized successfully");
+        // Initialize WebSocket connection
+        initializeWebSocket();
+    })();
 });

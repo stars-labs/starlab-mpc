@@ -18,6 +18,42 @@ pub enum Message {
     PopScreen,
     ForceRemount,
     
+    // Headless control messages — used by non-TUI front-ends (e.g. the
+    // native Slint app) that drive the same Elm core without the
+    // multi-screen keyboard flow. Each one seeds the model state the
+    // interactive screens would have set, then hands off to the exact
+    // same downstream path (SubmitPassword → creator/joiner DKG). The
+    // TUI never emits these.
+    HeadlessCreateWallet {
+        config: WalletConfig,
+        password: String,
+        /// Optional user display label (→ keystore metadata.label).
+        label: String,
+    },
+    HeadlessJoinSession {
+        session_id: String,
+        password: String,
+        label: String,
+    },
+    /// Initiator-side signing for a non-TUI front-end: seeds the same
+    /// `pending_sign_*` state SignSubmit's cold path sets, then hands off to
+    /// SubmitPassword → UnlockWallet → InitiateSigning (announce + ceremony).
+    /// `encoding` is "utf8" (default) or "hex" for `message`.
+    HeadlessSign {
+        wallet_id: String,
+        message: String,
+        encoding: String,
+        password: String,
+    },
+    /// Request the active-session replay (`RequestActiveSessions`) over the
+    /// primary WebSocket. The interactive TUI fires this implicitly on
+    /// entering the Join-Session screen; headless front-ends (native, CLI)
+    /// have no such screen, so without this they never discover sessions
+    /// announced before they connected — the cold-start replay the browser
+    /// extension does automatically. Replies stream back as
+    /// `SessionDiscovered`.
+    HeadlessRefreshSessions,
+
     // Wallet management messages
     CreateWallet { config: WalletConfig },
     SelectWallet { wallet_id: String },

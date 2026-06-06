@@ -58,6 +58,10 @@ thiserror = "2.0.9"
 # Only examples/dkg.rs uses clap (argument parsing). No tests in this
 # crate currently; no async in the examples either.
 clap = { version = "4.5.21", features = ["derive"] }
+# Third FROST ciphersuite used ONLY in curve_registry tests, to prove a curve
+# beyond ed25519/secp256k1 registers and runs DKG with zero engine edits (#35).
+# Same ZCash FROST 2.2 line as the production curves.
+frost-ristretto255 = { version = "2.2.0", features = ["serde"] }
 # (bincode removed: the examples don't use it and bincode 3.x reshuffled the
 # serde integration. If a future example needs binary encoding, pull in
 # `bincode_serde` or ciborium explicitly at that point.)
