@@ -224,6 +224,55 @@ account this wallet controls.
 
 ---
 
+## 5b. Level up: a REAL transaction on the Solana blockchain
+
+The strongest version: the MPC wallet signs an actual Solana transfer and it lands
+on-chain, visible in a public block explorer. Division of labour (this is what makes
+it credible): the **standard `@solana/web3.js` library** builds and submits the
+transaction; our **raw `mpc-wallet-cli` only signs**. Helper: `scripts/demo/solana_onchain.mjs`.
+
+> **Always derive the address from `group_public_key`** (`solana_onchain.mjs address
+> <groupKeyHex>`), not from the `dkg_complete` event's `address` field — that field is
+> currently unreliable for ed25519 (tracked separately).
+
+### Pre-demo (do this BEFORE you're on stage — the live faucet is rate-limited)
+The wallet address needs a little SOL for the transfer + fee. The public devnet airdrop
+API is heavily rate-limited, so **pre-fund the address ahead of time**:
+```bash
+node scripts/demo/solana_onchain.mjs address <groupKeyHex>     # -> the Solana address
+# then fund it via the web faucet (https://faucet.solana.com, has a captcha)
+# or transfer ~0.01 SOL from any funded devnet wallet. Confirm it's funded:
+node scripts/demo/solana_onchain.mjs airdrop <groupKeyHex> 1   # works only if not rate-limited
+```
+
+### On stage — two ways to present (pick by whether you pre-funded)
+
+**(i) Fund-independent proof (cannot be rate-limited — recommended as the safe default):**
+```bash
+node scripts/demo/solana_onchain.mjs prepare <groupKeyHex> self 1000   # prints MESSAGE hex
+# MPC-sign that message (2-of-3): in alice's serve terminal
+#   {"cmd":"sign","wallet_id":"…","message":"<MESSAGE hex>","encoding":"hex","password":"demo"}
+#   bob: {"cmd":"approve_signing","session_id":"sign_…","password":"demo"}
+node scripts/demo/solana_onchain.mjs verify <signatureHex>             # -> web3.js tx.verifySignatures(): true
+```
+> 🎤 "The standard Solana library just confirmed our threshold signature is valid for a
+> real Solana transaction — no trust in our code required."
+
+**(ii) Full on-chain (if the address is pre-funded):** same `prepare` + MPC-sign, then
+```bash
+node scripts/demo/solana_onchain.mjs finalize <signatureHex>          # submits; prints the explorer URL
+```
+Open the printed `https://explorer.solana.com/tx/…?cluster=devnet` link on the projector.
+> 🎤 "That transaction was just settled on a public blockchain — authorized by two of three
+> machines that never assembled the private key."
+
+> **Verified:** address derivation matches web3.js; the MPC signature passes web3.js
+> `verifySignatures()` for a real transfer; the only thing gating `finalize` is the
+> account balance (mechanism proven — see the script header). `prepare → sign → finalize`
+> must complete within ~60s (blockhash lifetime), so have the MPC nodes already running.
+
+---
+
 ## 6. Optional but powerful: "one device cannot sign alone"
 
 This is the most visceral proof that the key is genuinely split.
