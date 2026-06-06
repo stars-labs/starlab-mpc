@@ -13,6 +13,10 @@ workspace member.
   (Node/Python/OpenSSL) and the key shown as a real Solana address. Includes
   talking points, the "one device can't sign alone" proof, fallbacks, and
   troubleshooting.
+- [`DEMO_REHEARSAL_CHECKLIST.md`](DEMO_REHEARSAL_CHECKLIST.md) — the
+  printable run-it-twice checklist to execute before the live demo
+  (pre-flight, roles, timing, failure drills, sign-off). Companion to
+  `LIVE_MPC_DEMO.md`.
 - [`MONOREPO_ARCHITECTURE.md`](MONOREPO_ARCHITECTURE.md) — workspace
   layout, how the Rust + Bun workspaces fit together, build order.
 - [`MPC_WALLET_TECHNICAL_DOCUMENTATION.md`](MPC_WALLET_TECHNICAL_DOCUMENTATION.md)
