@@ -18,7 +18,7 @@
 
 // Core Application State
 export type { AppState, SupportedChain } from './appstate';
-export { INITIAL_APP_STATE, CURVE_COMPATIBLE_CHAINS, getCompatibleChains, getRequiredCurve } from './appstate';
+export { INITIAL_APP_STATE, CURVE_COMPATIBLE_CHAINS, getCompatibleChains, getRequiredCurve, signingCaveat } from './appstate';
 // Note: Constants are exported for components that need them
 
 // Session Management

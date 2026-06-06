@@ -14,6 +14,14 @@ workspace member.
   crypto details, deployment scenarios). ~1,440 lines (earlier
   drafts said "several hundred pages" — not literally page-based;
   at typical print density this is closer to ~30 pages).
+- [`MULTI_CURVE_DERIVATION.md`](MULTI_CURVE_DERIVATION.md) — how one
+  root secret yields per-curve / per-account threshold wallets, and
+  the **recovery model** (the seed alone ≠ your share; back up the
+  keystore). Read alongside the next entry.
+- [`SIGNATURE_CHAIN_COMPATIBILITY.md`](SIGNATURE_CHAIN_COMPATIBILITY.md)
+  — which chains can actually *verify* a FROST (Schnorr) signature,
+  and the sharp EVM-EOA exception (standard Ethereum EOAs verify
+  ECDSA → need a smart-contract account).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code-of-conduct, branching
   model, commit format, PR guidelines.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history.

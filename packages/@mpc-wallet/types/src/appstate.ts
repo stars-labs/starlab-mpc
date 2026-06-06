@@ -199,3 +199,30 @@ export function getRequiredCurve(chain: SupportedChain): 'secp256k1' | 'ed25519'
   }
   return 'secp256k1';
 }
+
+/** EVM chains whose standard EOA transactions verify with ECDSA, not Schnorr. */
+const EVM_EOA_CHAINS: ReadonlySet<string> = new Set([
+  'ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bsc', 'avalanche',
+]);
+
+/**
+ * Signing-scheme compatibility caveat for a chain, or `null` if it verifies
+ * FROST (Schnorr/Ed25519) signatures natively.
+ *
+ * Mirrors the Rust `blockchain_config::signing_caveat`. FROST produces Schnorr
+ * signatures; a standard Ethereum-family EOA transaction verifies with ECDSA
+ * and will reject them — EVM use needs a smart-contract account (ERC-4337 / a
+ * Schnorr-verifier contract). See docs/SIGNATURE_CHAIN_COMPATIBILITY.md.
+ */
+export function signingCaveat(chain: string): string | null {
+  if (EVM_EOA_CHAINS.has(chain)) {
+    return (
+      'Threshold-Schnorr wallet: a standard Ethereum-family EOA transaction ' +
+      'verifies with ECDSA and will not accept this signature. EVM use ' +
+      'requires a smart-contract account (ERC-4337 / a Schnorr-verifier ' +
+      'contract). Receiving is fine; spending via a normal EOA transaction ' +
+      'is not supported.'
+    );
+  }
+  return null;
+}

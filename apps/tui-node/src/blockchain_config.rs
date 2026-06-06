@@ -111,6 +111,31 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
     config
 }
 
+/// Signing-scheme compatibility caveat for a chain, if one applies.
+///
+/// FROST produces **Schnorr** signatures. Bitcoin Taproot and the ed25519
+/// chains verify those natively, but a standard Ethereum-family **EOA**
+/// transaction verifies with **ECDSA** and will reject a Schnorr signature —
+/// EVM use needs a smart-contract account (ERC-4337 / a Schnorr verifier).
+///
+/// This is the single source of truth for that warning so the TUI / native /
+/// CLI surface one consistent message (the extension mirrors it in TS). See
+/// `docs/SIGNATURE_CHAIN_COMPATIBILITY.md`.
+///
+/// Returns `None` when the chain verifies FROST signatures natively.
+pub fn signing_caveat(chain: &str) -> Option<&'static str> {
+    match chain {
+        "ethereum" | "bsc" | "polygon" | "avalanche" => Some(
+            "Threshold-Schnorr wallet: a standard Ethereum-family EOA \
+             transaction verifies with ECDSA and will not accept this \
+             signature. EVM use requires a smart-contract account (ERC-4337 / \
+             a Schnorr-verifier contract). Receiving is fine; spending via a \
+             normal EOA transaction is not supported.",
+        ),
+        _ => None,
+    }
+}
+
 /// Get compatible blockchains for a given curve
 pub fn get_compatible_chains(curve: &CurveType) -> Vec<(&'static str, BlockchainInfo)> {
     let config = get_blockchain_config();
