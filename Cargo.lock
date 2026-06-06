@@ -4584,6 +4584,7 @@ dependencies = [
  "frost-secp256k1",
  "futures-util",
  "hex",
+ "mpc-wallet-frost-core",
  "serde",
  "serde_json",
  "tempfile",

@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 tui-node = { path = "../tui-node" }
+mpc-wallet-frost-core = { path = "../../packages/@mpc-wallet/frost-core" }
 webrtc-signal-server = { path = "../signal-server/server" }
 tokio = { workspace = true }
 serde = { workspace = true }

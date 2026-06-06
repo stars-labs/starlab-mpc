@@ -52,8 +52,29 @@ enum Command {
         #[command(flatten)]
         common: OneShot,
     },
+    /// Simulate a share refresh/resharing in one process and print a JSON
+    /// summary (group key preserved, refreshed quorum signs, old share
+    /// rejected). Self-contained — exercises the resharing engine (#45).
+    ReshareSimulate(ReshareSimArgs),
     /// Print the command/event protocol catalog as JSON (self-discovery).
     Schema,
+}
+
+#[derive(clap::Args)]
+struct ReshareSimArgs {
+    /// Number of participants in the initial wallet.
+    #[arg(long, default_value_t = 3)]
+    nodes: usize,
+    /// Signing threshold (K of N). Preserved by the refresh (can't be lowered).
+    #[arg(long, default_value_t = 2)]
+    threshold: u16,
+    /// Ciphersuite: secp256k1 (default) or ed25519.
+    #[arg(long, default_value = "secp256k1")]
+    curve: String,
+    /// Comma-separated participant ids to KEEP after the refresh (1-based;
+    /// default: all). Omit an id to remove that device.
+    #[arg(long, value_delimiter = ',')]
+    keep: Vec<u16>,
 }
 
 /// Shared flags for one-shot commands.
@@ -254,6 +275,16 @@ async fn main() -> anyhow::Result<()> {
         Command::Schema => {
             println!("{}", protocol::schema_json());
             Ok(())
+        }
+        Command::ReshareSimulate(args) => {
+            let r = mpc_wallet_cli::reshare::run_reshare_simulation(
+                args.nodes,
+                args.threshold,
+                &args.curve,
+                args.keep,
+            )?;
+            println!("{}", r.to_json());
+            if r.ok { Ok(()) } else { std::process::exit(1) }
         }
         Command::Wallet { sub } => match sub {
             WalletCmd::List { common } => {

@@ -9,6 +9,7 @@ pub mod bridge;
 pub mod oneshot;
 pub mod policy;
 pub mod protocol;
+pub mod reshare;
 pub mod serve;
 pub mod simulate;
 pub mod trace;
