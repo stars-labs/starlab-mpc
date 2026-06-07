@@ -219,7 +219,7 @@ MPC_SIGNAL_BIND=0.0.0.0:9000 mpc-wallet-cli ...   # or: cargo run -p webrtc-sign
 ```
 Point every node at `ws://<that-machine-LAN-ip>:9000`. Removes the internet
 dependency; ideal for a controlled demo room. (See the fallback ladder in
-`docs/INVESTOR_DEMO.md`.)
+`docs/INVESTOR_GUIDE.md`.)
 
 ### 4.3 WebRTC reachability
 The mesh needs the peers to connect directly. On the same LAN this is fine. Across

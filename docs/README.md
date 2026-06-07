@@ -7,16 +7,18 @@ workspace member.
 
 ## Contents
 
-- [`LIVE_MPC_DEMO.md`](LIVE_MPC_DEMO.md) — **run the live, independently
-  verifiable MPC demo** for investors: raw `mpc-wallet-cli` commands across
-  three machines (ed25519), with the signature verified by an *external* tool
-  (Node/Python/OpenSSL) and the key shown as a real Solana address. Includes
-  talking points, the "one device can't sign alone" proof, fallbacks, and
-  troubleshooting.
+- [`INVESTOR_GUIDE.md`](INVESTOR_GUIDE.md) — **the single investor demo
+  guide** (中文: `INVESTOR_GUIDE.zh.md`). Two tracks: **A** = raw
+  `mpc-wallet-cli` across three machines (ed25519), signature verified by an
+  *external* tool (Node/Python/OpenSSL), key shown as a real Solana address;
+  **B** = the polished TUI multi-device demo (air-gap, multi-chain). Includes
+  talking points, the "one device can't sign alone" proof, on-chain beat,
+  recovery, fallback ladder, and troubleshooting. (Merges the former
+  `LIVE_MPC_DEMO.md` + `INVESTOR_DEMO.md`.)
 - [`DEMO_REHEARSAL_CHECKLIST.md`](DEMO_REHEARSAL_CHECKLIST.md) — the
   printable run-it-twice checklist to execute before the live demo
   (pre-flight, roles, timing, failure drills, sign-off). Companion to
-  `LIVE_MPC_DEMO.md`.
+  `INVESTOR_GUIDE.md`.
 - [`MONOREPO_ARCHITECTURE.md`](MONOREPO_ARCHITECTURE.md) — workspace
   layout, how the Rust + Bun workspaces fit together, build order.
 - [`MPC_WALLET_TECHNICAL_DOCUMENTATION.md`](MPC_WALLET_TECHNICAL_DOCUMENTATION.md)

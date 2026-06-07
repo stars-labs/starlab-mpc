@@ -303,4 +303,4 @@ MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CUR
 ```
 
 Related docs: `docs/MULTI_TENANT.md` (isolation), `docs/INTEROP_EXT_CLI.md`
-(ext↔CLI interop + caveats), `docs/INVESTOR_DEMO.md` (demo runbook + fallbacks).
+(ext↔CLI interop + caveats), `docs/INVESTOR_GUIDE.md` (demo guide + fallbacks).
