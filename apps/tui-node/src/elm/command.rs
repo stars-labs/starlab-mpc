@@ -59,9 +59,26 @@ pub enum Command {
     /// Calls `protocal::dkg::process_dkg_round2` which finalises the key with
     /// `part3` once all Round 2 packages for us have arrived.
     ProcessDKGRound2 { from_device: String, package_bytes: Vec<u8> },
-    /// Begin a same-set reshare on this node (#45): refresh part 1 over the
-    /// current session's live mesh, then broadcast. Triggered by HeadlessReshare.
+    /// Reshare **initiator** (#56): load the OLD share from the keystore, seed
+    /// the reshare context, and announce a `SessionType::Reshare` session. The
+    /// refresh itself fires later via the shared mesh-ready path
+    /// (`StartFrostProtocol`), exactly like DKG. Triggered by `HeadlessReshare`.
     StartReshare { wallet_id: String, password: String, keystore_path: String },
+    /// Reshare **joiner** (#56): load the OLD share, seed the reshare context,
+    /// and send a `SessionStatusUpdate` to join the announced reshare session so
+    /// the mesh forms. Refresh fires via `StartFrostProtocol`. Dispatched from
+    /// the SubmitPassword `Reshare` arm once the joiner accepts the invite.
+    JoinReshare {
+        session_id: String,
+        wallet_name: String,
+        total: u16,
+        threshold: u16,
+        proposer_id: String,
+        curve_type: String,
+        group_public_key: String,
+        password: String,
+        keystore_path: String,
+    },
     /// Process a peer's reshare round-1 / round-2 package received over a data
     /// channel — drives `protocal::reshare`.
     ProcessReshareRound1 { from_device: String, package_bytes: Vec<u8> },
@@ -246,6 +263,58 @@ pub(crate) fn decode_keystore_blob<C: frost_core::Ciphersuite>(
     Ok((kp, pkp))
 }
 
+/// Load an existing wallet's OLD share + metadata from the keystore and seed the
+/// reshare context on `AppState` (keys, ORIGINAL participant set, persist creds,
+/// `reshare_in_progress`). Shared by the reshare initiator (`StartReshare`) and
+/// joiner (`JoinReshare`) so that — before the mesh forms and the refresh runs —
+/// finalize has the old `KeyPackage` and the ORIGINAL identifier set (design §3,
+/// never the retained/mesh set).
+///
+/// Returns `(original_participants, threshold, total_participants, curve_type,
+/// group_public_key)` from the persisted metadata, for the announce/join. On any
+/// failure returns `Err` and leaves `AppState` untouched (no `reshare_in_progress`).
+#[allow(clippy::type_complexity)]
+async fn seed_reshare_context<C: frost_core::Ciphersuite>(
+    app_state: &std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
+    wallet_id: &str,
+    password: &str,
+    keystore_path: &str,
+) -> Result<(Vec<String>, u16, u16, String, String), String> {
+    use crate::keystore::Keystore;
+    let device_id = { app_state.lock().await.device_id.clone() };
+    let ks = Keystore::new(keystore_path, &device_id)
+        .map_err(|e| format!("reshare: keystore open ({keystore_path}): {e}"))?;
+    let meta = ks
+        .get_wallet(wallet_id)
+        .ok_or_else(|| format!("reshare: wallet '{wallet_id}' not found in keystore"))?
+        .clone();
+    let blob = ks
+        .load_wallet_file(wallet_id, password)
+        .map_err(|e| format!("reshare: unlock '{wallet_id}' failed: {e}"))?;
+    let (key_package, public_key_package) =
+        decode_keystore_blob::<C>(&blob).map_err(|e| format!("reshare: decode blob: {e}"))?;
+
+    let mut state = app_state.lock().await;
+    state.key_package = Some(key_package);
+    state.group_public_key = Some(*public_key_package.verifying_key());
+    state.public_key_package = Some(public_key_package);
+    state.current_wallet_id = Some(wallet_id.to_string());
+    // ORIGINAL participant set (design §3) — survivors keep their original FROST
+    // ids even when a device is removed, so we always canonicalise over this.
+    state.reshare_original_participants = meta.participants.clone();
+    state.reshare_wallet_id = Some(wallet_id.to_string());
+    state.reshare_password = Some(password.to_string());
+    state.reshare_keystore_path = Some(keystore_path.to_string());
+    state.reshare_in_progress = true;
+    Ok((
+        meta.participants.clone(),
+        meta.threshold,
+        meta.total_participants,
+        meta.curve_type.clone(),
+        meta.group_public_key.clone(),
+    ))
+}
+
 /// Parse a `session_info` JSON blob (as sent over the wire by the Cloudflare
 /// signal Worker) into a strongly-typed `SessionInfo`. Returns `None` if any
 /// of the required scalar fields is missing or has the wrong type — callers
@@ -291,15 +360,35 @@ pub(crate) fn parse_session_info(
         .unwrap_or("Network")
         .to_string();
 
-    // `session_type` on the wire is a flat string flag: `"dkg"` or
-    // `"signing"`. For signing sessions we also carry `wallet_name` and
-    // `group_public_key` in the announcement JSON so joiners can
-    // cross-check against their local keystore without a separate query.
+    // `session_type` on the wire is a flat string flag: `"dkg"`,
+    // `"signing"`, or `"reshare"`. For signing/reshare sessions we also carry
+    // `wallet_name` and `group_public_key` in the announcement JSON so joiners
+    // can cross-check against their local keystore without a separate query.
     let session_type_tag = session_info
         .get("session_type")
         .and_then(|v| v.as_str())
         .unwrap_or("dkg");
-    let session_type = if session_type_tag == "signing" {
+    let session_type = if session_type_tag == "reshare" {
+        // Reshare announce: the joiner needs `wallet_name` to know which local
+        // wallet to unlock, and `group_public_key` to confirm it owns that
+        // exact wallet before refreshing. Degrade to empty strings if absent —
+        // downstream matches care about the variant shape.
+        let wallet_name = session_info
+            .get("wallet_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let group_public_key = session_info
+            .get("group_public_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        SessionType::Reshare {
+            wallet_name,
+            curve_type: curve_type.clone(),
+            group_public_key,
+        }
+    } else if session_type_tag == "signing" {
         // Degrade gracefully: if the signing-specific fields aren't
         // present we still produce a Signing variant with empty
         // strings, since the downstream matches care about the variant
@@ -777,7 +866,7 @@ impl Command {
                 // twice would regenerate the secret/package and break the
                 // protocol mid-flight. We atomically transition dkg_state to
                 // `Round1InProgress` only from `Idle` — subsequent calls bail.
-                let (device_id, internal_cmd_tx, have_session, already_running) = {
+                let (device_id, internal_cmd_tx, have_session, already_running, is_reshare) = {
                     let mut state_guard = app_state.lock().await;
                     let already = !matches!(state_guard.dkg_state, crate::utils::state::DkgState::Idle);
                     if !already {
@@ -788,6 +877,7 @@ impl Command {
                         state_guard.websocket_internal_cmd_tx.clone(),
                         state_guard.session.is_some(),
                         already,
+                        state_guard.reshare_in_progress,
                     )
                 };
                 if already_running {
@@ -803,6 +893,30 @@ impl Command {
                     state.dkg_state = crate::utils::state::DkgState::Idle;
                     return Ok(());
                 }
+
+                // Reshare fork: the mesh-ready path is identical for DKG and
+                // reshare (announce → join → mesh → StartFrostProtocol). The only
+                // difference is which FROST ceremony runs. When the initiator
+                // (`StartReshare`) / joiner (`JoinReshare`) seeded a reshare,
+                // `reshare_in_progress` is set — refresh the share instead of
+                // generating a fresh key. (The OLD share + ORIGINAL participant
+                // set were loaded from the keystore by those commands.)
+                if is_reshare {
+                    info!(
+                        "🔄 Triggering FROST reshare Round 1 for device_id={}",
+                        device_id
+                    );
+                    crate::protocal::reshare::handle_trigger_reshare_round1(
+                        app_state.clone(),
+                        device_id.clone(),
+                    )
+                    .await;
+                    let _ = tx.send(Message::Info {
+                        message: "✅ Reshare Round 1 initiated - refreshing share...".to_string(),
+                    });
+                    return Ok(());
+                }
+
                 let internal_tx = internal_cmd_tx.unwrap_or_else(|| {
                     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
                     tx
@@ -862,23 +976,190 @@ impl Command {
             }
 
             Command::StartReshare { wallet_id, password, keystore_path } => {
-                // Same-set reshare reusing the current session's live mesh (#45).
-                // Seed the reshare context (id source + persist creds) from the
-                // active session, then trigger round 1 on this node.
-                let self_id = {
-                    let mut state = app_state.lock().await;
-                    if let Some(session) = state.session.clone() {
-                        if state.reshare_original_participants.is_empty() {
-                            state.reshare_original_participants = session.participants.clone();
+                // Reshare INITIATOR (#56). Mirrors `StartDKG`: load the OLD share
+                // from the keystore, seed the reshare context, then announce a
+                // `SessionType::Reshare` session so the retained signers can
+                // discover + join. The refresh itself does NOT run here — it
+                // fires on every node via the shared mesh-ready path
+                // (`StartFrostProtocol`, which forks on `reshare_in_progress`),
+                // exactly like DKG Round 1.
+                info!("Reshare initiator: load '{}' + announce reshare session", wallet_id);
+                let (orig_participants, threshold, total, curve_type, group_pk) =
+                    match seed_reshare_context::<C>(app_state, &wallet_id, &password, &keystore_path)
+                        .await
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!("{e}");
+                            let _ = tx.send(Message::Error { message: e });
+                            return Ok(());
+                        }
+                    };
+                drop(password);
+
+                // Same-set reshare: retain ALL original participants. (Reduced-set
+                // / device-removal threads a keep-list in a follow-up; the §3
+                // identifier logic + finalize already support non-contiguous ids.)
+                let retained_total = if total as usize == orig_participants.len() && total > 0 {
+                    total
+                } else {
+                    orig_participants.len() as u16
+                };
+
+                let device_id = { app_state.lock().await.device_id.clone() };
+                let ws_tx = {
+                    let state = app_state.lock().await;
+                    match state.websocket_msg_tx.clone() {
+                        Some(ws) => ws,
+                        None => {
+                            warn!("StartReshare: primary WebSocket not up — can't announce");
+                            let _ = tx.send(Message::Error {
+                                message: "Signal server not connected. Wait for reconnect."
+                                    .to_string(),
+                            });
+                            let mut s = app_state.lock().await;
+                            crate::protocal::reshare::clear_reshare_state(&mut s);
+                            return Ok(());
                         }
                     }
-                    state.reshare_wallet_id = Some(wallet_id);
-                    state.reshare_password = Some(password);
-                    state.reshare_keystore_path = Some(keystore_path);
-                    state.device_id.clone()
                 };
-                crate::protocal::reshare::handle_trigger_reshare_round1(app_state.clone(), self_id)
-                    .await;
+
+                let session_id = format!("reshare_{}", uuid::Uuid::new_v4());
+                let announce = webrtc_signal_server::ClientMsg::AnnounceSession {
+                    session_info: serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "total": retained_total,
+                        "threshold": threshold,
+                        "session_type": "reshare",
+                        "proposer_id": device_id.clone(),
+                        "participants": [device_id.clone()],
+                        "curve_type": curve_type.clone(),
+                        "coordination_type": "Network",
+                        "wallet_name": wallet_id.clone(),
+                        "group_public_key": group_pk.clone(),
+                    }),
+                };
+                match serde_json::to_string(&announce) {
+                    Ok(json) => {
+                        info!("Announcing reshare session: {}", json);
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx.send(Message::Error {
+                                message: "Primary WebSocket closed mid reshare-announce".to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize reshare AnnounceSession failed: {}", e),
+                }
+
+                {
+                    let mut state = app_state.lock().await;
+                    state.session = Some(crate::protocal::signal::SessionInfo {
+                        session_id: session_id.clone(),
+                        proposer_id: device_id.clone(),
+                        participants: vec![device_id.clone()],
+                        threshold,
+                        total: retained_total,
+                        session_type: crate::protocal::signal::SessionType::Reshare {
+                            wallet_name: wallet_id.clone(),
+                            curve_type: curve_type.clone(),
+                            group_public_key: group_pk.clone(),
+                        },
+                        curve_type,
+                        coordination_type: "Network".to_string(),
+                        signing_message_hex: None,
+                    });
+                }
+                let _ = tx.send(Message::Info {
+                    message: format!("🔄 Reshare session announced: {} — waiting for signers", session_id),
+                });
+            }
+
+            Command::JoinReshare {
+                session_id,
+                wallet_name,
+                total,
+                threshold,
+                proposer_id,
+                curve_type,
+                group_public_key,
+                password,
+                keystore_path,
+            } => {
+                // Reshare JOINER (#56). Mirrors `JoinDKG`: load the OLD share,
+                // seed the reshare context, then send a `SessionStatusUpdate` so
+                // the server+initiator grow the participant set and the mesh
+                // forms. Refresh fires via the shared `StartFrostProtocol` path.
+                info!("Reshare joiner: load '{}' + join session {}", wallet_name, session_id);
+                if let Err(e) =
+                    seed_reshare_context::<C>(app_state, &wallet_name, &password, &keystore_path)
+                        .await
+                {
+                    error!("{e}");
+                    let _ = tx.send(Message::Error { message: e });
+                    return Ok(());
+                }
+                drop(password);
+
+                let device_id = { app_state.lock().await.device_id.clone() };
+                let ws_tx = {
+                    let state = app_state.lock().await;
+                    match state.websocket_msg_tx.clone() {
+                        Some(ws) => ws,
+                        None => {
+                            warn!("JoinReshare: primary WebSocket not up — can't join");
+                            let _ = tx.send(Message::Error {
+                                message: "Signal server not connected. Wait for reconnect."
+                                    .to_string(),
+                            });
+                            let mut s = app_state.lock().await;
+                            crate::protocal::reshare::clear_reshare_state(&mut s);
+                            return Ok(());
+                        }
+                    }
+                };
+
+                let status_msg = webrtc_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "participant_joined": device_id.clone(),
+                    }),
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx.send(Message::Error {
+                                message: "Primary WS closed mid reshare-join".to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
+                }
+
+                {
+                    let mut state = app_state.lock().await;
+                    state.session = Some(crate::protocal::signal::SessionInfo {
+                        session_id: session_id.clone(),
+                        proposer_id: if proposer_id.is_empty() {
+                            "unknown".to_string()
+                        } else {
+                            proposer_id
+                        },
+                        participants: vec![device_id.clone()],
+                        threshold,
+                        total,
+                        session_type: crate::protocal::signal::SessionType::Reshare {
+                            wallet_name,
+                            curve_type: curve_type.clone(),
+                            group_public_key,
+                        },
+                        curve_type,
+                        coordination_type: "Network".to_string(),
+                        signing_message_hex: None,
+                    });
+                }
+                let _ = tx.send(Message::Info {
+                    message: format!("🔄 Joined reshare session: {}", session_id),
+                });
             }
 
             Command::ProcessReshareRound1 {

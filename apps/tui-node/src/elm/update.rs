@@ -580,18 +580,48 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                                 .clone(),
                         })
                     }
-                    crate::protocal::signal::SessionType::Reshare { wallet_name, .. } => {
-                        // Phase 2 (#45): the Reshare session type exists, but the
-                        // joiner ceremony (unlock → JoinReshare over the mesh) is
-                        // wired in a later phase. Don't silently no-op into a
-                        // confusing state — clear the pending password and warn.
-                        warn!(
+                    crate::protocal::signal::SessionType::Reshare {
+                        wallet_name,
+                        curve_type,
+                        group_public_key,
+                    } => {
+                        // Reshare joiner (#56): the user accepted a reshare invite
+                        // and supplied the wallet password. Reuse the DKG progress
+                        // screen (the mesh-formation UX is identical) and dispatch
+                        // `JoinReshare`, which loads the OLD share, seeds the
+                        // reshare context, and joins so the mesh forms. The refresh
+                        // then fires via the shared `StartFrostProtocol` path.
+                        let password = model
+                            .wallet_state
+                            .pending_password
+                            .take()
+                            .unwrap_or_default();
+                        info!(
                             "SubmitPassword on reshare session {} (wallet '{}') — \
-                             reshare ceremony not yet wired; ignoring",
+                             dispatching JoinReshare",
                             session_id, wallet_name
                         );
-                        model.wallet_state.pending_password = None;
-                        None
+                        model.push_screen(Screen::DKGProgress {
+                            session_id: session_id.clone(),
+                        });
+                        model.ui_state.focus =
+                            crate::elm::model::ComponentId::DKGProgress;
+                        model
+                            .ui_state
+                            .selected_indices
+                            .entry(crate::elm::model::ComponentId::DKGProgress)
+                            .or_insert(0);
+                        Some(Command::JoinReshare {
+                            session_id,
+                            wallet_name: wallet_name.clone(),
+                            total: session.total,
+                            threshold: session.threshold,
+                            proposer_id: session.proposer_id.clone(),
+                            curve_type: curve_type.clone(),
+                            group_public_key: group_public_key.clone(),
+                            password,
+                            keystore_path: model.wallet_state.keystore_path.clone(),
+                        })
                     }
                 }
             } else if let Some(cw) = model.wallet_state.creating_wallet.clone() {

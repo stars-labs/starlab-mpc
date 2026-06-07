@@ -78,7 +78,7 @@ impl SigningResult {
 #[derive(Debug, Clone)]
 enum Evt {
     Connected,
-    SessionDiscovered { id: String, signing: bool },
+    SessionDiscovered { id: String, signing: bool, reshare: bool },
     DkgDone { wallet_id: String, group_key: String },
     SignDone { signature: String, message: String },
     ReshareDone { group_key: String },
@@ -100,6 +100,7 @@ fn watcher() -> (
                     let _ = tx.send(Evt::SessionDiscovered {
                         id: session.session_id.clone(),
                         signing: matches!(session.session_type, SessionType::Signing { .. }),
+                        reshare: matches!(session.session_type, SessionType::Reshare { .. }),
                     });
                 }
                 Message::DKGFinalized {
@@ -416,24 +417,75 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     let nodes = opts.nodes;
     let threshold = opts.threshold;
     let started = Instant::now();
-    let mut c = dkg_cluster(&opts).await?;
+    let c = dkg_cluster(&opts).await?;
     if !c.agreed {
         anyhow::bail!("DKG did not agree; aborting reshare");
     }
     let dkg_group_key = c.group_key.clone();
     let wallet_id = c.outcomes[0].wallet_id.clone();
 
-    // Trigger a reshare on every node — each refreshes its share over the mesh.
-    for (i, s) in c.senders.iter().enumerate() {
-        s.send(Message::HeadlessReshare {
-            wallet_id: wallet_id.clone(),
+    // True cross-process reshare (#56): tear down the DKG runners and spawn FRESH
+    // ones against the SAME keystores. Each fresh node loads its OLD share from
+    // disk, the initiator announces a reshare session, the retained signers
+    // discover + join, a NEW mesh forms, and every node refreshes. This
+    // exercises the disk-load + announce/join path a separate device would take
+    // — not the in-memory post-DKG mesh shortcut (4b).
+    //
+    // The fresh runners reuse the ORIGINAL device_ids (reshare identifiers are
+    // canonical over the original set, design §3) so they connect to a FRESH
+    // embedded signal server — the old runners still hold those ids on the old
+    // server (the server rejects duplicate live registrations, exactly as it
+    // would for a real still-connected device).
+    let ws_url = match &opts.signal_url {
+        Some(u) => u.clone(),
+        None => embedded_signal_server().await?,
+    };
+    let device_ids = c.device_ids.clone();
+    let keystores = c.keystores; // move: must outlive the fresh runners
+    drop(c.senders);
+    drop(c.receivers);
+
+    let mut senders = Vec::new();
+    let mut receivers = Vec::new();
+    for (i, device_id) in device_ids.iter().enumerate() {
+        let (cb, rx) = watcher();
+        let ks_path = keystores[i].path().to_string_lossy().into_owned();
+        let tx = if opts.curve == "ed25519" {
+            spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
+        } else {
+            spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
+        };
+        senders.push(tx);
+        receivers.push(rx);
+    }
+    for tx in &senders {
+        let _ = tx.send(Message::TriggerReconnect);
+    }
+    for rx in &mut receivers {
+        wait_for(rx, 15, |e| matches!(e, Evt::Connected)).await?;
+    }
+
+    // Initiator (node 0) announces the reshare; retained signers 1.. join it.
+    senders[0].send(Message::HeadlessReshare {
+        wallet_id: wallet_id.clone(),
+        password: "sim-password-0".into(),
+        keystore_path: keystores[0].path().to_string_lossy().to_string(),
+    })?;
+    for (i, rx) in receivers.iter_mut().enumerate().skip(1) {
+        let session_id = match wait_for(rx, 20, |e| matches!(e, Evt::SessionDiscovered { reshare: true, .. })).await? {
+            Evt::SessionDiscovered { id, .. } => id,
+            _ => unreachable!(),
+        };
+        senders[i].send(Message::HeadlessJoinSession {
+            session_id,
             password: format!("sim-password-{i}"),
-            keystore_path: c.keystores[i].path().to_string_lossy().to_string(),
+            label: "reshare".into(),
         })?;
     }
+
     // Every node must report reshare completion with the unchanged group key.
     let mut reshare_keys = Vec::new();
-    for rx in c.receivers.iter_mut() {
+    for rx in receivers.iter_mut() {
         let done = wait_for(rx, opts.timeout_secs, |e| matches!(e, Evt::ReshareDone { .. })).await?;
         if let Evt::ReshareDone { group_key } = done {
             reshare_keys.push(group_key);
@@ -447,7 +499,7 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     // group key (a fresh Keystore reads from the file we just rewrote).
     let persisted_group_key = {
         use tui_node::keystore::Keystore;
-        Keystore::new(c.keystores[0].path(), &c.device_ids[0])
+        Keystore::new(keystores[0].path(), &device_ids[0])
             .ok()
             .and_then(|ks| ks.get_wallet(&wallet_id).map(|w| w.group_public_key.clone()))
             .unwrap_or_default()
@@ -456,8 +508,8 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
 
     // Sign with the REFRESHED shares and verify against the (unchanged) group key.
     let (signature, signed_message) = drive_signing(
-        &c.senders,
-        &mut c.receivers,
+        &senders,
+        &mut receivers,
         wallet_id,
         message,
         "utf8",
