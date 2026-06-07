@@ -280,6 +280,7 @@ where
                             session_type: match s.session_type {
                                 crate::protocal::signal::SessionType::DKG => SessionType::DKG,
                                 crate::protocal::signal::SessionType::Signing { .. } => SessionType::Signing,
+                                crate::protocal::signal::SessionType::Reshare { .. } => SessionType::Reshare,
                             },
                             creator: s.proposer_id.clone(),
                             status: SessionStatus::Waiting,

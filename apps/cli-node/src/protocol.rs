@@ -140,6 +140,15 @@ pub enum CliEvent {
         total: u16,
         proposer: String,
     },
+    /// An incoming share-refresh/resharing request we're a participant for
+    /// (discovered). A co-signer approves by joining the session (#45).
+    ReshareRequest {
+        session_id: String,
+        wallet: String,
+        threshold: u16,
+        total: u16,
+        proposer: String,
+    },
     /// A threshold signing ceremony finished.
     SignatureComplete {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -221,6 +230,7 @@ pub fn schema_json() -> String {
             {"event": "dkg_progress", "fields": {"session_id": "string", "round": "u8", "received": "usize", "need": "usize"}},
             {"event": "dkg_complete", "fields": {"correlates?": "u64", "wallet_id": "string", "address": "string", "group_public_key": "string"}},
             {"event": "signing_request", "fields": {"session_id": "string", "wallet": "string", "threshold": "u16", "total": "u16", "proposer": "string"}},
+            {"event": "reshare_request", "fields": {"session_id": "string", "wallet": "string", "threshold": "u16", "total": "u16", "proposer": "string"}},
             {"event": "signature_complete", "fields": {"correlates?": "u64", "signature": "string", "message_hash": "string"}},
             {"event": "error", "fields": {"correlates?": "u64", "code": "string", "message": "string"}}
         ]

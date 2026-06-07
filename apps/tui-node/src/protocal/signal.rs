@@ -35,6 +35,15 @@ pub enum SessionType {
         blockchain: String,
         group_public_key: String,
     },
+    /// Share refresh / resharing of an existing wallet (#45). Carries the OLD
+    /// group public key so a joiner only participates if it owns that wallet;
+    /// `participants` (on the enclosing `SessionInfo`) is the RETAINED signer
+    /// set after the refresh (a removed device simply isn't listed).
+    Reshare {
+        wallet_name: String,
+        curve_type: String,
+        group_public_key: String,
+    },
 }
 // Import the DKG Package type
 // Import round1 and round2 packages
@@ -281,5 +290,46 @@ impl From<RTCIceCandidateInit> for CandidateInfo {
 impl From<RTCSessionDescription> for SDPInfo {
     fn from(desc: RTCSessionDescription) -> Self {
         SDPInfo { sdp: desc.sdp }
+    }
+}
+
+#[cfg(test)]
+mod reshare_type_tests {
+    use super::*;
+
+    #[test]
+    fn reshare_session_type_serde_roundtrips() {
+        let st = SessionType::Reshare {
+            wallet_name: "wallet-ab12".into(),
+            curve_type: "secp256k1".into(),
+            group_public_key: "02deadbeef".into(),
+        };
+        let json = serde_json::to_string(&st).unwrap();
+        // Tagged shape: {"type":"Reshare","data":{...}} — co-existing with DKG/Signing.
+        assert!(json.contains("\"type\":\"Reshare\""), "got {json}");
+        let back: SessionType = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, st);
+    }
+
+    #[test]
+    fn reshare_session_info_roundtrips_with_retained_participants() {
+        let info = SessionInfo {
+            session_id: "reshare_x".into(),
+            proposer_id: "alice".into(),
+            total: 2,
+            threshold: 2,
+            participants: vec!["alice".into(), "carol".into()], // retained set (bob removed)
+            session_type: SessionType::Reshare {
+                wallet_name: "W".into(),
+                curve_type: "ed25519".into(),
+                group_public_key: "abcd".into(),
+            },
+            curve_type: "ed25519".into(),
+            coordination_type: "online".into(),
+            signing_message_hex: None,
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let back: SessionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, info);
     }
 }

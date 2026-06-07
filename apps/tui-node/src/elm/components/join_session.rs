@@ -44,6 +44,7 @@ pub struct SessionInfo {
 pub enum SessionType {
     DKG,
     Signing,
+    Reshare,
 }
 
 #[derive(Debug, Clone)]
@@ -356,8 +357,12 @@ impl JoinSessionComponent {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(status_color))
-                    .title(format!(" {} Details ", 
-                        if session.session_type == SessionType::DKG { "DKG" } else { "Signing" }
+                    .title(format!(" {} Details ",
+                        match session.session_type {
+                            SessionType::DKG => "DKG",
+                            SessionType::Signing => "Signing",
+                            SessionType::Reshare => "Reshare",
+                        }
                     ))
                     .title_style(Style::default().fg(status_color).add_modifier(Modifier::BOLD))
             );

@@ -580,6 +580,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                                 .clone(),
                         })
                     }
+                    crate::protocal::signal::SessionType::Reshare { wallet_name, .. } => {
+                        // Phase 2 (#45): the Reshare session type exists, but the
+                        // joiner ceremony (unlock → JoinReshare over the mesh) is
+                        // wired in a later phase. Don't silently no-op into a
+                        // confusing state — clear the pending password and warn.
+                        warn!(
+                            "SubmitPassword on reshare session {} (wallet '{}') — \
+                             reshare ceremony not yet wired; ignoring",
+                            session_id, wallet_name
+                        );
+                        model.wallet_state.pending_password = None;
+                        None
+                    }
                 }
             } else if let Some(cw) = model.wallet_state.creating_wallet.clone() {
                 // Creator path — build the `WalletConfig` out of whatever

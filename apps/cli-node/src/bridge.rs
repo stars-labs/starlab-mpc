@@ -112,6 +112,7 @@ impl Bridge {
                     // dkg→signing transition on the same id surface once each.
                     let dedup_key = match &session.session_type {
                         SessionType::Signing { .. } => format!("sign:{}", session.session_id),
+                        SessionType::Reshare { .. } => format!("reshare:{}", session.session_id),
                         SessionType::DKG => format!("dkg:{}", session.session_id),
                     };
                     if self.announced_sessions.insert(dedup_key) {
@@ -121,6 +122,18 @@ impl Bridge {
                         match &session.session_type {
                             SessionType::Signing { wallet_name, .. } => {
                                 events.push(CliEvent::SigningRequest {
+                                    session_id: session.session_id.clone(),
+                                    wallet: wallet_name.clone(),
+                                    threshold: session.threshold,
+                                    total: session.total,
+                                    proposer: session.proposer_id.clone(),
+                                });
+                            }
+                            SessionType::Reshare { wallet_name, .. } => {
+                                // A co-signer approves a reshare by joining its
+                                // session (contributing a refreshed share), same
+                                // as signing. Surface it as a reshare_request.
+                                events.push(CliEvent::ReshareRequest {
                                     session_id: session.session_id.clone(),
                                     wallet: wallet_name.clone(),
                                     threshold: session.threshold,
@@ -235,6 +248,7 @@ fn session_entry(s: &SessionInfo) -> SessionEntry {
     let session_type = match &s.session_type {
         SessionType::DKG => "dkg".to_string(),
         SessionType::Signing { .. } => "signing".to_string(),
+        SessionType::Reshare { .. } => "reshare".to_string(),
     };
     SessionEntry {
         session_id: s.session_id.clone(),
