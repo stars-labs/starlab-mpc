@@ -262,16 +262,27 @@ Curve dispatch: same `C: Ciphersuite` generic pattern the DKG/signing drivers us
 
 ## 12. Phased delivery (each PR independently green)
 
-1. **Engine hardening** — `resharing.rs`: non-contiguous-id + middle-removal tests
-   (+ fix/fallback if frost rejects). *Gates everything; do first.*
-2. **Protocol types** — `SessionType::Reshare`, messages, commands, bridge event,
-   wire golden. No behavior yet; compiles + serde round-trips.
-3. **Driver** — `protocal/reshare.rs` + AppState accumulators + keystore swap/erase.
-   Unit-tested at the protocol layer.
-4. **CLI/serve wiring** — `reshare` one-shot + `serve` approve path; L3 cross-process
-   test. This is "the button works".
-5. **Other clients (later)** — native/TUI reuse the core; extension implements the
-   same three messages over its WASM `refresh_*` (separate effort, like its DKG).
+> **Status (live):** phases 1–4a are **done and merged**, all unit-tested. The
+> remaining networked wiring (4b) + CLI/L3 (4c) is tracked in **issue #56** — it
+> needs a real multi-node/multi-process environment to validate end to end.
+
+1. ✅ **Engine hardening** (PR #52) — `resharing.rs`: non-contiguous-id +
+   middle-removal tests. frost accepts non-contiguous ids → no fallback needed.
+2. ✅ **Protocol types** (PR #53) — `SessionType::Reshare`,
+   `CliEvent::ReshareRequest`, discovery plumbing + serde tests. No behavior yet.
+3. ✅ **Driver core** (PR #54) — `protocal/reshare.rs` (`reshare_part1/part2/
+   finalize`, group-key-preserved assertion) + AppState accumulators; multi-
+   AppState in-process test.
+4. **CLI/serve wiring** — split:
+   - ✅ **4a** (PR #55) — `Keystore::update_wallet_share`: atomic
+     (temp+fsync+rename) share swap; address/label preserved.
+   - ⬜ **4b** (#56) — async mesh transport (`WebRTCMessage` reshare rounds +
+     device/webrtc routing) + `StartReshare`/`JoinReshare` command+message
+     handlers + mesh-ready trigger.
+   - ⬜ **4c** (#56) — `mpc-wallet-cli reshare` one-shot + `serve` approve path +
+     **L3 cross-process e2e test** ("the button works").
+5. ⬜ **Other clients (later)** — native/TUI reuse the core; extension implements
+   the same three messages over its WASM `refresh_*` (separate effort, like its DKG).
 
 Phases 1–4 land the headless, testable feature end to end; phase 5 is per-client UI.
 
