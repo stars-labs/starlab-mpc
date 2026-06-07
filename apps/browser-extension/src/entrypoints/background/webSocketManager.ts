@@ -163,10 +163,19 @@ export class WebSocketManager {
     private setupEventHandlers(): void {
         if (!this.wsClient) return;
 
+        // Capture the client these handlers belong to. After a reconnect() the
+        // superseded client's close/error fires asynchronously (the close
+        // handshake outlives `disconnect()`), which would clobber the NEW
+        // connection's wsConnected=true back to false. Ignore any event whose
+        // client is no longer the active one. (#33)
+        const client = this.wsClient;
+        const isStale = () => this.wsClient !== client;
+
         console.log("[WebSocketManager] Setting up WebSocket event handlers");
 
         // Handle connection open
         this.wsClient.onOpen(() => {
+            if (isStale()) return;
             console.log("[WebSocketManager] WebSocket onOpen event triggered - connection established");
 
             // Use StateManager to update and persist WebSocket status
@@ -261,6 +270,10 @@ export class WebSocketManager {
 
         // Handle connection close
         this.wsClient.onClose((event) => {
+            if (isStale()) {
+                console.log("[WebSocketManager] Ignoring onClose from a superseded client (post-reconnect)");
+                return;
+            }
             console.log("[WebSocketManager] WebSocket onClose event triggered, event:", event);
 
             // Use StateManager to update and persist WebSocket status
@@ -284,6 +297,10 @@ export class WebSocketManager {
 
         // Handle connection errors
         this.wsClient.onError((error) => {
+            if (isStale()) {
+                console.log("[WebSocketManager] Ignoring onError from a superseded client (post-reconnect)");
+                return;
+            }
             console.error("[WebSocketManager] WebSocket onError event triggered, error:", error);
 
             // Use StateManager to update and persist WebSocket status
@@ -310,6 +327,7 @@ export class WebSocketManager {
 
         // Set up the message handler
         this.wsClient.onMessage((message: any) => {
+            if (isStale()) return;
             this.handleWebSocketMessage(message);
         });
     }
