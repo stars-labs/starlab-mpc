@@ -1,0 +1,105 @@
+name: L3c interop (ext ↔ CLI)
+
+# The highest-value / highest-cost conformance layer (#33): drive the REAL MV3
+# browser extension (TS + WASM) against `mpc-wallet-cli serve` peers (Rust core)
+# and assert the cross-implementation invariant — all participants agree on the
+# group key and a threshold signature with the extension in the mesh verifies.
+# See docs/cli-conformance-testing.md §5.4 and apps/browser-extension/tests/interop.
+#
+# Heavy + browser-flaky, so it is NOT on the per-PR path: it runs nightly and on
+# demand. MV3 requires HEADED Chrome (its background service worker does not
+# register under --headless=new), so every browser step runs under `xvfb-run`.
+
+on:
+  schedule:
+    # 06:17 UTC daily (off the top of the hour to dodge scheduler congestion).
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      signal:
+        description: "Signal server URL for the FULL interop flow"
+        default: "wss://panda.qzz.io"
+        required: false
+      curve:
+        description: "Ciphersuite (secp256k1 | ed25519)"
+        default: "secp256k1"
+        required: false
+
+concurrency:
+  group: interop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  interop:
+    name: Browser ext ↔ CLI conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Rust core: CLI peer binary + wasm32 for the extension's WASM glue ---
+      - name: Install Rust toolchain (+ wasm32)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: System deps (build + headed-browser virtual display)
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev xvfb
+
+      - name: Install wasm-pack
+        uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: "v0.13.1"
+      - uses: oven-sh/setup-bun@v2
+
+      # `--ignore-scripts`: the extension's postinstall (`wxt prepare`) imports
+      # @mpc-wallet/types/* and would fail before its dist/ exists. Build the
+      # deps first, then prepare — mirrors the `extension` job in ci.yml.
+      - run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Build core-wasm (the extension loads the real WASM FROST glue)
+        run: cd packages/@mpc-wallet/core-wasm && wasm-pack build --target web --out-dir pkg
+      - name: Build shared types (@mpc-wallet/types/* dist subpaths)
+        run: bun run --filter '@mpc-wallet/types' build
+      - name: Prepare WXT (now that types dist exists)
+        run: cd apps/browser-extension && bunx wxt prepare
+
+      # Build the MV3 extension (.output/chrome-mv3) the harness loads, and the
+      # release CLI peers the full flow spawns.
+      - name: Build extension (MV3)
+        run: cd apps/browser-extension && bun run build
+      - name: Build CLI peers
+        run: cargo build --release -p mpc-wallet-cli --locked
+
+      # Playwright's bundled Chromium (its system deps installed via --with-deps)
+      # works on ubuntu-latest, so we use it directly — no PLAYWRIGHT_CHROME_PATH.
+      - name: Install Playwright Chromium
+        run: cd apps/browser-extension && bunx playwright install --with-deps chromium
+
+      # --- GATE: boundary smoke. Loads the MV3 extension headed (xvfb) and saves
+      # a strong room. No signal server / CLI / WebRTC — so it is deterministic
+      # and gates the job. Proves the harness + extension load end to end. ---
+      - name: Boundary smoke (extension load + room config)
+        run: cd apps/browser-extension && xvfb-run -a bun run test:interop:smoke
+
+      # --- FULL interop: ext + CLI DKG + signing over a live signal server. This
+      # needs real UDP/ICE connectivity, which GitHub's shared runners do NOT
+      # provide (same constraint as the Rust e2e steps in ci.yml — observed ICE
+      # failures over loopback/link-local). So it RUNS but does not gate; move to
+      # a self-hosted runner with real networking to make it a hard gate. ---
+      - name: Full interop (ext-initiated DKG + threshold signing)
+        continue-on-error: true
+        env:
+          INTEROP_SIGNAL: ${{ github.event.inputs.signal || 'wss://panda.qzz.io' }}
+          INTEROP_CURVE: ${{ github.event.inputs.curve || 'secp256k1' }}
+        run: cd apps/browser-extension && xvfb-run -a bun run test:interop
+
+      - name: Upload Playwright traces on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-playwright-traces
+          path: apps/browser-extension/test-results/**
+          if-no-files-found: ignore
+          retention-days: 7
