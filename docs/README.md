@@ -33,13 +33,13 @@ workspace member.
   and the sharp EVM-EOA exception (standard Ethereum EOAs verify
   ECDSA → need a smart-contract account).
 - [`RECOVERY_AND_RESHARING.md`](RECOVERY_AND_RESHARING.md) — "what if a
-- [`RESHARE_CEREMONY_DESIGN.md`](RESHARE_CEREMONY_DESIGN.md) — design for the
-  networked reshare ceremony over the WebRTC mesh (the #45 build-out): session
-  type, mesh driver, identifier-preservation rule, safety invariants, phased plan.
   device is lost or stolen?" — threat model, recovery flows, and the
   design for share refresh/resharing (same address, fresh shares, drop a
   lost device) built on `frost-core::keys::refresh`. Investor talking
   points included.
+- [`RESHARE_CEREMONY_DESIGN.md`](RESHARE_CEREMONY_DESIGN.md) — design for the
+  networked reshare ceremony over the WebRTC mesh (the #45 build-out): session
+  type, mesh driver, identifier-preservation rule, safety invariants, phased plan.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code-of-conduct, branching
   model, commit format, PR guidelines.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history.
