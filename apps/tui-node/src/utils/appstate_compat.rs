@@ -72,6 +72,18 @@ pub struct AppState<C: Ciphersuite> {
     pub offline_config: Option<crate::offline::OfflineConfig>,
     pub log_scroll: usize,
     pub round2_secret_package: Option<frost_core::keys::dkg::round2::SecretPackage<C>>,
+    // --- Reshare (share refresh / resharing) ceremony state (#45). Distinct
+    // from the dkg_* fields so a reshare can't be confused with a fresh DKG.
+    // Refresh reuses frost's dkg round1/round2 Package + SecretPackage types.
+    // The OLD share+group key live in `key_package` / `public_key_package`
+    // (loaded when the wallet is unlocked); refresh_dkg_shares consumes them. ---
+    pub reshare_in_progress: bool,
+    pub reshare_round1_secret: Option<frost_core::keys::dkg::round1::SecretPackage<C>>,
+    pub reshare_round2_secret: Option<frost_core::keys::dkg::round2::SecretPackage<C>>,
+    pub reshare_round1_packages:
+        std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round1::Package<C>>,
+    pub reshare_round2_packages:
+        std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round2::Package<C>>,
     pub pending_mesh_ready_signals: std::collections::HashSet<String>,
     // Additional fields for UI compatibility
     pub websocket_connected: bool,
@@ -167,6 +179,11 @@ where
             offline_config: None,
             log_scroll: 0,
             round2_secret_package: None,
+            reshare_in_progress: false,
+            reshare_round1_secret: None,
+            reshare_round2_secret: None,
+            reshare_round1_packages: std::collections::BTreeMap::new(),
+            reshare_round2_packages: std::collections::BTreeMap::new(),
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,
@@ -239,6 +256,11 @@ where
             offline_config: None,
             log_scroll: 0,
             round2_secret_package: None,
+            reshare_in_progress: false,
+            reshare_round1_secret: None,
+            reshare_round2_secret: None,
+            reshare_round1_packages: std::collections::BTreeMap::new(),
+            reshare_round2_packages: std::collections::BTreeMap::new(),
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,
