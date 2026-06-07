@@ -178,11 +178,15 @@ export class WebSocketManager {
             if (isStale()) return;
             console.log("[WebSocketManager] WebSocket onOpen event triggered - connection established");
 
-            // Use StateManager to update and persist WebSocket status
+            // Use StateManager to update and persist WebSocket status. Also set
+            // `this.appState.wsConnected` directly: the `initialState` broadcast
+            // below spreads `this.appState`, and `updateWebSocketStatus` does NOT
+            // write through to it — so without this the full-state message would
+            // carry a stale `wsConnected:false` that arrives AFTER the
+            // `wsStatus:true` above and clobbers the popup back to disconnected.
+            this.appState.wsConnected = true;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(true);
-            } else {
-                this.appState.wsConnected = true;
             }
 
             // Broadcast connection status immediately to any connected popups
@@ -276,11 +280,11 @@ export class WebSocketManager {
             }
             console.log("[WebSocketManager] WebSocket onClose event triggered, event:", event);
 
-            // Use StateManager to update and persist WebSocket status
+            // Keep `this.appState` in sync (the initialState broadcast below
+            // spreads it; updateWebSocketStatus doesn't write through).
+            this.appState.wsConnected = false;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, `Connection closed: ${event.code} ${event.reason}`);
-            } else {
-                this.appState.wsConnected = false;
             }
 
             // Broadcast disconnection status
@@ -303,11 +307,11 @@ export class WebSocketManager {
             }
             console.error("[WebSocketManager] WebSocket onError event triggered, error:", error);
 
-            // Use StateManager to update and persist WebSocket status
+            // Keep `this.appState` in sync (the initialState broadcast below
+            // spreads it; updateWebSocketStatus doesn't write through).
+            this.appState.wsConnected = false;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, error.toString());
-            } else {
-                this.appState.wsConnected = false;
             }
 
             // Broadcast error and disconnection status
