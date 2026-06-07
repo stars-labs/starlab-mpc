@@ -179,6 +179,93 @@ impl Keystore {
         Ok(wallet_id)
     }
 
+    /// Overwrite an existing wallet's key share + the refresh-affected metadata
+    /// (threshold / total / participants / participant_index) **in place** for a
+    /// reshare (#45): same `wallet_id`, same `curve_type`, same
+    /// `group_public_key` (address) and `label` — only the share and the signer
+    /// set change. Written **atomically** (temp file + fsync + rename) so a
+    /// crash can never leave the wallet without a valid share.
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_wallet_share(
+        &mut self,
+        wallet_id: &str,
+        key_share_data: &[u8],
+        password: &str,
+        threshold: u16,
+        total_participants: u16,
+        participants: Vec<String>,
+        participant_index: u16,
+    ) -> Result<()> {
+        let existing = self
+            .get_wallet(wallet_id)
+            .cloned()
+            .ok_or_else(|| KeystoreError::WalletNotFound(wallet_id.to_string()))?;
+
+        let mut metadata = WalletMetadata::with_participants(
+            wallet_id.to_string(),
+            self.device_id.clone(),
+            existing.curve_type.clone(),
+            threshold,
+            total_participants,
+            participant_index,
+            existing.group_public_key.clone(), // address is preserved by the refresh
+            participants,
+        );
+        metadata.label = existing.label.clone();
+
+        self.save_wallet_file_atomic(wallet_id, key_share_data, password, &metadata)?;
+
+        // Replace the cache entry in place (or insert if somehow absent).
+        if let Some(slot) = self
+            .wallet_cache
+            .iter_mut()
+            .find(|w| w.session_id == wallet_id)
+        {
+            *slot = metadata;
+        } else {
+            self.wallet_cache.push(metadata);
+        }
+        Ok(())
+    }
+
+    /// Atomic variant of `save_wallet_file_v2`: write to a temp file, fsync,
+    /// then rename over the target so the on-disk wallet is always a complete,
+    /// valid file (used by the reshare share-swap; never a window with no share).
+    fn save_wallet_file_atomic(
+        &self,
+        wallet_id: &str,
+        data: &[u8],
+        password: &str,
+        metadata: &WalletMetadata,
+    ) -> Result<()> {
+        let wallet_dir = self.base_path.join(&self.device_id).join(&metadata.curve_type);
+        fs::create_dir_all(&wallet_dir)?;
+        let wallet_path = wallet_dir.join(format!("{}.json", wallet_id));
+        let tmp_path = wallet_dir.join(format!(".{}.json.tmp", wallet_id));
+
+        let method = crate::keystore::encryption::KeyDerivation::Pbkdf2;
+        let encrypted_data =
+            crate::keystore::encryption::encrypt_data_with_method(data, password, method)?;
+        use base64::{engine::general_purpose, Engine as _};
+        let base64_encrypted = general_purpose::STANDARD.encode(&encrypted_data);
+        let wallet_file = WalletFile {
+            version: "2.0".to_string(),
+            encrypted: true,
+            algorithm: method.algorithm_string().to_string(),
+            data: base64_encrypted,
+            metadata: metadata.clone(),
+        };
+
+        {
+            let mut file = File::create(&tmp_path)?;
+            serde_json::to_writer_pretty(&mut file, &wallet_file)
+                .map_err(|e| KeystoreError::General(format!("Failed to write wallet JSON: {}", e)))?;
+            file.sync_all()?; // durable before the rename
+        }
+        fs::rename(&tmp_path, &wallet_path)?; // atomic on the same filesystem
+        Ok(())
+    }
+
     /// Creates a wallet (legacy single blockchain) - addresses are now derived
     pub fn create_wallet(
         &mut self,
@@ -543,6 +630,40 @@ mod tests {
         );
         assert_eq!(wallet.threshold, 2);
         assert_eq!(wallet.total_participants, 3);
+    }
+
+    #[test]
+    fn update_wallet_share_swaps_share_and_metadata_preserving_address() {
+        // Reshare (#45): overwrite the share + signer set in place, keep the
+        // group key (address). 2-of-3 → remove a device → 2-of-2, new share.
+        let tmp = TempDir::new().expect("tempdir");
+        let mut ks = Keystore::new(tmp.path(), "mpc-1").expect("keystore");
+        let group_key = "bb".repeat(33);
+        let wallet_id = ks
+            .create_wallet_multi_chain(
+                "resh-wallet", "secp256k1", Vec::new(), 2, 3,
+                group_key.as_str(), b"OLD-SHARE", "pw-123456789012", Vec::new(), None, 1,
+                vec!["mpc-1".into(), "mpc-2".into(), "mpc-3".into()],
+                Some("My Wallet".into()),
+            )
+            .expect("create");
+
+        ks.update_wallet_share(
+            &wallet_id, b"NEW-REFRESHED-SHARE", "pw-123456789012",
+            2, 2, vec!["mpc-1".into(), "mpc-3".into()], 1,
+        )
+        .expect("update_wallet_share");
+
+        // Reload from disk → fresh Keystore.
+        let ks2 = Keystore::new(tmp.path(), "mpc-1").expect("reload");
+        let w = ks2.get_wallet(&wallet_id).expect("wallet after reshare");
+        assert_eq!(w.group_public_key, group_key, "address (group key) preserved");
+        assert_eq!(w.total_participants, 2, "signer set shrank");
+        assert_eq!(w.participants, vec!["mpc-1".to_string(), "mpc-3".to_string()]);
+        assert_eq!(w.label.as_deref(), Some("My Wallet"), "label preserved");
+        // The refreshed share bytes are what load now.
+        let loaded = ks2.load_wallet_file(&wallet_id, "pw-123456789012").expect("decrypt");
+        assert_eq!(loaded, b"NEW-REFRESHED-SHARE");
     }
 
     #[test]
