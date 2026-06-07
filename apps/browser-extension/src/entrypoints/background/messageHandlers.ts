@@ -127,6 +127,11 @@ export class PopupMessageHandler {
                     await this.handleListDevicesRequest(sendResponse);
                     break;
 
+                case "reconnectSignal":
+                    console.log("🔌 [PopupMessageHandler] RECONNECT_SIGNAL: reconnecting to apply saved room/server");
+                    await this.handleReconnectSignal(sendResponse);
+                    break;
+
                 case MESSAGE_TYPES.RELAY:
 //                     console.log("🔄 [PopupMessageHandler] RELAY: Forwarding message via WebSocket");
                     await this.handleRelayRequest(message, sendResponse);
@@ -479,6 +484,24 @@ export class PopupMessageHandler {
         } else {
             console.warn("[PopupMessageHandler] WebSocket not connected, cannot list devices");
             sendResponse({ success: false, error: result.error });
+        }
+    }
+
+    /**
+     * Reconnect the signal-server WebSocket using the freshly saved room /
+     * server override. The startup connect is roomless (it runs before any room
+     * is configured) and the multi-tenant server rejects it; this re-resolves
+     * the URL so the new room takes effect without reloading the extension.
+     */
+    private async handleReconnectSignal(sendResponse: (response: any) => void): Promise<void> {
+        try {
+            await this.webSocketManager.reconnect();
+            sendResponse({ success: true });
+        } catch (error) {
+            sendResponse({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+            });
         }
     }
 

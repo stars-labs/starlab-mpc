@@ -138,22 +138,55 @@ export class WebSocketManager {
     }
 
     /**
+     * Tear down the current connection (if any) and reconnect using a freshly
+     * resolved signal-server URL. This is how a room / signal-server override
+     * saved AFTER startup takes effect: the startup connect runs before any room
+     * is set, so it dials a roomless URL the multi-tenant server rejects (#31).
+     * Re-resolving here picks up the saved `?room=…` so the socket is accepted.
+     * Wired to the popup's "Save room" action (Settings) and used by the L3c
+     * interop harness so the extension joins the co-signers' room (#33).
+     */
+    async reconnect(): Promise<void> {
+        console.log("[WebSocketManager] reconnect requested — re-resolving URL with saved room");
+        try {
+            this.wsClient?.disconnect();
+        } catch (e) {
+            console.warn("[WebSocketManager] reconnect: error closing existing client:", e);
+        }
+        const url = await getSignalServerUrl();
+        await this.initialize(url, this.appState.deviceId || "mpc-2");
+    }
+
+    /**
      * Set up WebSocket event handlers
      */
     private setupEventHandlers(): void {
         if (!this.wsClient) return;
 
+        // Capture the client these handlers belong to. After a reconnect() the
+        // superseded client's close/error fires asynchronously (the close
+        // handshake outlives `disconnect()`), which would clobber the NEW
+        // connection's wsConnected=true back to false. Ignore any event whose
+        // client is no longer the active one. (#33)
+        const client = this.wsClient;
+        const isStale = () => this.wsClient !== client;
+
         console.log("[WebSocketManager] Setting up WebSocket event handlers");
 
         // Handle connection open
         this.wsClient.onOpen(() => {
+            if (isStale()) return;
             console.log("[WebSocketManager] WebSocket onOpen event triggered - connection established");
 
-            // Use StateManager to update and persist WebSocket status
+            // Use StateManager to update and persist WebSocket status. Also set
+            // `this.appState.wsConnected` directly: the `initialState` broadcast
+            // below spreads `this.appState`, and `updateWebSocketStatus` does NOT
+            // write through to it — so without this the full-state message would
+            // carry a stale `wsConnected:false` that arrives AFTER the
+            // `wsStatus:true` above and clobbers the popup back to disconnected.
+            this.appState.wsConnected = true;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(true);
-            } else {
-                this.appState.wsConnected = true;
             }
 
             // Broadcast connection status immediately to any connected popups
@@ -241,13 +274,17 @@ export class WebSocketManager {
 
         // Handle connection close
         this.wsClient.onClose((event) => {
+            if (isStale()) {
+                console.log("[WebSocketManager] Ignoring onClose from a superseded client (post-reconnect)");
+                return;
+            }
             console.log("[WebSocketManager] WebSocket onClose event triggered, event:", event);
 
-            // Use StateManager to update and persist WebSocket status
+            // Keep `this.appState` in sync (the initialState broadcast below
+            // spreads it; updateWebSocketStatus doesn't write through).
+            this.appState.wsConnected = false;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, `Connection closed: ${event.code} ${event.reason}`);
-            } else {
-                this.appState.wsConnected = false;
             }
 
             // Broadcast disconnection status
@@ -264,13 +301,17 @@ export class WebSocketManager {
 
         // Handle connection errors
         this.wsClient.onError((error) => {
+            if (isStale()) {
+                console.log("[WebSocketManager] Ignoring onError from a superseded client (post-reconnect)");
+                return;
+            }
             console.error("[WebSocketManager] WebSocket onError event triggered, error:", error);
 
-            // Use StateManager to update and persist WebSocket status
+            // Keep `this.appState` in sync (the initialState broadcast below
+            // spreads it; updateWebSocketStatus doesn't write through).
+            this.appState.wsConnected = false;
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, error.toString());
-            } else {
-                this.appState.wsConnected = false;
             }
 
             // Broadcast error and disconnection status
@@ -290,6 +331,7 @@ export class WebSocketManager {
 
         // Set up the message handler
         this.wsClient.onMessage((message: any) => {
+            if (isStale()) return;
             this.handleWebSocketMessage(message);
         });
     }

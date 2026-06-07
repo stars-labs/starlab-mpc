@@ -40,26 +40,61 @@ export async function setRoom(page: Page, room: string): Promise<void> {
   await page.getByTestId("room-status").filter({ hasText: /saved/i }).waitFor({ timeout: 10_000 });
 }
 
-// --- FIRST-RUN: create wallet (DKG initiator) -------------------------------
+// --- create wallet (DKG initiator) ------------------------------------------
+
+/** Leave the Settings view (its "Done" button) so the wallet view is showing. */
+export async function closeSettings(page: Page): Promise<void> {
+  const done = page.getByRole("button", { name: /^done$/i });
+  if (await done.count()) {
+    await done.first().click();
+  }
+}
 
 /**
  * Create a threshold wallet — the extension becomes the DKG initiator.
- * Selectors here are the first-run starting point; confirm on a headed run.
+ *
+ * Selectors verified against CreateWalletForm.svelte: stable ids `#cw-total`,
+ * `#cw-threshold`, `#cw-curve`; both the main-view trigger and the form's submit
+ * are labelled "Create wallet", but the main view unmounts when the form opens
+ * (App.svelte `{#if showSettings}{:else if showCreateWallet}{:else}…`), so the
+ * post-open lookup resolves to the submit. The DKG-creation form has no password
+ * field (the keystore password is collected later), so `opts.password` is unused
+ * here.
  */
 export async function createWallet(
   page: Page,
   opts: { threshold: number; total: number; password: string; curve: string },
 ): Promise<void> {
-  await page.getByRole("button", { name: /create wallet/i }).first().click();
-  // CreateWalletForm overlay — threshold/total/curve inputs + submit.
-  // NEEDS-VERIFY: field names below are placeholders for the first headed run.
-  const thr = page.getByLabel(/threshold/i);
-  if (await thr.count()) await thr.fill(String(opts.threshold));
-  const tot = page.getByLabel(/total|participants/i);
-  if (await tot.count()) await tot.fill(String(opts.total));
-  const pw = page.getByLabel(/password/i);
-  if (await pw.count()) await pw.first().fill(opts.password);
-  await page.getByRole("button", { name: /create|start|generate/i }).last().click();
+  // `setRoom` leaves us on Settings; return to the wallet view.
+  await closeSettings(page);
+
+  // The main-view "Create wallet" button is `disabled` until the background
+  // reports wsConnected (it enables once the post-room reconnect lands). Assert
+  // it becomes enabled so a connection failure is a clear error, not a vague
+  // click timeout.
+  const trigger = page.getByRole("button", { name: /create wallet/i }).first();
+  await trigger.waitFor({ state: "visible", timeout: 20_000 });
+  await page.waitForFunction(
+    () => {
+      const b = Array.from(document.querySelectorAll("button")).find((el) =>
+        /create wallet/i.test(el.textContent ?? ""),
+      );
+      return !!b && !(b as HTMLButtonElement).disabled;
+    },
+    { timeout: 30_000 },
+  );
+  await trigger.click();
+
+  // CreateWalletForm overlay — fill the real inputs (defaults already match a
+  // 2-of-3, but set them explicitly so the test controls the shape).
+  await page.locator("#cw-total").fill(String(opts.total));
+  await page.locator("#cw-threshold").fill(String(opts.threshold));
+  if (opts.curve) {
+    await page.locator("#cw-curve").selectOption(opts.curve).catch(() => {});
+  }
+
+  // Submit (form's button is also "Create wallet"; main view is unmounted now).
+  await page.getByRole("button", { name: /^create wallet$/i }).click();
 }
 
 /**

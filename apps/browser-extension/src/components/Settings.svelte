@@ -38,9 +38,21 @@
             roomStatus = "✗ Need ≥16 chars of [A-Za-z0-9_-] (use Generate).";
             return;
         }
-        roomStatus = (await setRoom(r))
-            ? "✓ Saved. Reconnect to apply."
-            : "✗ Save failed.";
+        if (!(await setRoom(r))) {
+            roomStatus = "✗ Save failed.";
+            return;
+        }
+        // Apply immediately: the startup WS connect is roomless (it ran before a
+        // room existed) and the multi-tenant server rejects it, so without a
+        // reconnect the saved room never takes effect. Ask the background to
+        // re-resolve the URL and reconnect.
+        roomStatus = "✓ Saved — reconnecting…";
+        try {
+            await chrome.runtime.sendMessage({ type: "reconnectSignal" });
+            roomStatus = "✓ Saved & reconnecting.";
+        } catch (e) {
+            roomStatus = "✓ Saved. Reload the extension to apply.";
+        }
     }
     const dispatch = createEventDispatcher<{
         backToWallet: { chain: string; curve: string };
