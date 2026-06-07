@@ -52,6 +52,18 @@ enum Command {
         #[command(flatten)]
         common: OneShot,
     },
+    /// Initiate a networked share refresh/resharing of an existing wallet and
+    /// block until it completes. Announces a reshare session the retained
+    /// signers join (via `session join` / `serve`); the group address is
+    /// preserved and the refreshed share replaces the old one on disk (#56).
+    Reshare {
+        #[arg(long)]
+        wallet_id: String,
+        #[command(flatten)]
+        pw: PasswordArgs,
+        #[command(flatten)]
+        common: OneShot,
+    },
     /// Simulate a share refresh/resharing in one process and print a JSON
     /// summary (group key preserved, refreshed quorum signs, old share
     /// rejected). Self-contained — exercises the resharing engine (#45).
@@ -329,6 +341,14 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let password = pw.resolve()?;
             finish(oneshot::sign(common.init_and_opts(), wallet_id, message, encoding, password).await)
+        }
+        Command::Reshare {
+            wallet_id,
+            pw,
+            common,
+        } => {
+            let password = pw.resolve()?;
+            finish(oneshot::reshare(common.init_and_opts(), wallet_id, password).await)
         }
         Command::Simulate(args) => {
             if !args.log_level.is_empty() {

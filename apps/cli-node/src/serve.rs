@@ -66,6 +66,7 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
     // Correlate the next terminal event with the command that started it.
     let pending_create: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
     let pending_sign: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
+    let pending_reshare: Arc<Mutex<Option<u64>>> = Arc::new(Mutex::new(None));
 
     // --- runner sync closure: model/message → events + snapshot cache ---
     let out_for_sync = out_tx.clone();
@@ -73,6 +74,7 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
     let snapshot_for_sync = snapshot.clone();
     let pending_for_sync = pending_create.clone();
     let pending_sign_for_sync = pending_sign.clone();
+    let pending_reshare_for_sync = pending_reshare.clone();
     // Auto-approve plumbing: the callback can't capture the runner sender
     // (chicken-and-egg with spawn), so route it through a OnceLock set right
     // after spawn returns.
@@ -101,6 +103,9 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                     CliEvent::SignatureComplete { correlates, .. } if correlates.is_none() => {
                         *correlates = pending_sign_for_sync.lock().unwrap().take();
                     }
+                    CliEvent::ReshareComplete { correlates, .. } if correlates.is_none() => {
+                        *correlates = pending_reshare_for_sync.lock().unwrap().take();
+                    }
                     // Policy-gated auto-approval: join the signing session to
                     // contribute our share, only if the operator opted in AND
                     // the request passes the policy (allowlist + budget).
@@ -117,6 +122,27 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                                     code: "auto_approved".into(),
                                     message: format!(
                                         "auto-approved signing request for {wallet} ({session_id})"
+                                    ),
+                                });
+                            }
+                        }
+                    }
+                    // Reshare is approved the same way a co-signer approves
+                    // signing — by joining the session to contribute a refreshed
+                    // share. Gate on the same policy (allowlist + budget).
+                    CliEvent::ReshareRequest { session_id, wallet, .. } => {
+                        if policy.try_approve(wallet) {
+                            if let Some(tx) = approve_sender_cb.get() {
+                                let _ = tx.send(Message::HeadlessJoinSession {
+                                    session_id: session_id.clone(),
+                                    password: approve_pw.clone(),
+                                    label: String::new(),
+                                });
+                                let _ = out_for_sync.send(CliEvent::Error {
+                                    correlates: None,
+                                    code: "auto_approved".into(),
+                                    message: format!(
+                                        "auto-approved reshare request for {wallet} ({session_id})"
                                     ),
                                 });
                             }
@@ -268,6 +294,21 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                     session_id,
                     password,
                     label: String::new(),
+                });
+                ack(id);
+            }
+            CliCommand::Reshare {
+                wallet_id,
+                password,
+            } => {
+                // Initiator: load the OLD share + announce a reshare session.
+                // Retained signers approve with `join_session`. Correlate the
+                // eventual `reshare_complete` with this command id.
+                *pending_reshare.lock().unwrap() = id;
+                let _ = runner_tx.send(Message::HeadlessReshare {
+                    wallet_id,
+                    password,
+                    keystore_path: opts.keystore_path.clone(),
                 });
                 ack(id);
             }

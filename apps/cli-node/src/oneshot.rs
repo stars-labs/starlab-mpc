@@ -148,7 +148,40 @@ pub async fn session_join(
         label: String::new(),
     })?;
     let ev = wait_event(&mut rx, opts.timeout_secs, |e| {
-        matches!(e, CliEvent::DkgComplete { .. } | CliEvent::SignatureComplete { .. })
+        matches!(
+            e,
+            CliEvent::DkgComplete { .. }
+                | CliEvent::SignatureComplete { .. }
+                | CliEvent::ReshareComplete { .. }
+        )
+    })
+    .await?;
+    print(&ev);
+    Ok(true)
+}
+
+/// `reshare` — initiate a share refresh/resharing of an existing wallet and
+/// block until it completes. The group public key (address) is preserved; the
+/// refreshed share replaces the old one on disk. Retained co-signers approve by
+/// running `session join` (or `serve`) on the announced reshare session.
+pub async fn reshare(
+    opts: OneShotOpts,
+    wallet_id: String,
+    password: String,
+) -> anyhow::Result<bool> {
+    let (tx, mut rx) = start(&opts);
+    tx.send(Message::TriggerReconnect)?;
+    wait_event(&mut rx, 15, |e| {
+        matches!(e, CliEvent::Connection { connected: true })
+    })
+    .await?;
+    tx.send(Message::HeadlessReshare {
+        wallet_id,
+        password,
+        keystore_path: opts.keystore_path.clone(),
+    })?;
+    let ev = wait_event(&mut rx, opts.timeout_secs, |e| {
+        matches!(e, CliEvent::ReshareComplete { .. })
     })
     .await?;
     print(&ev);

@@ -442,8 +442,20 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     };
     let device_ids = c.device_ids.clone();
     let keystores = c.keystores; // move: must outlive the fresh runners
+
+    // Tear the DKG cluster DOWN before bringing the reshare cluster up: send
+    // Quit so each runner exits its loop and drops its `AppState` (closing the
+    // WebRTC peer connections + releasing their ICE/UDP sockets), then drop the
+    // handles and give the runtime a beat to reclaim those sockets. Without this
+    // the DKG cluster's ~N WebRTC agents stay alive alongside the reshare
+    // cluster's, and across a sequential e2e suite the accumulated ICE agents
+    // exhaust loopback sockets → "WebRTC connection FAILED" in the reshare mesh.
+    for tx in &c.senders {
+        let _ = tx.send(Message::Quit);
+    }
     drop(c.senders);
     drop(c.receivers);
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let mut senders = Vec::new();
     let mut receivers = Vec::new();

@@ -158,6 +158,16 @@ impl Bridge {
                         message_hash: format!("0x{}", hex::encode(message)),
                     });
                 }
+                Message::ReshareComplete {
+                    wallet_id,
+                    group_public_key,
+                } => {
+                    events.push(CliEvent::ReshareComplete {
+                        correlates: None, // serve stamps the reshare-command id
+                        wallet_id: wallet_id.clone(),
+                        group_public_key: group_public_key.clone(),
+                    });
+                }
                 _ => {}
             }
         }

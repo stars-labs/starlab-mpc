@@ -866,7 +866,7 @@ impl Command {
                 // twice would regenerate the secret/package and break the
                 // protocol mid-flight. We atomically transition dkg_state to
                 // `Round1InProgress` only from `Idle` — subsequent calls bail.
-                let (device_id, internal_cmd_tx, have_session, already_running, is_reshare) = {
+                let (device_id, internal_cmd_tx, have_session, already_running, is_reshare, dkg_in_progress) = {
                     let mut state_guard = app_state.lock().await;
                     let already = !matches!(state_guard.dkg_state, crate::utils::state::DkgState::Idle);
                     if !already {
@@ -878,6 +878,7 @@ impl Command {
                         state_guard.session.is_some(),
                         already,
                         state_guard.reshare_in_progress,
+                        state_guard.dkg_in_progress,
                     )
                 };
                 if already_running {
@@ -889,6 +890,26 @@ impl Command {
                         "StartFrostProtocol fired but AppState::session is None — ignoring"
                     );
                     // Roll back the state transition since we didn't actually run.
+                    let mut state = app_state.lock().await;
+                    state.dkg_state = crate::utils::state::DkgState::Idle;
+                    return Ok(());
+                }
+                // Guard against a STALE-session mesh: when a node reconnects to a
+                // signal server that still lists a previously-completed session
+                // (e.g. after a process restart), that session's mesh can re-form
+                // and fire mesh-ready even though this node has NO active ceremony
+                // intent. Running DKG Round 1 then would (a) waste a ceremony and
+                // (b) pin `dkg_state` to Round1InProgress, blocking a subsequent
+                // *reshare* on the same node (its StartFrostProtocol would be
+                // ignored as "already running"). Only proceed when a ceremony is
+                // genuinely pending: a reshare (`reshare_in_progress`) or a DKG
+                // (`dkg_in_progress`, set by StartDKG/JoinDKG). Signing is immune —
+                // it never routes through this path.
+                if !is_reshare && !dkg_in_progress {
+                    warn!(
+                        "StartFrostProtocol fired with no DKG/reshare in progress \
+                         (stale-session mesh?) — ignoring"
+                    );
                     let mut state = app_state.lock().await;
                     state.dkg_state = crate::utils::state::DkgState::Idle;
                     return Ok(());
@@ -909,6 +930,7 @@ impl Command {
                     crate::protocal::reshare::handle_trigger_reshare_round1(
                         app_state.clone(),
                         device_id.clone(),
+                        tx.clone(),
                     )
                     .await;
                     let _ = tx.send(Message::Info {
@@ -1170,6 +1192,7 @@ impl Command {
                     app_state.clone(),
                     from_device,
                     package_bytes,
+                    tx.clone(),
                 )
                 .await;
             }

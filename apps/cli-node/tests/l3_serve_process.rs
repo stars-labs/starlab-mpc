@@ -418,3 +418,90 @@ async fn sign_after_process_restart_verifies() {
     a.quit().await;
     b.quit().await;
 }
+
+/// RESHARE-L3 (#56): a full networked share refresh across two REAL `serve`
+/// processes, then a signature with the REFRESHED shares. After DKG we KILL both
+/// processes and bring fresh ones up on the SAME keystores — so the reshare runs
+/// over a brand-new mesh, each node loading its OLD share from disk (exactly what
+/// a separate device does). The group public key (address) must survive the
+/// refresh, and a 2-of-2 signature with the new shares must verify against it.
+///
+/// This is the cross-process counterpart to the in-process `reshare_then_sign`
+/// e2e: it exercises the actual compiled binary's `reshare` / `reshare_request`
+/// / `reshare_complete` JSONL surface and the announce/join ceremony end to end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "spawns serve processes + real WebRTC over loopback; run with --ignored"]
+async fn reshare_then_sign_across_serve_processes() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(webrtc_signal_server::run(listener));
+    let ws_url = format!("ws://127.0.0.1:{port}");
+
+    let ks_a = tempfile::TempDir::new().unwrap();
+    let ks_b = tempfile::TempDir::new().unwrap();
+    let pa = ks_a.path().to_string_lossy().to_string();
+    let pb = ks_b.path().to_string_lossy().to_string();
+
+    // --- Phase 1: DKG, then kill both processes (shares persist to disk). ---
+    let (wallet_id, group_key) = {
+        let mut a = spawn_connected("reshare-a", &pa, &ws_url).await.expect("a");
+        let mut b = spawn_connected("reshare-b", &pb, &ws_url).await.expect("b");
+        let r = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+        a.quit().await;
+        b.quit().await;
+        r
+    };
+    assert!(!group_key.is_empty());
+    // Give the server a moment to drop the closed connections before reuse.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // --- Phase 2: fresh processes on the SAME keystores, then reshare. ---
+    let mut a = spawn_connected("reshare-a", &pa, &ws_url).await.expect("a restart");
+    let mut b = spawn_connected("reshare-b", &pb, &ws_url).await.expect("b restart");
+
+    // a initiates the reshare (loads its OLD share, announces a reshare session).
+    a.send(json!({"id": 20, "cmd": "reshare", "wallet_id": wallet_id, "password": "pw-a"}))
+        .await
+        .unwrap();
+
+    // b discovers the reshare request and approves by joining (contributing a
+    // refreshed share). `join_session` is the reshare approval path.
+    let req = b.wait_for("reshare_request", 30).await.expect("b reshare_request");
+    let sid = req["session_id"].as_str().unwrap().to_string();
+    b.send(json!({"id": 21, "cmd": "join_session", "session_id": sid, "password": "pw-b"}))
+        .await
+        .unwrap();
+
+    // Both nodes complete the refresh; the group key (address) must be unchanged.
+    let rc_a = a.wait_for("reshare_complete", 90).await.expect("a reshare_complete");
+    let _rc_b = b.wait_for("reshare_complete", 90).await.expect("b reshare_complete");
+    assert_eq!(
+        rc_a["group_public_key"].as_str().unwrap(),
+        group_key,
+        "group key changed across reshare"
+    );
+
+    // --- Phase 3: sign with the REFRESHED shares; must verify. ---
+    a.send(json!({
+        "id": 30, "cmd": "sign", "wallet_id": wallet_id,
+        "message": "signed after a networked reshare", "encoding": "utf8", "password": "pw-a"
+    }))
+    .await
+    .unwrap();
+    let req = b.wait_for("signing_request", 30).await.expect("b signing_request");
+    let sid = req["session_id"].as_str().unwrap().to_string();
+    b.send(json!({"id": 31, "cmd": "approve_signing", "session_id": sid, "password": "pw-b"}))
+        .await
+        .unwrap();
+    let sc = a.wait_for("signature_complete", 90).await.expect("a signature_complete");
+    let sig = sc["signature"].as_str().unwrap();
+    let msg = sc["message_hash"].as_str().unwrap();
+    assert!(
+        verify_secp256k1(&group_key, msg, sig),
+        "post-reshare signature failed to verify: sig={sig} msg={msg} group={group_key}"
+    );
+    eprintln!("✅ RESHARE-L3: reshared across processes, group preserved, refreshed shares signed");
+
+    a.quit().await;
+    b.quit().await;
+}

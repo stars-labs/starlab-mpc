@@ -69,6 +69,15 @@ pub enum CliCommand {
         session_id: String,
         password: String,
     },
+    /// Initiate a networked share refresh/resharing of an existing wallet as
+    /// the owner. Announces a reshare session the retained signers join; the
+    /// group address is preserved and the refreshed share replaces the old one
+    /// on disk (#56). Co-signers approve with `join_session` on the announced
+    /// reshare session.
+    Reshare {
+        wallet_id: String,
+        password: String,
+    },
     /// Stop the runner and exit.
     Quit,
 }
@@ -149,6 +158,15 @@ pub enum CliEvent {
         total: u16,
         proposer: String,
     },
+    /// A share refresh/resharing ceremony finished. The wallet's group public
+    /// key (and therefore its address) is unchanged; the refreshed share has
+    /// been persisted, invalidating the old one (#45/#56).
+    ReshareComplete {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        correlates: Option<u64>,
+        wallet_id: String,
+        group_public_key: String,
+    },
     /// A threshold signing ceremony finished.
     SignatureComplete {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -215,6 +233,7 @@ pub fn schema_json() -> String {
             {"cmd": "join_session", "fields": {"session_id": "string", "password": "string", "label?": "string"}},
             {"cmd": "sign", "fields": {"wallet_id": "string", "message": "string", "encoding?": "utf8|hex", "password": "string"}},
             {"cmd": "approve_signing", "fields": {"session_id": "string", "password": "string"}},
+            {"cmd": "reshare", "fields": {"wallet_id": "string", "password": "string"}},
             {"cmd": "quit"},
             {"_note": "every command may include an `id` (u64); long-running ones echo it back as `correlates`"}
         ],
@@ -232,6 +251,7 @@ pub fn schema_json() -> String {
             {"event": "signing_request", "fields": {"session_id": "string", "wallet": "string", "threshold": "u16", "total": "u16", "proposer": "string"}},
             {"event": "reshare_request", "fields": {"session_id": "string", "wallet": "string", "threshold": "u16", "total": "u16", "proposer": "string"}},
             {"event": "signature_complete", "fields": {"correlates?": "u64", "signature": "string", "message_hash": "string"}},
+            {"event": "reshare_complete", "fields": {"correlates?": "u64", "wallet_id": "string", "group_public_key": "string"}},
             {"event": "error", "fields": {"correlates?": "u64", "code": "string", "message": "string"}}
         ]
     });
