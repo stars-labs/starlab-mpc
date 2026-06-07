@@ -84,6 +84,12 @@ pub struct AppState<C: Ciphersuite> {
         std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round1::Package<C>>,
     pub reshare_round2_packages:
         std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round2::Package<C>>,
+    /// The wallet's ORIGINAL participant list (from keystore metadata), used to
+    /// map device_id → original FROST id during a reshare (design §3 — must NOT
+    /// recompute over the retained set). Set when the reshare loads the wallet.
+    pub reshare_original_participants: Vec<String>,
+    /// Wallet id being reshared (so finalize knows which keystore to overwrite).
+    pub reshare_wallet_id: Option<String>,
     pub pending_mesh_ready_signals: std::collections::HashSet<String>,
     // Additional fields for UI compatibility
     pub websocket_connected: bool,
@@ -184,6 +190,8 @@ where
             reshare_round2_secret: None,
             reshare_round1_packages: std::collections::BTreeMap::new(),
             reshare_round2_packages: std::collections::BTreeMap::new(),
+            reshare_original_participants: Vec::new(),
+            reshare_wallet_id: None,
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,
@@ -261,6 +269,8 @@ where
             reshare_round2_secret: None,
             reshare_round1_packages: std::collections::BTreeMap::new(),
             reshare_round2_packages: std::collections::BTreeMap::new(),
+            reshare_original_participants: Vec::new(),
+            reshare_wallet_id: None,
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,

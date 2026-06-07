@@ -30,6 +30,19 @@ use frost_core::{Ciphersuite, Identifier};
 
 use crate::utils::appstate_compat::AppState;
 
+/// FROST identifier for `device_id` in a reshare — derived from the wallet's
+/// **ORIGINAL** participant set (design §3), NOT the retained set. Removing a
+/// device must not renumber the survivors (their old key packages carry their
+/// original ids), so we always canonicalise over the full original list
+/// (persisted in `WalletMetadata.participants`). Using the reduced set here
+/// would silently mis-key the refresh and corrupt the result.
+pub fn reshare_identifier<C: Ciphersuite>(
+    original_participants: &[String],
+    device_id: &str,
+) -> Option<Identifier<C>> {
+    crate::protocal::dkg::canonical_identifier::<C>(original_participants, device_id)
+}
+
 /// Round 1: produce this node's refresh round-1 package and stash the secret.
 /// `max_signers` = number of RETAINED participants; `min_signers` = the
 /// (unchanged) threshold; `identifier` = this node's ORIGINAL id.
@@ -216,6 +229,25 @@ mod tests {
             assert!(states[&k].reshare_round1_packages.is_empty());
         }
         keys
+    }
+
+    #[test]
+    fn reshare_identifier_uses_original_set_not_reduced() {
+        // Original sorted: alice=1, bob=2, carol=3.
+        let original = vec!["alice".to_string(), "bob".to_string(), "carol".to_string()];
+        assert_eq!(reshare_identifier::<Secp>(&original, "alice"), Identifier::<Secp>::try_from(1).ok());
+        assert_eq!(reshare_identifier::<Secp>(&original, "carol"), Identifier::<Secp>::try_from(3).ok());
+        // Removing the MIDDLE device (bob): survivors must KEEP their original ids.
+        // The wrong approach (canonicalise over the reduced {alice,carol}) would
+        // make carol=2 — proving why we must use the original set.
+        let reduced = vec!["alice".to_string(), "carol".to_string()];
+        let wrong = crate::protocal::dkg::canonical_identifier::<Secp>(&reduced, "carol");
+        assert_eq!(wrong, Identifier::<Secp>::try_from(2).ok(), "reduced-set id is 2 (wrong)");
+        assert_ne!(
+            reshare_identifier::<Secp>(&original, "carol"),
+            wrong,
+            "reshare must NOT renumber carol — keep original id 3"
+        );
     }
 
     #[test]
