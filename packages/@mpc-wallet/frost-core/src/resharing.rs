@@ -284,4 +284,59 @@ mod tests {
         let err = refresh::<Secp>(&kps, &pp, &[1, 2, 9], 2, 53);
         assert!(err.is_err(), "refresh must reject a participant with no prior share");
     }
+
+    // --- Phase 1 gate (#45): NON-CONTIGUOUS identifiers ---------------------
+    // Removing a *middle* device leaves the survivors holding their original
+    // (now non-contiguous) FROST ids, e.g. {1,3}. The networked ceremony MUST
+    // keep those original ids (not recompute canonical_identifier over the
+    // reduced set). These tests prove frost-core's refresh accepts that: a
+    // refresh over ids {1,3} with max_signers=2 preserves the group key and the
+    // surviving pair can sign. If this ever fails, the removal feature needs
+    // the trusted-dealer fallback (see RESHARE_CEREMONY_DESIGN.md §3).
+    #[test]
+    fn refresh_with_noncontiguous_ids_removing_the_middle_device() {
+        let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 14).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        // Remove the MIDDLE device (id 2) → survivors keep ids {1,3}.
+        let (new_kps, new_pp) = refresh::<Secp>(&kps, &pp, &[1, 3], 2, 54).unwrap();
+        assert_eq!(
+            group_key_hex(&new_pp).unwrap(),
+            before,
+            "group key (address) must survive a non-contiguous-id refresh"
+        );
+        assert_eq!(new_kps.keys().copied().collect::<Vec<_>>(), vec![1, 3]);
+        // The surviving {1,3} pair can sign with the refreshed shares.
+        threshold_sign_verify::<Secp>(&new_kps, &[1, 3], &new_pp, b"noncontig").unwrap();
+        // The removed device (id 2) and any stale share are dead against the
+        // refreshed group.
+        let mut with_removed = new_kps.clone();
+        with_removed.insert(2u16, kps[&2].clone());
+        assert!(
+            threshold_sign_verify::<Secp>(&with_removed, &[1, 2], &new_pp, b"x").is_err(),
+            "removed middle device's old share must not sign the refreshed group"
+        );
+    }
+
+    #[test]
+    fn refresh_noncontiguous_ids_ed25519() {
+        // Same as above on ed25519, to be sure it's curve-agnostic.
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        let (kps, pp) = dkg_keypackages::<Ed>(3, 2, 15).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        let (new_kps, new_pp) = refresh::<Ed>(&kps, &pp, &[1, 3], 2, 55).unwrap();
+        assert_eq!(group_key_hex(&new_pp).unwrap(), before);
+        threshold_sign_verify::<Ed>(&new_kps, &[1, 3], &new_pp, b"noncontig-ed").unwrap();
+    }
+
+    #[test]
+    fn refresh_5_of_5_down_to_3_of_5_arbitrary_subset() {
+        // Larger, more adversarial: 3-of-5, keep a scattered subset {2,4,5}
+        // (drop 1 and 3). Group key preserved; the 3 survivors sign.
+        let (kps, pp) = dkg_keypackages::<Secp>(5, 3, 16).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        let (new_kps, new_pp) = refresh::<Secp>(&kps, &pp, &[2, 4, 5], 3, 56).unwrap();
+        assert_eq!(group_key_hex(&new_pp).unwrap(), before);
+        assert_eq!(new_kps.keys().copied().collect::<Vec<_>>(), vec![2, 4, 5]);
+        threshold_sign_verify::<Secp>(&new_kps, &[2, 4, 5], &new_pp, b"scattered").unwrap();
+    }
 }
