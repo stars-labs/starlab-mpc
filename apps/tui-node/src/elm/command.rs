@@ -61,7 +61,7 @@ pub enum Command {
     ProcessDKGRound2 { from_device: String, package_bytes: Vec<u8> },
     /// Begin a same-set reshare on this node (#45): refresh part 1 over the
     /// current session's live mesh, then broadcast. Triggered by HeadlessReshare.
-    StartReshare { password: String },
+    StartReshare { wallet_id: String, password: String, keystore_path: String },
     /// Process a peer's reshare round-1 / round-2 package received over a data
     /// channel — drives `protocal::reshare`.
     ProcessReshareRound1 { from_device: String, package_bytes: Vec<u8> },
@@ -861,24 +861,20 @@ impl Command {
                 }
             }
 
-            Command::StartReshare { password } => {
+            Command::StartReshare { wallet_id, password, keystore_path } => {
                 // Same-set reshare reusing the current session's live mesh (#45).
-                // Seed the reshare context from the active session + loaded
-                // wallet, then trigger round 1 on this node.
+                // Seed the reshare context (id source + persist creds) from the
+                // active session, then trigger round 1 on this node.
                 let self_id = {
                     let mut state = app_state.lock().await;
                     if let Some(session) = state.session.clone() {
                         if state.reshare_original_participants.is_empty() {
                             state.reshare_original_participants = session.participants.clone();
                         }
-                        if state.reshare_wallet_id.is_none() {
-                            state.reshare_wallet_id = state
-                                .current_wallet_id
-                                .clone()
-                                .or(Some(session.session_id.clone()));
-                        }
                     }
-                    let _ = password; // share re-encryption on persist — #56
+                    state.reshare_wallet_id = Some(wallet_id);
+                    state.reshare_password = Some(password);
+                    state.reshare_keystore_path = Some(keystore_path);
                     state.device_id.clone()
                 };
                 crate::protocal::reshare::handle_trigger_reshare_round1(app_state.clone(), self_id)

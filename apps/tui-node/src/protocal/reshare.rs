@@ -353,23 +353,67 @@ pub async fn process_reshare_round2<C>(
         guard.reshare_round2_packages.len() >= need && need > 0
     };
     if ready {
-        let mut guard = state.lock().await;
-        match finalize_reshare(&mut guard) {
-            Ok((_new_key, new_pub)) => {
-                let group_hex = new_pub
-                    .verifying_key()
-                    .serialize()
-                    .map(|b| hex::encode(b))
-                    .unwrap_or_default();
-                let wallet_id = guard.reshare_wallet_id.clone().unwrap_or_default();
-                info!("✅ reshare complete; group key preserved = {}", group_hex);
-                // NOTE (#56): persist the refreshed share via
-                // Keystore::update_wallet_share once the reshare password is
-                // stashed on AppState. Until then the new share lives in-memory
-                // (AppState.key_package) — signing keeps working this session.
-                let _ = tx.send(Message::ReshareComplete { wallet_id, group_public_key: group_hex });
+        // Finalize under lock (swaps the in-memory share + asserts the group
+        // key), capturing what we need to persist; then do the keystore IO.
+        let finalized = {
+            let mut guard = state.lock().await;
+            match finalize_reshare(&mut guard) {
+                Ok((new_key, new_pub)) => {
+                    let group_hex = new_pub
+                        .verifying_key()
+                        .serialize()
+                        .map(|b| hex::encode(b))
+                        .unwrap_or_default();
+                    Some((
+                        new_key,
+                        new_pub,
+                        group_hex,
+                        guard.reshare_wallet_id.clone().unwrap_or_default(),
+                        guard.reshare_password.clone(),
+                        guard.reshare_keystore_path.clone(),
+                        guard.device_id.clone(),
+                        guard.session.clone(),
+                    ))
+                }
+                Err(e) => {
+                    error!("reshare finalize: {e}");
+                    None
+                }
             }
-            Err(e) => error!("reshare finalize: {e}"),
+        };
+        if let Some((new_key, new_pub, group_hex, wallet_id, password, path, device_id, session)) =
+            finalized
+        {
+            // Persist the refreshed share atomically over the existing wallet
+            // (same id/curve/group-key/address). Best-effort: a failure here
+            // leaves the in-memory new share usable this session and is logged.
+            if let (Some(password), Some(path), Some(session)) = (password, path, &session) {
+                match crate::elm::command::encode_keystore_blob(&new_key, &new_pub) {
+                    Ok(blob) => match crate::keystore::Keystore::new(&path, &device_id) {
+                        Ok(mut ks) => {
+                            let idx =
+                                ks.get_wallet(&wallet_id).map(|w| w.participant_index).unwrap_or(1);
+                            if let Err(e) = ks.update_wallet_share(
+                                &wallet_id,
+                                &blob,
+                                &password,
+                                session.threshold,
+                                session.total,
+                                session.participants.clone(),
+                                idx,
+                            ) {
+                                error!("reshare persist: update_wallet_share: {e}");
+                            } else {
+                                info!("💾 refreshed share persisted for {}", wallet_id);
+                            }
+                        }
+                        Err(e) => error!("reshare persist: keystore open: {e}"),
+                    },
+                    Err(e) => error!("reshare persist: encode blob: {e}"),
+                }
+            }
+            info!("✅ reshare complete; group key preserved = {}", group_hex);
+            let _ = tx.send(Message::ReshareComplete { wallet_id, group_public_key: group_hex });
         }
     }
 }

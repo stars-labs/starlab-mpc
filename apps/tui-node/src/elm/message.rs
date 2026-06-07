@@ -47,9 +47,12 @@ pub enum Message {
     },
     /// Headless trigger: begin a same-set reshare on this node, reusing the
     /// current session's live mesh (#45). Every retained node receives this to
-    /// start its round 1.
+    /// start its round 1. `keystore_path` + `wallet_id` let finalize persist the
+    /// refreshed share atomically over the existing wallet.
     HeadlessReshare {
+        wallet_id: String,
         password: String,
+        keystore_path: String,
     },
     /// A reshare ceremony finished on this node (group key preserved). Tapped by
     /// the CLI bridge / simulate harness.

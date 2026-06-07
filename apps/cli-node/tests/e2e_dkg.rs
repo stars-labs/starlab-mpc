@@ -111,6 +111,7 @@ async fn reshare_then_sign_2_of_3_preserves_group_key() {
     assert!(r.key_preserved, "group key changed across reshare: {r:?}");
     assert_eq!(r.dkg_group_public_key, r.reshare_group_public_key);
     assert!(r.signed_after_reshare, "refreshed shares failed to sign: {r:?}");
+    assert!(r.share_persisted, "refreshed share not persisted with same group key: {r:?}");
     eprintln!(
         "✅ reshare e2e ok in {}ms, group preserved = {}",
         r.elapsed_ms, r.dkg_group_public_key

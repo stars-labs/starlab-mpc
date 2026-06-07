@@ -1484,8 +1484,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         Message::ProcessReshareRound2 { from_device, package_bytes } => {
             Some(Command::ProcessReshareRound2 { from_device, package_bytes })
         }
-        Message::HeadlessReshare { password } => {
-            Some(Command::StartReshare { password })
+        Message::HeadlessReshare { wallet_id, password, keystore_path } => {
+            Some(Command::StartReshare { wallet_id, password, keystore_path })
         }
         Message::ReshareComplete { .. } => {
             // Terminal event; tapped by the CLI bridge / simulate harness. No
