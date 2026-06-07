@@ -90,6 +90,10 @@ pub struct AppState<C: Ciphersuite> {
     pub reshare_original_participants: Vec<String>,
     /// Wallet id being reshared (so finalize knows which keystore to overwrite).
     pub reshare_wallet_id: Option<String>,
+    /// Password to re-encrypt the refreshed share at finalize (#45 persist).
+    pub reshare_password: Option<String>,
+    /// Keystore base path for the refreshed-share write at finalize.
+    pub reshare_keystore_path: Option<String>,
     pub pending_mesh_ready_signals: std::collections::HashSet<String>,
     // Additional fields for UI compatibility
     pub websocket_connected: bool,
@@ -192,6 +196,8 @@ where
             reshare_round2_packages: std::collections::BTreeMap::new(),
             reshare_original_participants: Vec::new(),
             reshare_wallet_id: None,
+            reshare_password: None,
+            reshare_keystore_path: None,
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,
@@ -271,6 +277,8 @@ where
             reshare_round2_packages: std::collections::BTreeMap::new(),
             reshare_original_participants: Vec::new(),
             reshare_wallet_id: None,
+            reshare_password: None,
+            reshare_keystore_path: None,
             pending_mesh_ready_signals: std::collections::HashSet::new(),
             websocket_connected: false,
             websocket_connecting: false,

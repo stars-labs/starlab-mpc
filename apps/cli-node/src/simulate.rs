@@ -395,6 +395,8 @@ pub struct ReshareE2eResult {
     pub key_preserved: bool,
     /// True iff a threshold signature with the REFRESHED shares verifies.
     pub signed_after_reshare: bool,
+    /// True iff node 0's refreshed share is on disk with the unchanged group key.
+    pub share_persisted: bool,
     pub elapsed_ms: u128,
 }
 
@@ -403,7 +405,7 @@ impl ReshareE2eResult {
         serde_json::to_string_pretty(self).unwrap_or_default()
     }
     pub fn ok(&self) -> bool {
-        self.key_preserved && self.signed_after_reshare
+        self.key_preserved && self.signed_after_reshare && self.share_persisted
     }
 }
 
@@ -422,8 +424,12 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     let wallet_id = c.outcomes[0].wallet_id.clone();
 
     // Trigger a reshare on every node — each refreshes its share over the mesh.
-    for s in c.senders.iter() {
-        s.send(Message::HeadlessReshare { password: "sim-password-0".into() })?;
+    for (i, s) in c.senders.iter().enumerate() {
+        s.send(Message::HeadlessReshare {
+            wallet_id: wallet_id.clone(),
+            password: format!("sim-password-{i}"),
+            keystore_path: c.keystores[i].path().to_string_lossy().to_string(),
+        })?;
     }
     // Every node must report reshare completion with the unchanged group key.
     let mut reshare_keys = Vec::new();
@@ -436,6 +442,17 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     let key_preserved = reshare_keys.len() == nodes
         && reshare_keys.iter().all(|k| *k == dkg_group_key);
     let reshare_group_key = reshare_keys.first().cloned().unwrap_or_default();
+
+    // Persistence check: node 0's refreshed share is on disk with the unchanged
+    // group key (a fresh Keystore reads from the file we just rewrote).
+    let persisted_group_key = {
+        use tui_node::keystore::Keystore;
+        Keystore::new(c.keystores[0].path(), &c.device_ids[0])
+            .ok()
+            .and_then(|ks| ks.get_wallet(&wallet_id).map(|w| w.group_public_key.clone()))
+            .unwrap_or_default()
+    };
+    let share_persisted = persisted_group_key == dkg_group_key;
 
     // Sign with the REFRESHED shares and verify against the (unchanged) group key.
     let (signature, signed_message) = drive_signing(
@@ -459,6 +476,7 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
         reshare_group_public_key: reshare_group_key,
         key_preserved,
         signed_after_reshare,
+        share_persisted,
         elapsed_ms: started.elapsed().as_millis(),
     })
 }
