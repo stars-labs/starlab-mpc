@@ -314,8 +314,45 @@ async fn main() {
     }
 }
 
+/// Parse argv, but on an *unrecognized subcommand* add a one-line tip pointing
+/// at the right command for the intuitive misses (e.g. `wallet join` — joining
+/// lives under `session join`; `session create` — creating is `wallet create`).
+/// Otherwise behaves exactly like `Cli::parse()` (clap prints + exits).
+fn parse_cli() -> Cli {
+    use clap::error::{ContextKind, ContextValue, ErrorKind};
+    match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => {
+            if e.kind() == ErrorKind::InvalidSubcommand {
+                if let Some(ContextValue::String(bad)) = e.get(ContextKind::InvalidSubcommand) {
+                    let tip = match bad.as_str() {
+                        "join" => Some(
+                            "to join a wallet another device created, run:\n  \
+                             mpc-wallet-cli session join --session-id <id> --room <room> \
+                             --device-id <unique> --password <pw>\n\
+                             (the <id> is the dkg_… that `wallet create` prints.)",
+                        ),
+                        "create" => Some(
+                            "to create a shared wallet, run:\n  \
+                             mpc-wallet-cli wallet create --room <room> --device-id <unique> \
+                             --password <pw>",
+                        ),
+                        _ => None,
+                    };
+                    if let Some(tip) = tip {
+                        let _ = e.print();
+                        eprintln!("\ntip: {tip}");
+                        std::process::exit(e.exit_code());
+                    }
+                }
+            }
+            e.exit();
+        }
+    }
+}
+
 async fn run() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let cli = parse_cli();
     match cli.command {
         Command::Schema => {
             println!("{}", protocol::schema_json());
