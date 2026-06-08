@@ -185,7 +185,11 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                 let _ = out_tx.send(CliEvent::Error {
                     correlates: None,
                     code: "bad_request".into(),
-                    message: e.to_string(),
+                    message: format!(
+                        "invalid JSONL command: {e}. Expected one JSON object per line, e.g. \
+                         {{\"cmd\":\"create_wallet\",\"threshold\":2,\"total\":3,\"password\":\"…\"}}. \
+                         Run `mpc-wallet-cli schema` for the full command list."
+                    ),
                 });
                 continue;
             }
@@ -199,6 +203,22 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
 
         match req.command {
             CliCommand::Connect => {
+                // A roomless connection to the hosted (wss://) server is rejected
+                // by the multi-tenant signal server, so the connection will never
+                // come up — tell the operator why, in-band, instead of letting
+                // every later command silently hang.
+                if opts.signal_url.starts_with("wss://") && !opts.signal_url.contains("room=") {
+                    let _ = out_tx.send(CliEvent::Error {
+                        correlates: id,
+                        code: "room_required".into(),
+                        message: format!(
+                            "no room set for the hosted server ({}). It requires a strong room \
+                             (≥16 chars) — a roomless connection is rejected. Restart `serve` with \
+                             --room <id> (the SAME value on every node).",
+                            opts.signal_url
+                        ),
+                    });
+                }
                 let _ = runner_tx.send(Message::TriggerReconnect);
                 ack(id);
             }

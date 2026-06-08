@@ -888,7 +888,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             error!("Signing ceremony {} failed: {}", request_id, error);
             model.ui_state.modal = Some(Modal::Error {
                 title: "Signing Failed".to_string(),
-                message: error,
+                message: crate::elm::error_help::signing(&error),
             });
             // Clear pending-sign state so a retry starts clean.
             model.wallet_state.pending_sign_message = None;
@@ -1202,10 +1202,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // produce nonsense, so we must block the flow until the user
             // either retries or navigates away.
             error!("Wallet unlock failed: {}", error);
-            model.ui_state.modal = Some(Modal::Error {
-                title: "Unlock Failed".to_string(),
-                message: error,
-            });
+            let (title, message) = crate::elm::error_help::unlock(&error);
+            model.ui_state.modal = Some(Modal::Error { title, message });
             // Critical: clear any pending signing state so a subsequent
             // DKG-creator PasswordPrompt submit isn't hijacked into
             // UnlockWallet on this-failed wallet_id. Without this,
@@ -1434,7 +1432,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Show error modal - always stay on current screen so user can retry or press Esc to go back
             model.ui_state.modal = Some(Modal::Error {
                 title: "DKG Failed".to_string(),
-                message: error,
+                message: crate::elm::error_help::dkg(&error),
             });
 
             // Reset DKG-in-progress flag so user can retry

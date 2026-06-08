@@ -651,7 +651,7 @@ impl Command {
                             _ => {
                                 warn!("StartDKG: primary WebSocket not up — can't announce");
                                 let _ = tx_clone.send(Message::DKGFailed {
-                                    error: "Signal server not connected. Wait for reconnect and try again.".to_string(),
+                                    error: crate::elm::error_help::not_connected(),
                                 });
                                 drop(state);
                                 let mut s = app_state.lock().await;
@@ -1036,8 +1036,7 @@ impl Command {
                         None => {
                             warn!("StartReshare: primary WebSocket not up — can't announce");
                             let _ = tx.send(Message::Error {
-                                message: "Signal server not connected. Wait for reconnect."
-                                    .to_string(),
+                                message: crate::elm::error_help::not_connected(),
                             });
                             let mut s = app_state.lock().await;
                             crate::protocal::reshare::clear_reshare_state(&mut s);
@@ -1130,8 +1129,7 @@ impl Command {
                         None => {
                             warn!("JoinReshare: primary WebSocket not up — can't join");
                             let _ = tx.send(Message::Error {
-                                message: "Signal server not connected. Wait for reconnect."
-                                    .to_string(),
+                                message: crate::elm::error_help::not_connected(),
                             });
                             let mut s = app_state.lock().await;
                             crate::protocal::reshare::clear_reshare_state(&mut s);
@@ -1270,7 +1268,7 @@ impl Command {
                         _ => {
                             warn!("JoinDKG: primary WebSocket not up — can't join");
                             let _ = tx_clone.send(Message::DKGFailed {
-                                error: "Signal server not connected. Wait for reconnect.".to_string(),
+                                error: crate::elm::error_help::not_connected(),
                             });
                             return Ok(());
                         }
