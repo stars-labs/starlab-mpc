@@ -29,7 +29,7 @@ enum Command {
     /// Run a full N-node DKG in one process (embedded signal server) and
     /// print a JSON summary. Self-contained — ideal for CI / smoke tests.
     Simulate(SimulateArgs),
-    /// Wallet one-shot commands (list / create).
+    /// Wallet one-shot commands (list / create / join).
     Wallet {
         #[command(subcommand)]
         sub: WalletCmd,
@@ -152,6 +152,16 @@ enum WalletCmd {
         threshold: u16,
         #[arg(long, default_value_t = 3)]
         total: u16,
+        #[command(flatten)]
+        pw: PasswordArgs,
+        #[command(flatten)]
+        common: OneShot,
+    },
+    /// Join a wallet's DKG that another device created. Alias of
+    /// `session join` — the `--session-id` is the one the creator prints.
+    Join {
+        #[arg(long)]
+        session_id: String,
         #[command(flatten)]
         pw: PasswordArgs,
         #[command(flatten)]
@@ -354,6 +364,15 @@ async fn run() -> anyhow::Result<()> {
                     )
                     .await,
                 )
+            }
+            WalletCmd::Join {
+                session_id,
+                pw,
+                common,
+            } => {
+                common.validate_room()?;
+                let password = pw.resolve()?;
+                finish(oneshot::session_join(common.init_and_opts(), session_id, password).await)
             }
         },
         Command::Session { sub } => match sub {
