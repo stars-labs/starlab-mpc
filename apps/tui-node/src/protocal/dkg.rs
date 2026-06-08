@@ -52,6 +52,31 @@ pub(crate) fn canonical_identifier<C: Ciphersuite>(
     Identifier::<C>::try_from(one_based).ok()
 }
 
+/// Derive the persisted wallet id from a DKG session id.
+///
+/// The session id is `dkg_<uuid>` — random, and **identical across all
+/// participants** (the creator mints it and joiners adopt it), so this mapping
+/// is deterministic cluster-wide: every device computes the same wallet id. We
+/// strip the `dkg_` prefix and keep 12 hex chars — enough entropy that two
+/// wallets in one room don't collide, and no `dkg_` noise inside the id (e.g.
+/// session `dkg_d9f249e9-66b3-4ee8-…` → `wallet-d9f249e966b3`). Non-standard
+/// session ids fall back to a sanitized slice so we always produce a valid id.
+///
+/// MUST be the single source of truth for this mapping — both the in-memory
+/// `current_wallet_id` (here, post-part3) and the persisted wallet id
+/// (`FinalizeWalletFromDkg`) call this, and they have to agree.
+pub fn wallet_id_from_session(session_id: &str) -> String {
+    let core = session_id.strip_prefix("dkg_").unwrap_or(session_id);
+    let hex: String = core.chars().filter(|c| c.is_ascii_hexdigit()).take(12).collect();
+    let token = if hex.len() >= 8 {
+        hex
+    } else {
+        let s: String = core.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
+        if s.is_empty() { "default".to_string() } else { s }
+    };
+    format!("wallet-{token}")
+}
+
 // Removed insecure derive_group_key function - now using real FROST DKG output.
 //
 // `handle_trigger_dkg_round1_dynamic` used to live here as a dispatch helper
@@ -663,12 +688,13 @@ where
         // Complete DKG
         guard.dkg_state = DkgState::Complete;
         
-        // Generate wallet ID
-        let wallet_id = if let Some(session) = &guard.session {
-            format!("wallet-{}", &session.session_id[..8])
-        } else {
-            "wallet-default".to_string()
-        };
+        // Generate wallet ID (shared derivation — see `wallet_id_from_session`;
+        // must match the persisted id in `FinalizeWalletFromDkg`).
+        let wallet_id = guard
+            .session
+            .as_ref()
+            .map(|s| wallet_id_from_session(&s.session_id))
+            .unwrap_or_else(|| "wallet-default".to_string());
         guard.current_wallet_id = Some(wallet_id.clone());
         
         // Log the real group public key
@@ -870,4 +896,42 @@ pub fn aggregate_signature<C: Ciphersuite>(
 pub fn generate_signing_commitment<C: Ciphersuite>(
 ) -> Result<frost_core::round1::SigningCommitments<C>, Box<dyn std::error::Error + Send + Sync>> {
     Err("Signing commitment generation is temporarily stubbed".into())
+}
+#[cfg(test)]
+mod wallet_id_tests {
+    use super::wallet_id_from_session;
+
+    #[test]
+    fn strips_dkg_prefix_and_keeps_12_hex() {
+        assert_eq!(
+            wallet_id_from_session("dkg_d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d"),
+            "wallet-d9f249e966b3"
+        );
+    }
+
+    #[test]
+    fn distinct_sessions_distinct_ids() {
+        let a = wallet_id_from_session("dkg_d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d");
+        let b = wallet_id_from_session("dkg_3a17c0de-1111-2222-3333-444455556666");
+        assert_ne!(a, b);
+        assert!(a.starts_with("wallet-") && b.starts_with("wallet-"));
+    }
+
+    #[test]
+    fn deterministic() {
+        let s = "dkg_abcdef0123456789-aaaa";
+        assert_eq!(wallet_id_from_session(s), wallet_id_from_session(s));
+    }
+
+    #[test]
+    fn no_dkg_substring_in_id() {
+        assert!(!wallet_id_from_session("dkg_d9f249e9-66b3").contains("dkg_"));
+    }
+
+    #[test]
+    fn short_or_weird_session_does_not_panic() {
+        assert!(wallet_id_from_session("x").starts_with("wallet-"));
+        assert!(wallet_id_from_session("").starts_with("wallet-"));
+        assert!(wallet_id_from_session("dkg_").starts_with("wallet-"));
+    }
 }
