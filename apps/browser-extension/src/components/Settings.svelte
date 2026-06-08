@@ -39,7 +39,7 @@
             return;
         }
         if (!(await setRoom(r))) {
-            roomStatus = "✗ Save failed.";
+            roomStatus = "✗ Save failed — couldn't write to extension storage. Reload the extension and try again.";
             return;
         }
         // Apply immediately: the startup WS connect is roomless (it ran before a

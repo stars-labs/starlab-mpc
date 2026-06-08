@@ -11,6 +11,7 @@
     import Button from "../../lib/ui/Button.svelte";
     import Modal from "../../lib/ui/Modal.svelte";
     import CopyButton from "../../lib/ui/CopyButton.svelte";
+    import { guideError } from "../../utils/error-guidance";
     import Collapsible from "../../lib/ui/Collapsible.svelte";
     import { storage } from "#imports";
     import type { AppState } from "@mpc-wallet/types/appstate";
@@ -433,7 +434,10 @@
 //                 console.log("[UI] Processing wsStatus:", message);
                 appState.wsConnected = message.connected || false;
                 if (!message.connected && message.reason) {
-                    appState.wsError = `WebSocket disconnected: ${message.reason}`;
+                    appState.wsError = guideError(
+                        `Disconnected from the signal server: ${message.reason}`,
+                        "connection",
+                    );
                 } else if (message.connected) {
                     appState.wsError = "";
                 }
@@ -452,7 +456,7 @@
 
             case "wsError":
 //                 console.log("[UI] Processing wsError:", message);
-                appState.wsError = message.error;
+                appState.wsError = guideError(message.error, "connection");
                 console.error("[UI] WebSocket error:", message.error);
                 // Trigger reactivity
                 appState = { ...appState };
@@ -816,10 +820,10 @@
                 showSignForm = false;
                 signMessage = "";
             } else {
-                signError = response?.error ?? "Sign failed";
+                signError = guideError(response?.error ?? "Sign failed", "signing");
             }
         } catch (e) {
-            signError = (e as Error).message ?? String(e);
+            signError = guideError((e as Error).message ?? String(e), "signing");
         } finally {
             signing_ = false;
         }

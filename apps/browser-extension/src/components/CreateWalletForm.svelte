@@ -11,6 +11,7 @@
     import { MESSAGE_TYPES } from "@mpc-wallet/types/messages";
     import Button from "../lib/ui/Button.svelte";
     import Icon from "../lib/ui/Icon.svelte";
+    import { guideError } from "../utils/error-guidance";
 
     let showAdvanced = false;
 
@@ -56,11 +57,13 @@
             if (response?.success && response.sessionId) {
                 dispatch("created", { sessionId: response.sessionId });
             } else {
-                errorMessage =
-                    response?.error ?? "Failed to create wallet (no error returned)";
+                errorMessage = guideError(
+                    response?.error ?? "Failed to create wallet (no error returned)",
+                    "dkg",
+                );
             }
         } catch (e) {
-            errorMessage = (e as Error).message ?? String(e);
+            errorMessage = guideError((e as Error).message ?? String(e), "dkg");
         } finally {
             submitting = false;
         }
