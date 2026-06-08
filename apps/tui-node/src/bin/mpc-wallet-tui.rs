@@ -45,6 +45,13 @@ struct Args {
     room: Option<String>,
 }
 
+/// A "strong" room the hosted multi-tenant server will accept: ≥16 chars of
+/// `[A-Za-z0-9_-]` (mirrors the server's `MIN_ROOM_LEN`). Kept identical to the
+/// CLI's check so both front-ends reject the same weak rooms.
+fn is_strong_room(r: &str) -> bool {
+    r.chars().count() >= 16 && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Merge a `room` into the signal URL as a query param (`?room=` / `&room=`).
 /// No-op when absent — the server then rejects with a clear error.
 fn with_room(url: &str, room: Option<&str>) -> String {
@@ -65,6 +72,34 @@ fn with_room(url: &str, room: Option<&str>) -> String {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    // Fail fast on a bad --room for the hosted server, before the TUI takes over
+    // the terminal (same footgun the CLI guards: `--room test-1`). Offline mode
+    // and a local ws:// server need no room, so only enforce for online wss://.
+    if !args.offline && args.signal_server.starts_with("wss://") {
+        match args.room.as_deref() {
+            Some(r) if !is_strong_room(r) => {
+                eprintln!(
+                    "error: --room \"{r}\" is too weak for the hosted server ({}). It needs ≥16 \
+                     chars of [A-Za-z0-9_-] (got {} char(s)). Generate a strong one and share the \
+                     SAME value with every device:\n      --room \"$(uuidgen | tr -d -)\"\n    (a \
+                     local --signal-server ws://<host-ip>:9000, or --offline, needs no room.)",
+                    args.signal_server,
+                    r.chars().count()
+                );
+                std::process::exit(1);
+            }
+            None => {
+                eprintln!(
+                    "warning: no --room set — the hosted server ({}) requires a strong room \
+                     (≥16 chars) or it rejects the connection (you'll stay Offline). Add \
+                     --room \"$(uuidgen | tr -d -)\" (the SAME on every device).",
+                    args.signal_server
+                );
+            }
+            _ => {}
+        }
+    }
 
     // Determine device ID
     let device_id = args.device_id.unwrap_or_else(|| {
