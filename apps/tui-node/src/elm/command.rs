@@ -603,8 +603,12 @@ impl Command {
                             info!("🔄 Reusing existing session ID: {}", session.session_id);
                             session.session_id.clone()
                         } else {
-                            // Only generate new session ID if we don't have one
-                            let new_id = format!("dkg_{}", uuid::Uuid::new_v4());
+                            // Only generate new session ID if we don't have one.
+                            // Bare UUID — the session TYPE is carried in the
+                            // `session_type` field, not parsed from an id prefix,
+                            // so a `dkg_` prefix was just noise. (wallet ids derive
+                            // from the hex either way; see wallet_id_from_session.)
+                            let new_id = uuid::Uuid::new_v4().to_string();
                             info!("🆕 Creating new session ID: {}", new_id);
                             new_id
                         }
