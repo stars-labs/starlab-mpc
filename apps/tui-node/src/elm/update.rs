@@ -1587,12 +1587,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
                 // Wallet name is derived from the session so every participant
                 // ends up with the same identifier — required for cross-device
-                // signing coordination later. Same formula as `dkg.rs:661`
-                // uses to seed `current_wallet_id`.
+                // signing coordination later. Shared derivation with `dkg.rs`
+                // (`wallet_id_from_session`) so the persisted id matches the
+                // in-memory `current_wallet_id` seeded post-part3.
                 let wallet_name = model
                     .active_session
                     .as_ref()
-                    .map(|s| format!("wallet-{}", &s.session_id[..8.min(s.session_id.len())]));
+                    .map(|s| crate::protocal::dkg::wallet_id_from_session(&s.session_id));
 
                 // Optional user-chosen display label (creator typed it on the
                 // password screen). Empty → None → UI falls back to the id.
