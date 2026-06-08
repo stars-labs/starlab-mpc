@@ -281,7 +281,18 @@ struct ServeArgs {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
+    // Single clean exit point: print the error chain as one line and exit 1 —
+    // no Rust "Error: …" + stack backtrace in a user's face (and consistent with
+    // the `finish()` one-shot paths). `{:#}` renders anyhow's full cause chain
+    // on one line without a backtrace, even when RUST_BACKTRACE is set.
+    if let Err(e) = run().await {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Schema => {
