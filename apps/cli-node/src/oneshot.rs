@@ -306,13 +306,32 @@ pub async fn session_join(
     let (tx, mut rx, roster) = start(&opts);
     tx.send(Message::TriggerReconnect)?;
     wait_connected(&mut rx, &opts).await?;
-    // Give the server a moment to replay the session, then join.
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    tx.send(Message::HeadlessJoinSession {
-        session_id,
-        password,
-        label: String::new(),
-    })?;
+    // Cold-start discovery + join. The creator almost always announces the
+    // session BEFORE we connect, and `announce_session` is a one-shot broadcast,
+    // so we must ask the server to replay active sessions
+    // (`HeadlessRefreshSessions` → `RequestActiveSessions`) — otherwise we never
+    // discover the session and silently time out (the bug investors hit). We
+    // retry refresh→join on a short cadence to beat the announce/connect race in
+    // EITHER order; `HeadlessJoinSession` is idempotent once joined, so the
+    // repeats are harmless no-ops after the mesh forms.
+    {
+        let tx_join = tx.clone();
+        let sid = session_id.clone();
+        let pw = password.clone();
+        let attempts = (opts.timeout_secs / 6).clamp(5, 12);
+        tokio::spawn(async move {
+            for _ in 0..attempts {
+                let _ = tx_join.send(Message::HeadlessRefreshSessions);
+                tokio::time::sleep(Duration::from_millis(700)).await;
+                let _ = tx_join.send(Message::HeadlessJoinSession {
+                    session_id: sid.clone(),
+                    password: pw.clone(),
+                    label: String::new(),
+                });
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        });
+    }
     let ev = wait_outcome(
         &mut rx,
         opts.timeout_secs,

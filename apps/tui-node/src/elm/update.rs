@@ -355,6 +355,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // Headless joiner entry: pick the discovered invite by id, mark it
         // active (the joiner signal SubmitPassword keys off), then hand off.
         Message::HeadlessJoinSession { session_id, password, label } => {
+            // Idempotent: the CLI joiner retries refresh+join on a short cadence
+            // to beat the announce/connect race (the creator may announce before
+            // we connect, and `announce_session` is a one-shot broadcast). Once
+            // we've already joined this session, ignore repeat sends so we don't
+            // re-fire SubmitPassword and clobber an in-progress DKG.
+            if model
+                .active_session
+                .as_ref()
+                .map(|s| s.session_id.as_str())
+                == Some(session_id.as_str())
+            {
+                return None;
+            }
             match model
                 .session_invites
                 .iter()
@@ -369,8 +382,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     }))
                 }
                 None => {
-                    warn!(
-                        "HeadlessJoinSession: no discovered session with id {}",
+                    // Not discovered yet — expected during the cold-start retry
+                    // window before the server's `RequestActiveSessions` replay
+                    // (or the live announce) arrives. Logged at debug so the
+                    // retry cadence doesn't spam an investor's info-level run.
+                    debug!(
+                        "HeadlessJoinSession: session {} not discovered yet, awaiting replay",
                         session_id
                     );
                     None
