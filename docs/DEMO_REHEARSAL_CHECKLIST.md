@@ -40,7 +40,8 @@ point into it).
 - [ ] **Clock/agreement:** everyone has the *same* room id and signal URL pasted, ready.
 - [ ] **Projector/screen mirroring works**; terminals are large‑font and readable.
 - [ ] **Fallback ready:** know which laptop runs the LAN signal server if Wi‑Fi dies, and
-      that the NUCLEAR `simulate` one‑liner is one paste away (guide §6 rung 3).
+      that the NUCLEAR `scripts/demo/ceremony.sh … --sign` one‑liner is one paste away
+      (guide §6 rung 3).
 
 ## The run — do it twice, timed
 
@@ -56,16 +57,19 @@ point into it).
        and/or `finalize` → explorer link opens and shows the confirmed tx.
 8. [ ] **Threshold drama** (guide §3.5): alice tries to sign alone → it times out → repeat
        with bob → it completes.
-9. [ ] **Recovery beat** (guide §5, optional): `mpc-wallet-cli reshare-simulate --nodes 3
-       --threshold 2 --curve ed25519 --keep 1,2` → `"ok": true`, same `group_public_key`,
-       `old_share_rejected: true`. The "lose/rotate a device, same address" story.
+9. [ ] **Recovery beat** (guide §5, optional): on the wallet-holding node run
+       `mpc-wallet-cli reshare --wallet-id <W> --room "$ROOM"` and have the retained signers
+       `session join` it → same `group_public_key`, the wallet keeps signing, the dropped
+       device's share is dead. The "lose/rotate a device, same address" story. *(No live
+       setup? The resharing engine is verified in `cargo test -p mpc-wallet-cli`.)*
 
 ## Failure drills (rehearse the recovery, not just the happy path)
 
 - [ ] **Kill Wi‑Fi mid‑run** → switch the whole group to the LAN server (rung 1). Time it.
 - [ ] **Type a wrong room on one node** → see it never joins; fix it live calmly.
-- [ ] **"Nuclear" cold open** → from nothing, run the `simulate … --sign` one‑liner and
-      verify the output. This is your "no matter what, here is the crypto working" card.
+- [ ] **"Nuclear" cold open** → from nothing, run the `scripts/demo/ceremony.sh … --sign`
+      one‑liner and verify the output. This is your "no matter what, here is the crypto
+      working — real separate processes" card.
 - [ ] **Faucet dead** (if on‑chain) → fall back to the fund‑independent `verify` proof.
 
 ## Sign‑off (don't go on stage until all true)

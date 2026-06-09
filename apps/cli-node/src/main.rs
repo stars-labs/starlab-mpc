@@ -12,7 +12,6 @@ use mpc_wallet_cli::oneshot::{self, OneShotOpts};
 use mpc_wallet_cli::policy::{self, AutoApprovePolicy};
 use mpc_wallet_cli::protocol;
 use mpc_wallet_cli::serve::{self, ServeOpts};
-use mpc_wallet_cli::simulate::{self, SimulateOpts};
 use std::sync::Arc;
 
 #[derive(Parser)]
@@ -26,9 +25,6 @@ struct Cli {
 enum Command {
     /// Run the JSONL daemon: read commands on stdin, emit events on stdout.
     Serve(ServeArgs),
-    /// Run a full N-node DKG in one process (embedded signal server) and
-    /// print a JSON summary. Self-contained — ideal for CI / smoke tests.
-    Simulate(SimulateArgs),
     /// Wallet one-shot commands (list / create).
     Wallet {
         #[command(subcommand)]
@@ -64,29 +60,8 @@ enum Command {
         #[command(flatten)]
         common: OneShot,
     },
-    /// Simulate a share refresh/resharing in one process and print a JSON
-    /// summary (group key preserved, refreshed quorum signs, old share
-    /// rejected). Self-contained — exercises the resharing engine (#45).
-    ReshareSimulate(ReshareSimArgs),
     /// Print the command/event protocol catalog as JSON (self-discovery).
     Schema,
-}
-
-#[derive(clap::Args)]
-struct ReshareSimArgs {
-    /// Number of participants in the initial wallet.
-    #[arg(long, default_value_t = 3)]
-    nodes: usize,
-    /// Signing threshold (K of N). Preserved by the refresh (can't be lowered).
-    #[arg(long, default_value_t = 2)]
-    threshold: u16,
-    /// Ciphersuite: secp256k1 (default) or ed25519.
-    #[arg(long, default_value = "secp256k1")]
-    curve: String,
-    /// Comma-separated participant ids to KEEP after the refresh (1-based;
-    /// default: all). Omit an id to remove that device.
-    #[arg(long, value_delimiter = ',')]
-    keep: Vec<u16>,
 }
 
 /// Shared flags for one-shot commands.
@@ -229,37 +204,6 @@ fn finish(ok: anyhow::Result<bool>) -> anyhow::Result<()> {
 }
 
 #[derive(clap::Args)]
-struct SimulateArgs {
-    /// Number of participants (devices).
-    #[arg(long, default_value_t = 2)]
-    nodes: usize,
-    /// Signers required (K of N). Defaults to N (all).
-    #[arg(long)]
-    threshold: Option<u16>,
-    /// Ciphersuite (currently secp256k1).
-    #[arg(long, default_value = "secp256k1")]
-    curve: String,
-    /// Overall timeout in seconds.
-    #[arg(long, default_value_t = 90)]
-    timeout: u64,
-    /// If set, after DKG sign this message with a quorum and verify it.
-    #[arg(long)]
-    sign: Option<String>,
-    /// External signal server URL (e.g. wss://panda.qzz.io). When omitted, an
-    /// isolated server is embedded in-process. Use this to smoke-test a
-    /// deployed/remote server.
-    #[arg(long)]
-    signal_server: Option<String>,
-    /// Tenant room merged into `--signal-server` as `?room=<id>` (the deployed
-    /// server requires a strong room). Ignored when no `--signal-server`.
-    #[arg(long)]
-    room: Option<String>,
-    /// tracing filter (stderr); empty to silence.
-    #[arg(long, default_value = "")]
-    log_level: String,
-}
-
-#[derive(clap::Args)]
 struct ServeArgs {
     /// Stable identity for this node (used in the DKG participant set).
     #[arg(long, default_value = "cli-node")]
@@ -358,16 +302,6 @@ async fn run() -> anyhow::Result<()> {
             println!("{}", protocol::schema_json());
             Ok(())
         }
-        Command::ReshareSimulate(args) => {
-            let r = mpc_wallet_cli::reshare::run_reshare_simulation(
-                args.nodes,
-                args.threshold,
-                &args.curve,
-                args.keep,
-            )?;
-            println!("{}", r.to_json());
-            if r.ok { Ok(()) } else { std::process::exit(1) }
-        }
         Command::Wallet { sub } => match sub {
             WalletCmd::List { common } => {
                 finish(oneshot::wallet_list(common.init_and_opts()).await)
@@ -423,43 +357,6 @@ async fn run() -> anyhow::Result<()> {
             common.validate_room()?;
             let password = pw.resolve()?;
             finish(oneshot::reshare(common.init_and_opts(), wallet_id, password).await)
-        }
-        Command::Simulate(args) => {
-            if !args.log_level.is_empty() {
-                let _ = tracing_subscriber::fmt()
-                    .with_writer(std::io::stderr)
-                    .with_env_filter(
-                        tracing_subscriber::EnvFilter::try_new(&args.log_level)
-                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-                    )
-                    .with_ansi(false)
-                    .try_init();
-            }
-            let threshold = args.threshold.unwrap_or(args.nodes as u16);
-            let opts = SimulateOpts {
-                nodes: args.nodes,
-                threshold,
-                curve: args.curve,
-                signal_url: args
-                    .signal_server
-                    .as_deref()
-                    .map(|u| with_room(u, args.room.as_deref())),
-                timeout_secs: args.timeout,
-            };
-            let ok = if let Some(msg) = args.sign {
-                let r = simulate::run_signing_simulation(opts, &msg).await?;
-                println!("{}", r.to_json());
-                r.verified
-            } else {
-                let r = simulate::run_simulation(opts).await?;
-                println!("{}", r.to_json());
-                r.agreed
-            };
-            if ok {
-                Ok(())
-            } else {
-                std::process::exit(1);
-            }
         }
         Command::Serve(args) => {
             // Logs MUST go to stderr so stdout stays pure JSONL.

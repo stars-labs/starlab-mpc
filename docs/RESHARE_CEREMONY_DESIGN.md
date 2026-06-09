@@ -1,7 +1,7 @@
 # Networked Reshare Ceremony — Design
 
 **Status:** Design proposal (pre-implementation)
-**Issue:** #45 (the networked half — the engine + `reshare-simulate` CLI already landed)
+**Issue:** #45 (the networked half — the in-process resharing engine already landed)
 **Scope:** turn share refresh/resharing from an in-process engine into a real,
 networked ceremony over the WebRTC mesh, drivable from the CLI (and reusable by
 TUI/native/extension), so a quorum can **rotate shares** or **remove a device**
@@ -225,7 +225,9 @@ Curve dispatch: same `C: Ciphersuite` generic pattern the DKG/signing drivers us
 - One-shot: `mpc-wallet-cli reshare --wallet-id W --keep alice,bob --password-file f
   --room R --signal-server …` (creator); co-signers run `serve` and approve the
   `reshare_request` (auto-approve policy reused) or `session join`.
-- `reshare-simulate` (already shipped) stays as the in-process/CI check.
+- The in-process resharing engine stays as a CI check via the library
+  (`mpc_wallet_cli::reshare::run_reshare_simulation`, exercised by the cli-node
+  integration tests) — it is no longer a user-facing CLI subcommand.
 - Bridge events: `reshare_request` (discovered), `reshare_progress`,
   `reshare_complete{wallet_id, group_public_key}`.
 
@@ -250,8 +252,8 @@ Curve dispatch: same `C: Ciphersuite` generic pattern the DKG/signing drivers us
 - **Engine (frost-core, fast):** extend `resharing.rs` — add `keep={1,3}`
   (non-contiguous) and a 3→2 removal where the removed id is the middle one. (Gate
   the whole feature on this passing.)
-- **L1 in-process (cli):** extend `reshare-simulate` coverage in CI (already green
-  for same-set + tail removal).
+- **L1 in-process (cli):** extend the `run_reshare_simulation` lib coverage in the
+  cli-node integration tests (already green for same-set + tail removal).
 - **L3 cross-process (`tests/l3_serve_process.rs` style):** DKG across 2–3 `serve`
   processes → kill/keep → run a real `reshare` over the mesh → assert all retained
   nodes agree on the unchanged group key, a refreshed quorum signs, and an old share

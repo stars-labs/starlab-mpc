@@ -1,7 +1,9 @@
-//! `reshare-simulate` — exercise the share-refresh/resharing engine end to end
-//! from the CLI (#45). Runs a DKG, then refreshes the shares for a (possibly
-//! reduced) participant set in-process via `mpc_wallet_frost_core::resharing`,
-//! and asserts the recovery guarantees:
+//! In-process share-refresh/resharing engine check (#45), exposed as the
+//! library function `run_reshare_simulation` and exercised by the cli-node
+//! integration tests (it is no longer a user-facing CLI subcommand). Runs a
+//! DKG, then refreshes the shares for a (possibly reduced) participant set
+//! in-process via `mpc_wallet_frost_core::resharing`, and asserts the recovery
+//! guarantees:
 //!
 //! - the group public key (your address) is **unchanged** by the refresh,
 //! - the refreshed quorum **can sign**,

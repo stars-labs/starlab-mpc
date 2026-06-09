@@ -291,7 +291,9 @@ ROOM=$(uuidgen)                         # one shared strong room per wallet/tena
 mpc-wallet-cli serve   --device-id <id> --keystore <dir> --signal-server wss://panda.qzz.io --room "$ROOM"
 mpc-wallet-cli wallet  create --name w --threshold 2 --total 3 --curve secp256k1 --room "$ROOM" --device-id <id> --password-file <f>
 mpc-wallet-cli sign    --wallet-id <id> --message hi --room "$ROOM" --device-id <id> --password-file <f>
-mpc-wallet-cli simulate --nodes 3 --threshold 2 --sign hi [--signal-server wss://panda.qzz.io --room "$ROOM"]
+
+# Self-contained end-to-end smoke test (real multi-process DKG + signing over a local server):
+scripts/demo/ceremony.sh --nodes 3 --threshold 2 --sign hi   # add --signal wss://… --room "$ROOM" to test a hosted server
 
 # TUI
 mpc-wallet-tui --device-id <id> --signal-server wss://panda.qzz.io --room "$ROOM" [--offline]

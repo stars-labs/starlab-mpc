@@ -73,8 +73,9 @@ SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh
 
 它会**端到端**跑完整的 DKG（2-of-2 / 2-of-3 / 3-of-5）和门限签名，每个只需几秒，然后检查信令服务器是否可达。全部 ✅ → 可以开始。任何 ❌ → 修好它，或降级（§6）。这是最重要的一步 —— 它就是对"出事怎么办"的回答：你先在私下确保根本不会出事。
 
-> 为什么它值得信任：`preflight` 使用 `mpc-wallet-cli simulate`，它在一个进程里拉起一个真实的
-> N 节点 FROST 仪式（真实的密码学、走环回（loopback）的真实 WebRTC、内嵌的服务器）。
+> 为什么它值得信任：`preflight` 运行 `scripts/demo/ceremony.sh`，它把一个真实的 N 节点
+> FROST 仪式作为**彼此独立的 `mpc-wallet-cli` 进程**拉起 —— 每个进程都有自己的磁盘密钥库，
+> 通过真实的 WebRTC、经由真实的（本地）信令服务器通信。没有任何东西在单一进程里造假，
 > 它与真实客户端走的是同一条代码路径。
 
 ---
@@ -327,37 +328,27 @@ cargo run --release --bin mpc-wallet-tui -p tui-node -- \
 
 ## 5. 恢复与轮换："丢一台设备不等于丢钱包"
 
-这是每个投资人面对多设备钱包都会问的问题。**密钥分片刷新 / 重新分享（reshare）**的密码学引擎已经交付，并可用一条命令演练 —— 它无需任何网络配置即可证明恢复的故事：
+这是每个投资人面对多设备钱包都会问的问题。**联网的**密钥分片刷新 / 重新分享（reshare）仪式已经交付：群地址保持不变、刷新后的法定门限继续签名、刷新前的每个分片全部作废。
 
 ```bash
-# Rotate all shares (proactive security) — same wallet, fresh shares:
-mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519
-
-# Remove a lost/stolen device (2-of-3 → keep only devices 1 & 2):
-mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519 --keep 1,2
+# 在持有钱包的节点上 —— 轮换所有分片（地址不变，分片全新）：
+mpc-wallet-cli reshare --wallet-id <W> --room "$ROOM"
+#   → 保留下来的签名方在被广播的 reshare 会话上执行 `session join`
+#     （或 `serve --auto-approve`）来批准，就像一笔多方共签的交易。
 ```
 
-两者都打印相同的结构：
-```json
-{ "kept": [1,2], "group_public_key": "06833fdf…badb6ac8",
-  "key_preserved": true, "refreshed_quorum_signs": true, "old_share_rejected": true, "ok": true }
-```
-
-要指给投资人看的点：
+刷新保持了你要指给投资人看的那些不变量：
 - **`group_public_key` 前后完全相同** → **地址永不改变**；资金不动，无需重新注资。
-- **`refreshed_quorum_signs: true`** → 钱包用新的分片继续正常工作。
-- **`old_share_rejected: true`** → 刷新之前的每一个分片现在都**作废了** —— 被盗设备的碎片
-  再也无法组合起来签名。
+- **刷新后的法定门限仍能签名** → 钱包用新的分片继续正常工作。
+- **刷新之前的每一个分片现在都作废了** —— 被盗设备的碎片再也无法组合起来签名。
 
 > 🎤 "丢了一台笔记本？刷新到幸存的设备上 —— 地址不变，钱包继续工作，丢失设备的分片现在一文不值。
 > 我们还能按计划定期轮换，这样一个用几个月时间收集碎片的攻击者永远拼不出一把密钥。
 > 单密钥的托管钱包做不到这其中任何一点。"
 
-> **范围：** `reshare-simulate` 在**一个进程内**运行真实的刷新（就像核选项级别的降级方案）——
-> 它证明的是密码学本身。**联网的**多设备 reshare 仪式（走 WebRTC 网状连接，类似 DKG）也已交付 ——
-> 用 `mpc-wallet-cli reshare --wallet-id <W>` 发起，让保留下来的签名方执行 `session join`
->（或 `serve --auto-approve`）。完整的威胁模型 + 话术见
-> `docs/RECOVERY_AND_RESHARING.md`。
+> **无需现场搭建的证明：** 重新分享引擎（地址不变的刷新、刷新后法定门限签名、旧分片作废）
+> 在测试套件里被端到端验证 —— `cargo test -p mpc-wallet-cli` —— 与 DKG 和签名的一致性用例一起。
+> 完整的威胁模型 + 话术见 `docs/RECOVERY_AND_RESHARING.md`。
 
 ---
 
@@ -370,7 +361,7 @@ mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519 --keep 1
 | **0. 在线** | 正常 | 通过 `wss://panda.qzz.io` + 一个共享 `--room` 进行多设备演示。 |
 | **1. 本地 / 局域网服务器** | 网络不稳 / panda 不可达 | 一台笔记本：`MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p webrtc-signal-server`。所有人用 `--signal-server ws://<笔记本的局域网-ip>:9000` 重启（本地服务器**不需要**房间）。同样的演示，无需互联网。 |
 | **2. 单台笔记本，视觉版**（TUI） | 某位参与者的设备出问题 | `scripts/demo/demo-local.sh` → 在一台机器上、用 tmux 网格跑本地服务器 + 3 个 TUI 节点。看起来仍然像多方。 |
-| **3. 核选项（绝不失败）** | 一切都着火了 | `./target/release/mpc-wallet-cli simulate --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → 约 3 秒内完成完整的 DKG + 签名 + 一个可验证的签名，自包含。它打印群公钥 + 一个已验证的签名；然后用 §3.3 来验证。"这就是密码学，此刻正在工作。" |
+| **3. 核选项（绝不失败）** | 一切都着火了 | `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → 拉起一个本地信令服务器，在**彼此独立的真实进程**上跑完整的 DKG + 门限签名，几秒完成，自包含（无需互联网）。它打印群公钥 + 签名；用 §3.3 来验证。"这就是密码学，此刻正在工作 —— 三个独立进程，没有任何造假。" |
 
 ---
 
@@ -393,7 +384,7 @@ mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519 --keep 1
 1. 之前的**起飞前检查**通过了吗？如果没有 —— 你本就不该开始；直接到第 3 级。
 2. 在线运行卡住超过约 30 秒？→ **第 1 级**（本地/局域网服务器），让所有人重新连接。
 3. 仍然卡住，或者某台设备就是问题所在？→ **第 2 级**（单笔记本 TUI）或 **第 3 级**。
-4. 还是有问题？→ **第 3 级**（核选项 simulate）。它一定能行。一边重置，一边讲解密码学。
+4. 还是有问题？→ **第 3 级**（核选项 `ceremony.sh`）。它一定能行。一边重置，一边讲解密码学。
 
 现场调试绝不要超过约 30 秒。降一级，让故事继续推进，事后再修。
 
@@ -444,6 +435,6 @@ alice:         {"cmd":"sign","wallet_id":"<…>","message":"<investor's words>",
 bob:           {"cmd":"approve_signing","session_id":"<sign_…>","password":"demo"}
 VERIFY:        node -e '…'   # GK + SIG(no 0x) + MSG → VERIFIED: true
 
-FALLBACK:      0 live → 1 LAN server → 2 one-laptop TUI → 3 nuclear simulate
-NUCLEAR:       mpc-wallet-cli simulate --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"
+FALLBACK:      0 live → 1 LAN server → 2 one-laptop TUI → 3 nuclear ceremony.sh
+NUCLEAR:       scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"
 ```

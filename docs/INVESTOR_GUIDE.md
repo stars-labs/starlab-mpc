@@ -99,9 +99,11 @@ seconds each, then checks the signal server is reachable. All ✅ → go. Any �
 fall back (§6). This is the single most important step — it's the answer to "出事怎么办":
 you make sure there's no 出事, in private, first.
 
-> Why it's trustworthy: `preflight` uses `mpc-wallet-cli simulate`, which spins a real
-> N-node FROST ceremony (real crypto, real WebRTC over loopback, embedded server) in one
-> process. It's the same code path the real clients use.
+> Why it's trustworthy: `preflight` runs `scripts/demo/ceremony.sh`, which launches a real
+> N-node FROST ceremony as **separate `mpc-wallet-cli` processes** — each its own process
+> with its own on-disk keystore, talking over real WebRTC through a real (local) signal
+> server. Nothing is faked in a single address space; it's the exact code path the real
+> clients use.
 
 ---
 
@@ -367,40 +369,32 @@ cargo run --release --bin mpc-wallet-tui -p tui-node -- \
 
 ## 5. Recovery & rotation: "a lost device doesn't lose the wallet"
 
-The question every investor asks about a multi-device wallet. The cryptographic engine for
-**share refresh / resharing** is shipped and exercisable from one command — it proves the
-recovery story without any network setup:
+The question every investor asks about a multi-device wallet. The **networked** share
+refresh / resharing ceremony is shipped: the group address is preserved, the refreshed
+quorum keeps signing, and every pre-refresh share becomes dead.
 
 ```bash
-# Rotate all shares (proactive security) — same wallet, fresh shares:
-mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519
-
-# Remove a lost/stolen device (2-of-3 → keep only devices 1 & 2):
-mpc-wallet-cli reshare-simulate --nodes 3 --threshold 2 --curve ed25519 --keep 1,2
+# On the node holding the wallet — rotate all shares (same address, fresh shares):
+mpc-wallet-cli reshare --wallet-id <W> --room "$ROOM"
+#   → retained signers approve by running `session join` (or `serve --auto-approve`)
+#     on the announced reshare session, exactly like a co-signed transaction.
 ```
 
-Both print the same shape:
-```json
-{ "kept": [1,2], "group_public_key": "06833fdf…badb6ac8",
-  "key_preserved": true, "refreshed_quorum_signs": true, "old_share_rejected": true, "ok": true }
-```
-
-What to point at:
+The refresh preserves the invariants you point at:
 - **`group_public_key` is identical** before/after → **the address never changes**; no funds
   move, no re-funding.
-- **`refreshed_quorum_signs: true`** → the wallet keeps working with the new shares.
-- **`old_share_rejected: true`** → every pre-refresh share is now **dead** — a stolen
-  device's fragment can no longer combine to sign.
+- the **refreshed quorum still signs** → the wallet keeps working with the new shares.
+- **every pre-refresh share is now dead** — a stolen device's fragment can no longer
+  combine to sign.
 
 > 🎤 "Lose a laptop? Refresh down to the survivors — same address, the wallet keeps working,
 > and the lost device's share is now worthless. We can also rotate on a schedule, so an
 > attacker collecting fragments over months never assembles a key. A single-key custodial
 > wallet can't do any of that."
 
-> **Scope:** `reshare-simulate` runs the real refresh **in one process** (like the nuclear
-> fallback) — it proves the cryptography. The **networked** multi-device reshare ceremony
-> (over the WebRTC mesh, like DKG) also ships — initiate with `mpc-wallet-cli reshare
-> --wallet-id <W>` and have retained signers `session join` (or `serve --auto-approve`). See
+> **Proof without a live setup:** the resharing engine (key-preserved refresh, refreshed
+> quorum signs, old share rejected) is verified end to end in the test suite —
+> `cargo test -p mpc-wallet-cli` — alongside the DKG and signing conformance cases. See
 > `docs/RECOVERY_AND_RESHARING.md` for the full threat model + talking points.
 
 ---
@@ -415,7 +409,7 @@ bottom one is bulletproof. Rehearse rungs 2–3 so switching is muscle memory.
 | **0. Live** | normal | Multi-device via `wss://panda.qzz.io` + a shared `--room`. |
 | **1. Local / LAN server** | internet flaky / panda unreachable | One laptop: `MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p webrtc-signal-server`. Everyone restarts with `--signal-server ws://<laptop-LAN-ip>:9000` (a local server needs **no** room). Same demo, no internet. |
 | **2. One laptop, visual** (TUI) | a participant's device misbehaves | `scripts/demo/demo-local.sh` → local server + 3 TUI nodes in a tmux grid on ONE machine. Still looks multi-party. |
-| **3. Nuclear (cannot fail)** | everything is on fire | `./target/release/mpc-wallet-cli simulate --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → full DKG + signing + a verifiable signature in ~3s, self-contained. Prints the group key + a verified signature; then verify with §3.3. "Here is the cryptography working, right now." |
+| **3. Nuclear (cannot fail)** | everything is on fire | `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → spins a local signal server and runs a full DKG + threshold signing across **real separate processes** in seconds, self-contained (no internet). Prints the group key + signature; verify with §3.3. "Here is the cryptography working, right now — three independent processes, no fakery." |
 
 ---
 
@@ -438,8 +432,8 @@ bottom one is bulletproof. Rehearse rungs 2–3 so switching is muscle memory.
 1. Did **pre-flight** pass earlier? If no — you shouldn't have started; go to rung 3.
 2. Live run stalls > ~30s? → **rung 1** (local/LAN server), have everyone reconnect.
 3. Still stalling, or a device is the problem? → **rung 2** (one-laptop TUI) or **rung 3**.
-4. Anything still wrong? → **rung 3** (nuclear simulate). It will work. Narrate the crypto
-   while you reset.
+4. Anything still wrong? → **rung 3** (nuclear `ceremony.sh`). It will work. Narrate the
+   crypto while you reset.
 
 Never debug live for more than ~30s. Drop a rung, keep the story moving, fix later.
 
@@ -492,6 +486,6 @@ alice:         {"cmd":"sign","wallet_id":"<…>","message":"<investor's words>",
 bob:           {"cmd":"approve_signing","session_id":"<sign_…>","password":"demo"}
 VERIFY:        node -e '…'   # GK + SIG(no 0x) + MSG → VERIFIED: true
 
-FALLBACK:      0 live → 1 LAN server → 2 one-laptop TUI → 3 nuclear simulate
-NUCLEAR:       mpc-wallet-cli simulate --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"
+FALLBACK:      0 live → 1 LAN server → 2 one-laptop TUI → 3 nuclear ceremony.sh
+NUCLEAR:       scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"
 ```

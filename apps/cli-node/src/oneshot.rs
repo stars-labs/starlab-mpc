@@ -123,8 +123,8 @@ fn connect_help(opts: &OneShotOpts, secs: u64) -> String {
         );
     }
     s.push_str(
-        "\n  → To prove the cryptography with no server at all:  \
-         mpc-wallet-cli simulate --nodes 3 --threshold 2 --sign hello",
+        "\n  → To prove the whole stack with no external server:  \
+         scripts/demo/ceremony.sh --nodes 3 --threshold 2 --sign hello",
     );
     s
 }
