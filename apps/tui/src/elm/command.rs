@@ -668,7 +668,7 @@ impl Command {
                     return Ok(());
                 };
 
-                let request = webrtc_signal_server::ClientMsg::RequestActiveSessions;
+                let request = starlab_signal_server::ClientMsg::RequestActiveSessions;
                 match serde_json::to_string(&request) {
                     Ok(json) => {
                         if let Err(e) = ws_tx.send(json) {
@@ -851,7 +851,7 @@ impl Command {
                         "curve_type": announced_curve,
                         "coordination_type": "Network",
                     });
-                    let announce = webrtc_signal_server::ClientMsg::AnnounceSession {
+                    let announce = starlab_signal_server::ClientMsg::AnnounceSession {
                         session_info,
                     };
                     match serde_json::to_string(&announce) {
@@ -928,7 +928,7 @@ impl Command {
                                         }
                                     };
                                     match &*shared {
-                                                    webrtc_signal_server::ServerMsg::SessionAvailable { session_info } => {
+                                                    starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
                                                         // Another participant announced a session - check if it's us joining theirs
                                                         if let Some(sid) = session_info.get("session_id").and_then(|v| v.as_str())
                                                             && sid != session_id_clone {
@@ -938,7 +938,7 @@ impl Command {
                                                                 });
                                                             }
                                                     }
-                                                    webrtc_signal_server::ServerMsg::Devices { devices } => {
+                                                    starlab_signal_server::ServerMsg::Devices { devices } => {
                                                         // Display-only: show the raw signal-server
                                                         // device roster. `Devices` fires on every WS
                                                         // register/deregister, which is NOT the same
@@ -1296,7 +1296,7 @@ impl Command {
                 };
 
                 let session_id = format!("reshare_{}", uuid::Uuid::new_v4());
-                let announce = webrtc_signal_server::ClientMsg::AnnounceSession {
+                let announce = starlab_signal_server::ClientMsg::AnnounceSession {
                     session_info: serde_json::json!({
                         "session_id": session_id.clone(),
                         "total": retained_total,
@@ -1388,7 +1388,7 @@ impl Command {
                     }
                 };
 
-                let status_msg = webrtc_signal_server::ClientMsg::SessionStatusUpdate {
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
                     session_info: serde_json::json!({
                         "session_id": session_id.clone(),
                         "participant_joined": device_id.clone(),
@@ -1530,7 +1530,7 @@ impl Command {
                     "session_id": session_id.clone(),
                     "participant_joined": device_id.clone(),
                 });
-                let status_msg = webrtc_signal_server::ClientMsg::SessionStatusUpdate {
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
                     session_info: session_update,
                 };
                 match serde_json::to_string(&status_msg) {
@@ -1618,7 +1618,7 @@ impl Command {
                                     }
                                 };
                                 match &*shared {
-                                                webrtc_signal_server::ServerMsg::SessionAvailable { session_info } => {
+                                                starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
                                                     // Check if this is our session being announced/updated
                                                     if let Some(sid) = session_info.get("session_id").and_then(|v| v.as_str())
                                                         && sid == session_id_clone {
@@ -1663,7 +1663,7 @@ impl Command {
                                                             }
                                                         }
                                                 }
-                                                webrtc_signal_server::ServerMsg::Devices { devices } => {
+                                                starlab_signal_server::ServerMsg::Devices { devices } => {
                                                     let _ = tx_msg.send(Message::Info { 
                                                         message: format!("📡 Connected devices: {:?}", devices)
                                                     });
@@ -2588,7 +2588,7 @@ impl Command {
                         // the announce rather than requiring an extra round.
                         "signing_message_hex": hex::encode(&request.transaction_data),
                     });
-                    let announce = webrtc_signal_server::ClientMsg::AnnounceSession {
+                    let announce = starlab_signal_server::ClientMsg::AnnounceSession {
                         session_info,
                     };
                     match serde_json::to_string(&announce) {

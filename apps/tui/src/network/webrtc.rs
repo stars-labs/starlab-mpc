@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use webrtc::peer_connection::RTCPeerConnection;
 use tracing::{info, error, warn};
 use crate::protocal::signal::{WebRTCSignal, SDPInfo, WebSocketMessage};
-use webrtc_signal_server::ClientMsg as SharedClientMsg;
+use starlab_signal_server::ClientMsg as SharedClientMsg;
 use crate::utils::appstate_compat::AppState;
 use serde_json;
 
@@ -477,7 +477,7 @@ pub async fn initiate_webrtc_with_channel<C>(
                         let websocket_message = crate::protocal::signal::WebSocketMessage::WebRTCSignal(ice_signal);
 
                         if let Ok(json_val) = serde_json::to_value(websocket_message) {
-                            let relay_msg = webrtc_signal_server::ClientMsg::Relay {
+                            let relay_msg = starlab_signal_server::ClientMsg::Relay {
                                 to: device_id_ice.clone(),
                                 data: json_val,
                             };

@@ -16,7 +16,7 @@ use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 
 use frost_core::Ciphersuite;
 
-use webrtc_signal_server::ClientMsg as SharedClientMsg;
+use starlab_signal_server::ClientMsg as SharedClientMsg;
 use crate::protocal::signal::{CandidateInfo, WebSocketMessage}; // Updated path
 
 

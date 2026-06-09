@@ -4,15 +4,20 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Headless Starlab MPC node — FROST DKG, threshold signing, and key resharing over a WebRTC mesh."
+keywords = ["frost", "mpc", "threshold", "signature", "cli"]
+categories = ["cryptography", "command-line-utilities"]
 
 [[bin]]
 name = "starlab-cli"
 path = "src/main.rs"
 
 [dependencies]
-starlab-client = { path = "../tui" }
-starlab-core = { path = "../../packages/@starlab/core" }
-starlab-signal-server = { path = "../signal-server/server" }
+starlab-client = { path = "../tui", version = "0.1.0" }
+starlab-core = { path = "../../packages/@starlab/core", version = "0.1.0" }
+starlab-signal-server = { path = "../signal-server/server", version = "0.1.1" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = "1.0"

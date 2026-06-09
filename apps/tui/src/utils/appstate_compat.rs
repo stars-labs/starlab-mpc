@@ -121,7 +121,7 @@ pub struct AppState<C: Ciphersuite> {
     // `broadcast` chosen over `mpsc` so late subscribers can be added without
     // knowing about each other.
     pub server_msg_broadcast_tx:
-        Option<tokio::sync::broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>>,
+        Option<tokio::sync::broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>>,
     // ICE candidate queue for handling race conditions
     pub ice_candidate_queue: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>>>>,
 

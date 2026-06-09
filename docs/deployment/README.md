@@ -109,7 +109,7 @@ server does not proxy media.
 The signal server currently exposes no `/metrics`, `/health`, or
 `/api/*` endpoints (verified: zero route handlers match). Operate
 from `stdout`/`stderr` logs via systemd journal; add structured
-logging by compiling with `RUST_LOG=webrtc_signal_server=info`.
+logging by compiling with `RUST_LOG=starlab_signal_server=info`.
 
 Future work: Prometheus-compatible `/metrics` endpoint, structured
 log output (JSON).

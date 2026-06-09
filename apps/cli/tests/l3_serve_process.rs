@@ -199,7 +199,7 @@ fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
 async fn dkg_2_of_2_across_serve_processes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(listener));
+    tokio::spawn(starlab_signal_server::run(listener));
     let ws_url = format!("ws://127.0.0.1:{port}");
 
     let ks_a = tempfile::TempDir::new().unwrap();
@@ -231,7 +231,7 @@ async fn dkg_2_of_2_across_serve_processes() {
 async fn auto_approve_co_signer_signs_without_manual_approval() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(listener));
+    tokio::spawn(starlab_signal_server::run(listener));
     let ws_url = format!("ws://127.0.0.1:{port}");
 
     let ks_a = tempfile::TempDir::new().unwrap();
@@ -365,7 +365,7 @@ async fn malformed_jsonl_is_rejected_and_loop_survives() {
 async fn sign_after_process_restart_verifies() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(listener));
+    tokio::spawn(starlab_signal_server::run(listener));
     let ws_url = format!("ws://127.0.0.1:{port}");
 
     let ks_a = tempfile::TempDir::new().unwrap();
@@ -434,7 +434,7 @@ async fn sign_after_process_restart_verifies() {
 async fn reshare_then_sign_across_serve_processes() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let port = listener.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(listener));
+    tokio::spawn(starlab_signal_server::run(listener));
     let ws_url = format!("ws://127.0.0.1:{port}");
 
     let ks_a = tempfile::TempDir::new().unwrap();

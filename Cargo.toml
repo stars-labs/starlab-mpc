@@ -12,10 +12,11 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["MPC Wallet Team"]
+authors = ["Stars Labs"]
 edition = "2024"
-license = "Apache-2.0"
-repository = "https://github.com/hecoinfo/starlab-mpc"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/stars-labs/starlab-mpc"
+homepage = "https://github.com/stars-labs/starlab-mpc"
 
 [workspace.dependencies]
 # Common dependencies shared across workspace members

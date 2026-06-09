@@ -1,7 +1,14 @@
 [package]
 name = "starlab-core-wasm"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "WebAssembly bindings for the Starlab FROST MPC engine — DKG and threshold signing (ed25519 + secp256k1) in the browser."
+keywords = ["frost", "mpc", "wasm", "threshold", "webassembly"]
+categories = ["cryptography", "wasm"]
 
 [lib]
 crate-type = ["cdylib"]
@@ -36,8 +43,8 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 # Hex encode/decode for FROST round1/round2 package wire format.
 hex = "0.4.3"
 
-# Use our shared frost-core library
-starlab-core = { path = "../core" }
+# Use our shared starlab-core library
+starlab-core = { path = "../core", version = "0.1.0" }
 
 # Still need these for specific types
 frost-secp256k1 = { version = "2.2.0", features = ["serde"] }

@@ -169,7 +169,7 @@ struct Cluster {
 async fn embedded_signal_server() -> anyhow::Result<String> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
-    tokio::spawn(webrtc_signal_server::run(listener));
+    tokio::spawn(starlab_signal_server::run(listener));
     Ok(format!("ws://127.0.0.1:{port}"))
 }
 

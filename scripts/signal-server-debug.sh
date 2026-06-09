@@ -298,7 +298,7 @@ debug_mode() {
     cargo build
 
     print_info "Starting with maximum verbosity..."
-    export RUST_LOG=trace,webrtc_signal_server=trace,tokio=debug,tungstenite=debug
+    export RUST_LOG=trace,starlab_signal_server=trace,tokio=debug,tungstenite=debug
     export RUST_BACKTRACE=full
 
     local timestamp=$(date +%Y%m%d_%H%M%S)

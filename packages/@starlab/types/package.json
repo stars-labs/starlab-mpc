@@ -1,7 +1,18 @@
 {
   "name": "@starlab/types",
   "version": "0.1.0",
-  "description": "Shared TypeScript types for MPC Wallet",
+  "description": "Shared TypeScript types for the Starlab MPC wallet engine (DKG, sessions, keystore, WebRTC mesh).",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stars-labs/starlab-mpc.git",
+    "directory": "packages/@starlab/types"
+  },
+  "homepage": "https://github.com/stars-labs/starlab-mpc#readme",
+  "keywords": ["frost", "mpc", "threshold", "wallet", "types"],
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

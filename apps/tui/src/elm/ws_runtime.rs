@@ -77,7 +77,7 @@ pub(crate) async fn dial(
 ///     publisher; subscribers call `subscribe()` to get a receiver).
 pub(crate) struct InstalledChannels {
     pub ws_msg_rx: mpsc::UnboundedReceiver<String>,
-    pub broadcast_tx: broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>,
+    pub broadcast_tx: broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>,
 }
 
 pub(crate) async fn install_handles<C>(
@@ -90,7 +90,7 @@ where
 {
     let (ws_msg_tx, ws_msg_rx) = mpsc::unbounded_channel::<String>();
     let (broadcast_tx, _) =
-        broadcast::channel::<Arc<webrtc_signal_server::ServerMsg>>(128);
+        broadcast::channel::<Arc<starlab_signal_server::ServerMsg>>(128);
     {
         let mut state = app_state.lock().await;
         state.websocket_connected = true;
@@ -108,7 +108,7 @@ where
 /// infallible on the outside (logs on error) — if registration fails the socket
 /// is already broken and the reader will surface that as `WebSocketDisconnected`.
 pub(crate) async fn send_register(sink: &mut WsSink, device_id: &str) {
-    let msg = webrtc_signal_server::ClientMsg::Register {
+    let msg = starlab_signal_server::ClientMsg::Register {
         device_id: device_id.to_string(),
     };
     match serde_json::to_string(&msg) {
@@ -140,7 +140,7 @@ pub(crate) async fn send_reannounce(
         "curve_type": session.curve_type,
         "coordination_type": session.coordination_type,
     });
-    let announce = webrtc_signal_server::ClientMsg::AnnounceSession { session_info };
+    let announce = starlab_signal_server::ClientMsg::AnnounceSession { session_info };
     let json = match serde_json::to_string(&announce) {
         Ok(j) => j,
         Err(e) => {
@@ -198,7 +198,7 @@ pub(crate) fn spawn_sender_task(
 pub(crate) fn spawn_reader_task(
     mut rx: WsRx,
     tx_elm: mpsc::UnboundedSender<Message>,
-    broadcast_tx: broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>,
+    broadcast_tx: broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>,
 ) {
     tokio::spawn(async move {
         while let Some(frame) = rx.next().await {
@@ -233,7 +233,7 @@ pub(crate) fn spawn_reader_task(
 /// we're in. It exits when the broadcast closes (i.e. on reconnect, when the
 /// previous socket's channels are replaced), so handlers never stack.
 pub(crate) fn spawn_relay_handler_task<C>(
-    broadcast_tx: broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>,
+    broadcast_tx: broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>,
     app_state: Arc<Mutex<AppState<C>>>,
     tx_elm: mpsc::UnboundedSender<Message>,
     self_device_id: String,
@@ -249,7 +249,7 @@ pub(crate) fn spawn_relay_handler_task<C>(
         loop {
             match rx.recv().await {
                 Ok(shared) => {
-                    if let webrtc_signal_server::ServerMsg::Relay { from, data } = &*shared {
+                    if let starlab_signal_server::ServerMsg::Relay { from, data } = &*shared {
                         // `our_session_id` is ONLY needed to filter
                         // server-originated `participant_update` frames; peer
                         // WebRTC signals (offer/answer/the high-volume ICE
@@ -289,9 +289,9 @@ pub(crate) fn spawn_relay_handler_task<C>(
 fn dispatch_frame(
     txt: &str,
     tx_elm: &mpsc::UnboundedSender<Message>,
-    broadcast_tx: &broadcast::Sender<Arc<webrtc_signal_server::ServerMsg>>,
+    broadcast_tx: &broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>,
 ) {
-    let parsed = match serde_json::from_str::<webrtc_signal_server::ServerMsg>(txt) {
+    let parsed = match serde_json::from_str::<starlab_signal_server::ServerMsg>(txt) {
         Ok(m) => m,
         Err(e) => {
             warn!("Primary WS: unparseable server message ({}): {}", e, txt);
@@ -305,7 +305,7 @@ fn dispatch_frame(
     let _ = broadcast_tx.send(shared.clone());
 
     match &*shared {
-        webrtc_signal_server::ServerMsg::SessionAvailable { session_info } => {
+        starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
             match super::command::parse_session_info(session_info) {
                 Some(session) => {
                     let _ = tx_elm.send(Message::SessionDiscovered { session });
@@ -316,17 +316,17 @@ fn dispatch_frame(
                 ),
             }
         }
-        webrtc_signal_server::ServerMsg::SessionRemoved { session_id, .. } => {
+        starlab_signal_server::ServerMsg::SessionRemoved { session_id, .. } => {
             let _ = tx_elm.send(Message::RemoveSession {
                 session_id: session_id.clone(),
             });
         }
-        webrtc_signal_server::ServerMsg::Devices { devices } => {
+        starlab_signal_server::ServerMsg::Devices { devices } => {
             let _ = tx_elm.send(Message::UpdateParticipants {
                 participants: devices.clone(),
             });
         }
-        webrtc_signal_server::ServerMsg::Error { error } => {
+        starlab_signal_server::ServerMsg::Error { error } => {
             warn!("Server-side error frame: {}", error);
             let _ = tx_elm.send(Message::Error {
                 message: error.clone(),

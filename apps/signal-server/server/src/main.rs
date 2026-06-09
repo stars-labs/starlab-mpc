@@ -2,7 +2,7 @@ use tokio::net::TcpListener;
 use tokio::signal;
 
 // The accept loop + connection handling now lives in the library
-// (`webrtc_signal_server::run`) so it can be embedded in-process (CLI
+// (`starlab_signal_server::run`) so it can be embedded in-process (CLI
 // `simulate` + end-to-end tests) as well as run as this standalone binary.
 
 #[tokio::main]
@@ -21,7 +21,7 @@ async fn main() {
     };
 
     tokio::select! {
-        _ = webrtc_signal_server::run(listener) => {},
+        _ = starlab_signal_server::run(listener) => {},
         _ = shutdown_signal => {},
     }
 

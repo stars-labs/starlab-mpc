@@ -87,7 +87,7 @@ type in the shared crate). A "room" is the tenant boundary.
 
 **Acceptance / test:** an L1-style test — two rooms on one embedded server; a
 node in room A never receives room B's `session_available`/`Devices`, and a relay
-A→(B's device) is refused. Reuse the `webrtc_signal_server::run` in-process
+A→(B's device) is refused. Reuse the `starlab_signal_server::run` in-process
 harness already used by `simulate`/e2e.
 
 **Effort:** ~half a day; risk low (additive, default-room keeps existing clients

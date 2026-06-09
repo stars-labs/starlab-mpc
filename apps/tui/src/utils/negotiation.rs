@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, mpsc};
 
 use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
-use webrtc_signal_server::ClientMsg as SharedClientMsg;
+use starlab_signal_server::ClientMsg as SharedClientMsg;
 
 pub async fn initiate_offers_for_session<C>(
     participants: Vec<String>,

@@ -1,7 +1,14 @@
 [package]
 name = "starlab-client"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Starlab MPC client engine + terminal UI — FROST DKG, signing, and resharing across EVM, Bitcoin, Solana, and Sui."
+keywords = ["frost", "mpc", "threshold", "wallet", "tui"]
+categories = ["cryptography", "command-line-utilities"]
 
 [lib]
 name = "starlab_client"
@@ -9,7 +16,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Shared FROST library (DKG state machine, keystore encryption, curve helpers).
-starlab-core = { path = "../../packages/@starlab/core" }
+starlab-core = { path = "../../packages/@starlab/core", version = "0.1.0" }
 
 # FROST 2.2 — secp256k1 for Ethereum, ed25519 for Solana, `frost-core`
 # for ciphersuite-generic bounds.
@@ -72,7 +79,7 @@ bech32 = "0.11.0"
 
 clap = { version = "4.5.21", features = ["derive"] }
 chrono = { version = "0.4.39", features = ["serde"] }
-starlab-signal-server = { path = "../signal-server/server" }
+starlab-signal-server = { path = "../signal-server/server", version = "0.1.1" }
 thiserror = "2.0.9"
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 

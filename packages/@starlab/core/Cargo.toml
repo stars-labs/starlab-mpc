@@ -1,9 +1,14 @@
 [package]
 name = "starlab-core"
-version = "0.1.0"
-edition = "2024"
-description = "Core FROST implementation for MPC Wallet"
-license = "Apache-2.0"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Ciphersuite-generic FROST threshold-signature core: DKG, signing, and a unified multi-curve (ed25519 + secp256k1) keystore."
+keywords = ["frost", "mpc", "threshold", "signature", "cryptography"]
+categories = ["cryptography"]
 
 [dependencies]
 # FROST dependencies

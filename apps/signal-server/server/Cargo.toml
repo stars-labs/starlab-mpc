@@ -1,11 +1,12 @@
 [package]
 name = "starlab-signal-server"
 version = "0.1.1"
-edition = "2024"
-authors = ["xiongchenyu <xiongchenyu6@gmail.com>"]
-description = "General WebRTC signal server For Device to Device Communication"
-repository = "https://github.com/hecoinfo/starlab-mpc"
-license = "MIT OR Apache-2.0"
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "WebRTC signaling server for the Starlab MPC mesh — session discovery and device-to-device relay."
 keywords = ["webrtc", "signal", "server", "device-to-device", "communication"]
 categories = [
     "asynchronous",
@@ -21,7 +22,7 @@ tokio-tungstenite = "0.29.0"
 futures-util = "0.3.31"
 
 [lib]
-name = "webrtc_signal_server"
+name = "starlab_signal_server"
 path = "src/lib.rs"
 
 [[bin]]

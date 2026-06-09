@@ -85,7 +85,7 @@ async fn capture_dkg_frames(nodes: usize, threshold: u16) -> Vec<String> {
     // Embedded signal server.
     let server = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
     let s_port = server.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(server));
+    tokio::spawn(starlab_signal_server::run(server));
     // Recording proxy in front of it.
     let (proxy_url, log) = spawn_record_proxy(format!("ws://127.0.0.1:{s_port}")).await;
 
@@ -198,7 +198,7 @@ fn signing_golden_path() -> std::path::PathBuf {
 async fn capture_signing_frames(nodes: usize, threshold: u16) -> Vec<String> {
     let server = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
     let s_port = server.local_addr().unwrap().port();
-    tokio::spawn(webrtc_signal_server::run(server));
+    tokio::spawn(starlab_signal_server::run(server));
     let (proxy_url, log) = spawn_record_proxy(format!("ws://127.0.0.1:{s_port}")).await;
 
     let r = starlab_cli::simulate::run_signing_simulation(

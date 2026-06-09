@@ -537,7 +537,7 @@ fn attach_ice_candidate_handler(
                 let Ok(payload) = serde_json::to_value(wrapper) else {
                     return;
                 };
-                let relay = webrtc_signal_server::ClientMsg::Relay {
+                let relay = starlab_signal_server::ClientMsg::Relay {
                     to: device_id.clone(),
                     data: payload,
                 };
@@ -561,7 +561,7 @@ fn send_answer(from_device: &str, sdp: String, ws_tx: &UnboundedSender<String>) 
         error!("❌ Failed to serialize WebRTC answer wrapper for {}", from_device);
         return;
     };
-    let relay = webrtc_signal_server::ClientMsg::Relay {
+    let relay = starlab_signal_server::ClientMsg::Relay {
         to: from_device.to_string(),
         data: payload,
     };

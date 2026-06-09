@@ -616,7 +616,7 @@ Each phase is independently mergeable and leaves the tree green.
    instrumented build that tees frames. The instrumented build is most reliable but
    diverges from the shipped artifact. Lean toward CDP network capture of WS frames.
 4. **Embedded vs real signal server for L3c.** The extension needs a real WS endpoint.
-   Embedded `webrtc_signal_server::run(listener)` should work if the extension can be
+   Embedded `starlab_signal_server::run(listener)` should work if the extension can be
    pointed at an arbitrary `ws://127.0.0.1:<port>` — confirm the extension's signal URL
    is fully configurable at runtime (not baked at build).
 5. **ed25519 across the whole matrix** vs only the address/verify goldens — full parity

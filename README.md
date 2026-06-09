@@ -1,33 +1,60 @@
-# MPC Wallet
+# Starlab MPC
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![License](https://img.shields.io/badge/License-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=flat&logo=webrtc&logoColor=white)](https://webrtc.org/)
 
-A Multi-Party Computation (MPC) wallet implementing FROST (Flexible Round-Optimized Schnorr Threshold) signatures for secure distributed key management across multiple platforms. Currently early-stage development software — every workspace crate is at `0.1.0`, no tagged release has been cut, and no third-party security audit has been performed (see § Security below). Earlier drafts of this line called the repo "production-ready" — that claim contradicts all the caveats elsewhere in this README (no audit, no benchmarks, no regulatory certification) so it has been removed.
+**Starlab MPC** is a Multi-Party Computation wallet engine built on FROST (Flexible Round-Optimized Schnorr Threshold) signatures — one distributed key, split across devices, that controls accounts on **Ethereum, Bitcoin, Solana, and Sui** at once. No single party ever holds the whole key.
+
+> **Status — early-stage (`0.1.0`).** The engine works end-to-end (real multi-device DKG, signing, and resharing, exercised by a CI real-DKG e2e), but it is **not audited**: no third-party security review, no `criterion` benchmarks, no regulatory certification. Treat it as research-grade until those land (see § Security). Earlier drafts called this "production-ready"; that claim has been removed.
 
 ## Overview
 
-MPC Wallet enables threshold signatures where private keys are split across multiple parties, requiring a minimum threshold to sign transactions. No single party ever has access to the complete private key, providing superior security for digital asset management.
+Starlab MPC enables threshold signatures where the private key is split across multiple parties, requiring a minimum threshold (t-of-n) to sign. The combined key never exists in memory on any single participant. A **single DKG ceremony produces one unified wallet** that derives addresses across every supported chain.
 
 ### Key Features
 
 - **Real FROST DKG**: Distributed key generation via the ZCash Foundation's `frost-core 2.2` crates
 - **Threshold Signatures**: Configurable t-of-n threshold signing
-- **Multi-Platform**: Browser extension, desktop GUI, and terminal UI
-- **Multi-Chain Support**: Ethereum (secp256k1) and Solana (ed25519)
-- **Peer-to-Peer**: Direct WebRTC connections between participants
+- **Unified multi-chain wallet**: One DKG → addresses on **Ethereum & Bitcoin** (secp256k1) plus **Solana & Sui** (ed25519)
+- **Multi-Platform**: Browser extension, desktop GUI, terminal UI, and a headless CLI
+- **Peer-to-Peer**: Direct WebRTC connections between participants (signaling over WSS)
+- **Key resharing**: Recover or rotate the cohort without changing the group public key
 - **Offline Mode**: Air-gapped SD-card operation option
-- **Test Coverage**: `cargo test --workspace` runs ~180 Rust tests (184 `#[test]` / `#[tokio::test]` annotations as of this writing; the number drifts as tests land on `main`); the browser extension has 500+ Bun tests — no third-party security audit of this codebase has been performed (report security issues via GitHub Security Advisories)
+- **Tested**: `cargo test --workspace` (~180 Rust tests incl. a real-DKG e2e) + 500+ Bun tests in the browser extension — **not** a substitute for a security audit
+
+## Use it as a library
+
+The engine is published to **crates.io** and **npm** under the `starlab` / `@starlab` names.
+
+**Rust (crates.io):**
+
+```toml
+[dependencies]
+starlab-core = "0.1"          # ciphersuite-generic FROST: DKG, signing, unified keystore
+starlab-blockchain = "0.1"    # address derivation + tx building (EVM / BTC / Solana / Sui)
+```
+
+```bash
+cargo install starlab-cli     # headless MPC node: DKG, signing, resharing over a WebRTC mesh
+```
+
+Also published: `starlab-core-wasm` (browser bindings), `starlab-client` (engine + TUI), `starlab-signal-server`.
+
+**TypeScript (npm):**
+
+```bash
+npm install @starlab/core-wasm @starlab/types
+```
 
 ## Quick Start
 
-### Installation
+### Installation (from source)
 
 ```bash
 # Clone the repository
-git clone https://github.com/hecoinfo/starlab-mpc.git
+git clone https://github.com/stars-labs/starlab-mpc.git
 cd starlab-mpc
 
 # Install dependencies
@@ -126,17 +153,17 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ```
 starlab-mpc/
 ├── apps/                         # Applications
-│   ├── browser-extension/        # Chrome/Firefox extension (→ stars-labs/starlab-wallet)
-│   ├── cli/                 # Headless CLI (starlab-cli) — conformance oracle
-│   ├── starlab-client/                 # Terminal UI application (Ratatui)
+│   ├── browser-extension/        # Chrome/Firefox extension (also → stars-labs/starlab-wallet)
+│   ├── cli/                      # Headless CLI (starlab-cli) — also the conformance oracle
+│   ├── tui/                      # Terminal UI + engine lib (crate: starlab-client, bin: starlab-tui)
 │   └── signal-server/            # WebRTC signaling (server + Cloudflare Worker)
 │   # Desktop GUI moved to stars-labs/starlab-desktop (Iced)
 │
-├── packages/@starlab/         # Shared packages
-│   ├── frost-core/               # FROST protocol implementation (Rust)
-│   ├── core-wasm/                # WebAssembly bindings
-│   ├── blockchain/               # Multi-chain support (Ethereum/Solana/Bitcoin)
-│   └── types/                    # TypeScript type definitions
+├── packages/@starlab/            # Shared packages
+│   ├── core/                     # FROST protocol core (crate: starlab-core)
+│   ├── core-wasm/                # WebAssembly bindings (crate: starlab-core-wasm)
+│   ├── blockchain/               # Multi-chain support (EVM / Bitcoin / Solana / Sui)
+│   └── types/                    # TypeScript type definitions (@starlab/types)
 │
 ├── docs/                         # Documentation
 └── scripts/                      # Build, test, and operational scripts
@@ -192,7 +219,7 @@ The MPC Wallet is designed around threshold cryptography primitives:
   crates (`frost-core 2.2`, `frost-ed25519 2.2`, `frost-secp256k1 2.2`)
 
 No third-party security audit has been performed on this codebase as a
-whole. Report vulnerabilities via [GitHub Security Advisories](https://github.com/hecoinfo/starlab-mpc/security/advisories/new).
+whole. Report vulnerabilities via [GitHub Security Advisories](https://github.com/stars-labs/starlab-mpc/security/advisories/new).
 
 ## Performance
 
@@ -231,22 +258,29 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 
 ### Community
 
-- [GitHub Issues](https://github.com/hecoinfo/starlab-mpc/issues) - Report bugs
-- [GitHub Discussions](https://github.com/hecoinfo/starlab-mpc/discussions) - Ask questions
+- [GitHub Issues](https://github.com/stars-labs/starlab-mpc/issues) - Report bugs
+- [GitHub Discussions](https://github.com/stars-labs/starlab-mpc/discussions) - Ask questions
 - [Documentation](docs/) - Full documentation in this repo
 
 ## Roadmap
 
-### Shipped (through early 2025)
+### Shipped
+- [x] **Unified multi-chain wallet** — one DKG ceremony → one wallet
+  with addresses on Ethereum, Bitcoin, Solana, and Sui
+- [x] **Key resharing** — recover/rotate the cohort over the mesh while
+  preserving the group public key (driven by `starlab-cli`)
 - [x] Browser extension (Chrome / Firefox) — FROST DKG + threshold
   signing + EIP-1193 / EIP-6963 dApp integration
 - [x] Terminal UI (`apps/tui/`) — keyboard-driven FROST
   frontend with online (WebRTC mesh) + offline (SD-card) modes
+- [x] Headless CLI (`starlab-cli`) — scriptable DKG / signing /
+  resharing; doubles as the conformance oracle in CI
 - [x] Desktop application — Iced GUI reusing this repo's
   `starlab-client::core::*Manager` types; now in its own repo
   **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)**
 - [x] Cloudflare Worker signal server (Rust-over-WASM) and
   standalone `cargo`-built signal server
+- [x] Published to crates.io (`starlab-*`) and npm (`@starlab/*`)
 
 ### Open work (no committed timelines)
 
@@ -259,29 +293,28 @@ scheduled delivery date; contributions welcome via PR. See
   signing path with the TUI (its last feature-parity gap).
 - [ ] `criterion` benches for DKG / signing / keystore so future
   perf-optimization claims have reproducible numbers.
-- [ ] FROST share refresh (proactive share rotation preserving the
-  same group key). FROST supports it in principle; this crate
-  doesn't wire it up yet.
 - [ ] Third-party security audit of the full stack. The upstream
   ZCash Foundation `frost-*` crates are audited; this workspace's
   integration layer + TUI + the GUI frontends are not.
 - [ ] Hardware-wallet co-signer integration (Ledger / Trezor).
-- [ ] Additional blockchains beyond Ethereum (secp256k1) + Solana
-  (ed25519) — each new chain needs per-curve address derivation
+- [ ] Additional blockchains beyond the current four (Ethereum, Bitcoin,
+  Solana, Sui) — each new chain needs per-curve address derivation
   + encoding work (see `packages/@starlab/blockchain/`).
 - [ ] Structured audit-log emission (the absent feature flagged
   across the security docs).
 
 ## License
 
-The workspace-level `Cargo.toml` declares `license = "Apache-2.0"`.
-Individual crates under `packages/` and `apps/signal-server/` set their
-own — see each crate's `Cargo.toml` for specifics
-(`packages/@starlab/blockchain` is MIT; signal-server is dual
-MIT-or-Apache-2.0; everything else Apache-2.0). A repo-root `LICENSE`
-file hasn't been committed yet — contribute the Apache-2.0 text
-(or whichever single license you pick for the project) to settle
-the ambiguity.
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option. Every workspace crate declares `license = "MIT OR Apache-2.0"`.
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
 
 ## Acknowledgments
 
@@ -296,15 +329,15 @@ If you use this software in your research, please cite:
 
 ```bibtex
 @software{starlab_mpc,
-  title = {MPC Wallet: Multi-Party Computation Wallet},
-  author = {MPC Wallet Team},
-  year = {2025},
-  url = {https://github.com/hecoinfo/starlab-mpc}
+  title = {Starlab MPC: A FROST Threshold-Signature Wallet Engine},
+  author = {Stars Labs},
+  year = {2026},
+  url = {https://github.com/stars-labs/starlab-mpc}
 }
 ```
 
 ---
 
-**Built with ❤️ by the MPC Wallet Team**
+**Built with ❤️ by Stars Labs**
 
 *Secure. Distributed. Open Source.*

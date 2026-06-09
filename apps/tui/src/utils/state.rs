@@ -13,7 +13,7 @@ use std::{
                                                // Remove Arc import from here if only used for device_connections
 };
 
-use webrtc_signal_server::ClientMsg as SharedClientMsg;
+use starlab_signal_server::ClientMsg as SharedClientMsg;
 // Add this import
 
 use crate::protocal::signal::SessionResponse;
