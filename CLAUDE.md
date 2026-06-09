@@ -42,7 +42,7 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 ### Applications
 - **`apps/tui-node/`** — Terminal UI (Ratatui) with Elm architecture (`src/elm/` for Model/Update/View). Exposes `lib.rs` so native-node can reuse business logic. Supports online (WebRTC mesh) and offline (SD card air-gap) DKG modes.
-- **`apps/native-node/`** — Desktop GUI (Slint 1.x) reusing `tui-node::core::{*Manager, CoreState}` for business logic. Native UI events are bridged through the `UICallback` trait (impl: `NativeUICallback` in `src/ui_callback.rs`) which posts closures onto the Slint event loop via `Weak<MainWindow>` + `slint::invoke_from_event_loop` (closures must be `Send`; `MainWindow` is `!Send`). File dialogs use the `rfd` crate. See `apps/native-node/README.md` for feature-parity status.
+- **`apps/native-node/`** (crate `frost-mpc-native`) — Desktop GUI (**Iced**, MIT; migrated from Slint for licensing) reusing `tui-node::core::{*Manager, CoreState}` for business logic. Native UI events are bridged through the `UICallback` trait (impl: `NativeUICallback` in `src/ui_callback.rs`) which pushes `UiEvent`s into a `tokio::sync::mpsc` channel that an Iced `Subscription` drains into `Message`s. File dialogs use the `rfd` crate. See `apps/native-node/README.md` for feature-parity status.
 - **`apps/browser-extension/`** — Chrome/Firefox extension (WXT + Svelte 5). Manifest V3 with background worker, popup, offscreen document (WebRTC + WASM), content script.
 - **`apps/signal-server/`** — WebRTC signaling: standard WebSocket server + Cloudflare Worker variant
 
@@ -58,7 +58,7 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 **UIProvider trait** (`apps/tui-node/src/elm/provider.rs`): Abstracts the TUI's Elm app loop over a UI backend. Separate from `UICallback` (see below).
 
-**UICallback trait** (`apps/tui-node/src/core/mod.rs`): Event-push surface for the non-Elm managers in `tui-node::core`. Both TUI and native-node consume `core::*Manager` types — TUI goes through the Elm loop, native-node implements `UICallback` directly (`NativeUICallback` in `apps/native-node/src/ui_callback.rs`) to push state onto Slint globals.
+**UICallback trait** (`apps/tui-node/src/core/mod.rs`): Event-push surface for the non-Elm managers in `tui-node::core`. Both TUI and native-node consume `core::*Manager` types — TUI goes through the Elm loop, native-node implements `UICallback` directly (`NativeUICallback` in `apps/native-node/src/ui_callback.rs`) to push `UiEvent`s into an mpsc channel that the Iced `Subscription` turns into `Message`s.
 
 **Elm architecture** in TUI: State is `Model`, transitions via `Update`, rendering via `View`. Event-driven through `InternalCommand<C>` enum.
 
@@ -138,35 +138,25 @@ DKG is analogous: `generate_round1()` returns our round-1 package as hex; `add_r
 
 Signal-server live smoke tests need 3 browser instances — no bun harness exercises full FROST+WebRTC pairing. Unit coverage via `tests/entrypoints/background/` (regression suites: `dkgAutoTrigger`, `signingAutoTrigger`, `signingNotification`, `dappSignatureApproval`, `signingDecline`).
 
-## Native desktop node: Slint + tui-node::core
+## Native desktop node: Iced + tui-node::core
 
-`apps/native-node/` is a third MPC client that reuses `tui-node::core::{WalletManager, SessionManager, DkgManager, OfflineManager, ConnectionManager, SigningManager, CoreState}` as its business-logic backend. Architecture:
+`apps/native-node/` (crate `frost-mpc-native`) is a third MPC client that reuses `tui-node::core::{WalletManager, SessionManager, DkgManager, OfflineManager, ConnectionManager, SigningManager, CoreState}` as its business-logic backend. Its GUI is **Iced** (MIT) — migrated from Slint, whose licensing is unsuitable for a proprietary product. Architecture:
 
 ```
-ui/*.slint (Slint 1.x)  <---callbacks--->  src/main.rs  <--->  src/core_adapter.rs  --->  tui_node::core::*Manager
-     |                                                              |
-     | AppState globals                                              | UICallback events
-     |                                                               ↓
-     |<-------------------- NativeUICallback (src/ui_callback.rs)   |
-                          dispatches via Weak<MainWindow> +
-                          slint::invoke_from_event_loop
-                          (closures must be Send;
-                           MainWindow is !Send → upgrade INSIDE closure)
+view(&State)->Element<Message>   <--->  update(&mut State, Message)  <--->  src/core_adapter.rs  --->  tui_node::core::*Manager
+     ▲ widgets emit Message                    ▲                                   |
+     |                                          | Message::Ui(UiEvent)              | UICallback events
+     |          Subscription::run(ui_bridge) ───┘                                   ↓
+     |<──────── reads the mpsc receiver ◄──── NativeUICallback (src/ui_callback.rs) sends UiEvent
 ```
 
-**Send bridge pattern**. `MainWindow` contains `Cell<u32>` / `UnsafeCell<...>` and is therefore `!Send`. `invoke_from_event_loop` requires `Send + 'static` closures, so `NativeUICallback` holds `Weak<MainWindow>` (which IS Send), clones it into each callback closure, and upgrades inside. Pre-compute all values (e.g. `Vec<SlintWalletInfo>`) before the closure so only owned data crosses the Send boundary.
+**Async→UI bridge** (replaces Slint's `Weak<MainWindow>` + `invoke_from_event_loop`): `NativeUICallback` holds a `tokio::sync::mpsc::UnboundedSender<UiEvent>` and pushes one `UiEvent` per `UICallback` method. `State::new` creates the channel, hands the sender to `CoreAdapter`, and stashes the receiver in a `static Mutex<Option<Receiver>>`. `State::subscription` → `Subscription::run(ui_bridge)`, a plain `fn` worker that takes the receiver out of the static slot on first poll and folds it into a `Stream<Message::Ui>` via `futures::stream::unfold` (the static indirection is because `Subscription::run` identifies workers by type and can't capture). `Send`-clean by construction.
 
-**File dialogs**: `rfd` crate. Always spawn via `tokio::task::spawn_blocking(|| rfd::FileDialog::new()...)` — the dialog thread blocks; running it on the main tokio executor freezes the Slint event loop.
+**File dialogs**: `rfd` crate, spawned via `tokio::task::spawn_blocking` in `core_adapter.rs` (kept from before). Iced `Task` composes with rfd's async API if you prefer.
 
-**Slint 1.x gotchas** (all fixed during the rehabilitation pass, documented so future Slint bumps have a cheat-sheet):
-- `vertical-alignment` is only valid on `Text` — remove from `Rectangle` / `VerticalBox` / `HorizontalBox`.
-- `linear-gradient(...)` requires `@` prefix; stops take explicit percentages.
-- Strings have no `.length` / `.substring` / `.slice` — compute on the Rust side and push through struct properties.
-- `Rectangle` doesn't accept `padding` or `margin-*` — move to an inner layout element.
-- `Image.rotation-angle` removed (renamed `rotation`); `animate { loop: true }` unsupported.
-- `GridBox { Row { ... } }` doesn't accept `if`/`for` children — use `HorizontalBox`.
+**SD-card convention** (cross-client interop): export/import dirs are `frost_mpc_export` / `frost_mpc_import` on the SD root — these MUST match `tui-node`'s `offline_manager.rs` (a mismatch breaks native↔TUI air-gap).
 
-**Feature-parity status** (see `apps/native-node/README.md` for the matrix): DKG + sessions + WebRTC + keystore import/export with password + signing UX (approve/reject modal) + SD-card export/import/clear all wired end-to-end. The single remaining gap: `SigningManager::approve` + SD-card artefact emission both delegate to stubs because `tui_node::protocal::{signing, dkg}` operates on `AppState<C>` via the Elm `Message` loop. Extracting a ciphersuite-generic backend shared between the Elm loop and `core::*Manager` is the one-PR remaining for full parity — UI surface + CoreAdapter wiring are all in place.
+**Feature-parity status** (see `apps/native-node/README.md`): DKG + sessions + WebRTC + keystore import/export + signing approve/reject modal + SD-card export/import/clear all wired. Remaining gaps: `SigningManager::approve` + SD-card artefacts are stubs (need `tui_node::protocal::{signing,dkg}`, which operate on `AppState<C>` via the Elm loop — extract a ciphersuite-generic backend shared between the Elm loop and `core::*Manager`); plus two `// TODO(iced)` screens (per-participant DKG round table, pending-SD-ops list) that currently drop their event data.
 
 ## Dependencies
 
@@ -182,7 +172,7 @@ package.json            # Bun monorepo (browser extension)
 flake.nix               # Nix dev environment (Linux + macOS)
 apps/
   tui-node/             # Rust binary + library
-  native-node/          # Rust binary (Slint GUI)
+  native-node/          # Rust binary (Iced GUI; crate frost-mpc-native)
   signal-server/        # server/ + cloudflare-worker/
   browser-extension/    # WXT + Svelte + TailwindCSS
 packages/@frost-mpc/

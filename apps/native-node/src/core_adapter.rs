@@ -212,7 +212,7 @@ impl CoreAdapter {
             data_type,
             chrono::Utc::now().timestamp()
         );
-        let target = sd_dir.join("mpc_wallet_export").join(&filename);
+        let target = sd_dir.join("frost_mpc_export").join(&filename);
 
         if let Some(parent) = target.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
@@ -262,12 +262,12 @@ impl CoreAdapter {
         };
 
         let sd_dir = handle.to_path_buf();
-        let import_subdir = sd_dir.join("mpc_wallet_import");
+        let import_subdir = sd_dir.join("frost_mpc_import");
         if !import_subdir.exists() {
             self.ui_callback
                 .show_message(
                     format!(
-                        "No mpc_wallet_import/ directory under {}",
+                        "No frost_mpc_import/ directory under {}",
                         sd_dir.display()
                     ),
                     true,
@@ -319,7 +319,7 @@ impl CoreAdapter {
         let confirmed = self
             .ui_callback
             .request_confirmation(format!(
-                "Clear mpc_wallet_* directories under {}?",
+                "Clear frost_mpc_* directories under {}?",
                 sd_dir.display()
             ))
             .await;
@@ -327,7 +327,7 @@ impl CoreAdapter {
             return Ok(());
         }
 
-        for sub in ["mpc_wallet_export", "mpc_wallet_import"] {
+        for sub in ["frost_mpc_export", "frost_mpc_import"] {
             let p = sd_dir.join(sub);
             if p.exists() {
                 tokio::fs::remove_dir_all(&p).await.map_err(|e| e.to_string())?;
@@ -424,7 +424,7 @@ impl CoreAdapter {
             rfd::FileDialog::new()
                 .add_filter("MPC keystore", &["dat"])
                 .set_title("Export MPC keystore")
-                .set_file_name("mpc-wallet.dat")
+                .set_file_name("frost-mpc.dat")
                 .save_file()
         })
         .await

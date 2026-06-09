@@ -26,7 +26,7 @@ jobs:
       - name: System deps
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
 
-      # native-node is intentionally excluded here — it needs Slint/graphics
+      # native-node is intentionally excluded here — it needs Iced/graphics
       # system libraries that aren't worth provisioning for CI. The headless
       # stack (cli, tui-node, signal-server) covers the real DKG/signing path.
       - name: Unit tests

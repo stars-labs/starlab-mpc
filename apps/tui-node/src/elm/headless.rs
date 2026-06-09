@@ -3,7 +3,7 @@
 //! Drives the exact same Elm core (`update()` + `Command::execute()` +
 //! the real WebSocket/WebRTC/DKG protocol layers) as the terminal
 //! [`ElmApp`](crate::elm::ElmApp), but WITHOUT a terminal. Front-ends that
-//! render their own UI (e.g. the native Slint app) use this to get real
+//! render their own UI (e.g. the native Iced app) use this to get real
 //! DKG, signing and keystore persistence while keeping their own widgets.
 //!
 //! The loop is identical in spirit to `ElmApp::run`'s message arm:
@@ -179,7 +179,7 @@ where
 
 /// Convenience constructor for secp256k1 (Ethereum/EVM) front-ends that
 /// don't want to name the ciphersuite or depend on `frost-secp256k1`
-/// themselves (e.g. the native Slint app). Builds an `AppState`, spawns
+/// themselves (e.g. the native Iced app). Builds an `AppState`, spawns
 /// the [`HeadlessRunner`] on the current Tokio runtime, and returns the
 /// `Message` sender for injecting UI actions. Must be called from within
 /// a Tokio runtime context.

@@ -19,7 +19,7 @@ pub enum Message {
     ForceRemount,
     
     // Headless control messages — used by non-TUI front-ends (e.g. the
-    // native Slint app) that drive the same Elm core without the
+    // native Iced app) that drive the same Elm core without the
     // multi-screen keyboard flow. Each one seeds the model state the
     // interactive screens would have set, then hands off to the exact
     // same downstream path (SubmitPassword → creator/joiner DKG). The

@@ -133,7 +133,7 @@ cargo run -p frost-mpc-native
 frost-mpc/
 ├── apps/                         # Applications
 │   ├── browser-extension/        # Chrome/Firefox extension
-│   ├── native-node/              # Desktop GUI application (Slint)
+│   ├── native-node/              # Desktop GUI application (Iced)
 │   ├── tui-node/                 # Terminal UI application (Ratatui)
 │   └── signal-server/            # WebRTC signaling (server + Cloudflare Worker)
 │
@@ -156,7 +156,7 @@ frost-mpc/
 - **WebAssembly**: Bridge between Rust and JavaScript
 - **WebRTC**: Peer-to-peer communication
 - **Svelte**: Browser extension UI
-- **Slint**: Native desktop UI framework
+- **Iced**: Native desktop UI framework (MIT)
 - **Ratatui**: Terminal UI framework
 
 ### Cryptography
@@ -247,7 +247,7 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
   signing + EIP-1193 / EIP-6963 dApp integration
 - [x] Terminal UI (`apps/tui-node/`) — keyboard-driven FROST
   frontend with online (WebRTC mesh) + offline (SD-card) modes
-- [x] Desktop application (`apps/native-node/`) — Slint GUI reusing
+- [x] Desktop application (`apps/native-node/`) — Iced GUI reusing
   `tui-node::core::*Manager` types; feature-parity with TUI except
   for the `SigningManager::approve` stub (see
   [`apps/native-node/README.md`](apps/native-node/README.md) for
