@@ -13,8 +13,8 @@
 import type {
     PopupToBackgroundMessage,
     OffscreenToBackgroundMessage
-} from "@frost-mpc/types/messages";
-import { MESSAGE_TYPES, isRpcMessage, isAccountManagement, isNetworkManagement, isUIRequest } from "@frost-mpc/types/messages";
+} from "@starlab/types/messages";
+import { MESSAGE_TYPES, isRpcMessage, isAccountManagement, isNetworkManagement, isUIRequest } from "@starlab/types/messages";
 import { StateManager } from "./stateManager";
 import { OffscreenManager } from "./offscreenManager";
 import { WebSocketManager } from "./webSocketManager";
@@ -23,7 +23,7 @@ import { checkAndRestoreKeystores } from "./index";
 import { RpcHandler, UIRequestHandler } from "./rpcHandler";
 import AccountService from "../../services/accountService";
 import { KeystoreManager } from "../../services/keystoreManager";
-import { DkgState } from "@frost-mpc/types/dkg";
+import { DkgState } from "@starlab/types/dkg";
 
 /**
  * Handles messages from popup interface

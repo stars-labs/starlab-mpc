@@ -18,9 +18,9 @@ This document does two things:
 
 ## 1. What the three clients share
 
-| | Browser extension | CLI (`frost-mpc-cli`) | TUI / native |
+| | Browser extension | CLI (`starlab-cli`) | TUI / native |
 |---|---|---|---|
-| FROST crypto | `@frost-mpc/core-wasm` (Rust→WASM) | `tui_node` core (Rust) | `tui_node` core |
+| FROST crypto | `@starlab/core-wasm` (Rust→WASM) | `starlab_client` core (Rust) | `starlab_client` core |
 | Same FROST crates? | **yes** (`frost_secp256k1`/`frost_ed25519` via frost-core) | yes | yes |
 | Wire protocol | hand-written TS, modeled on TUI | Rust core | Rust core |
 | Transport | WebSocket (signal) + WebRTC (mesh) | same | same |
@@ -40,7 +40,7 @@ wire shapes, session orchestration).
   explicitly modeled on the core's `parse_session_info` (flat lowercase
   `session_type`, synthesises `accepted_devices`).
 - The CLI's wire contract is pinned by goldens
-  (`apps/cli-node/tests/fixtures/dkg_wire_protocol.golden.txt`,
+  (`apps/cli/tests/fixtures/dkg_wire_protocol.golden.txt`,
   `signing_wire_protocol.golden.txt`). The extension's emitted shape matches
   those fields. When the live ext↔CLI harness lands, diff the extension's frames
   against those goldens to keep them aligned.
@@ -49,14 +49,14 @@ wire shapes, session orchestration).
 - The extension's WASM eth-address derivation
   (`frost-core::Secp256k1Curve::get_eth_address`) decompresses the key correctly
   (`k256 from_sec1_bytes → to_encoded_point(false) → keccak(X‖Y)[12..]`). The
-  ETH-address bug that was fixed recently was in `tui_node::blockchain_config`
+  ETH-address bug that was fixed recently was in `starlab_client::blockchain_config`
   (the CLI/TUI bridge), **not** in the extension.
 - Same FROST crates ⇒ DKG/signing artifacts are cross-compatible.
 
 ### 2.3 🛑 FROST identifier derivation — **MISMATCH (blocker)**
 This is the one that will break a live ext↔CLI ceremony.
 
-- **Core** (`apps/tui-node/src/protocal/dkg.rs:44`): `canonical_identifier` SORTS
+- **Core** (`apps/tui/src/protocal/dkg.rs:44`): `canonical_identifier` SORTS
   the participant device-ids, then uses `position + 1`:
   ```rust
   let mut sorted = participants.iter().collect::<Vec<_>>();
@@ -131,9 +131,9 @@ Target: a **2-of-3** wallet shared by `cli-a`, `cli-b`, and the extension
 ```bash
 ROOM=$(uuidgen)   # the ONE shared room for all three; the extension uses the same
 # terminal 1
-frost-mpc-cli serve --device-id cli-a --keystore /tmp/ks-a --signal-server wss://panda.qzz.io --room "$ROOM"
+starlab-cli serve --device-id cli-a --keystore /tmp/ks-a --signal-server wss://panda.qzz.io --room "$ROOM"
 # terminal 2
-frost-mpc-cli serve --device-id cli-b --keystore /tmp/ks-b --signal-server wss://panda.qzz.io --room "$ROOM"
+starlab-cli serve --device-id cli-b --keystore /tmp/ks-b --signal-server wss://panda.qzz.io --room "$ROOM"
 ```
 For the extension, set its signal server to `wss://panda.qzz.io/?room=<the same ROOM>`
 (or set the room in its settings).
@@ -215,7 +215,7 @@ Same as §3, but the three nodes are on three machines.
 ### 4.2 Local signal server (no internet / most reliable)
 On one machine:
 ```bash
-MPC_SIGNAL_BIND=0.0.0.0:9000 frost-mpc-cli ...   # or: cargo run -p webrtc-signal-server
+MPC_SIGNAL_BIND=0.0.0.0:9000 starlab-cli ...   # or: cargo run -p starlab-signal-server
 ```
 Point every node at `ws://<that-machine-LAN-ip>:9000`. Removes the internet
 dependency; ideal for a controlled demo room. (See the fallback ladder in
@@ -252,12 +252,12 @@ sessions exist) and is noisy.
 ### 5.2 Recommended tenant isolation (pick per need)
 
 **Option 1 — one signal-server instance per tenant (recommended, zero code).**
-Run a separate `webrtc-signal-server` (different port/host) per tenant; give each
+Run a separate `starlab-signal-server` (different port/host) per tenant; give each
 tenant its own URL. Full isolation: no cross-tenant visibility, device-id
 collisions only matter within a tenant. Cheapest correct answer today.
 ```bash
-MPC_SIGNAL_BIND=0.0.0.0:9001 webrtc-signal-server   # tenant A
-MPC_SIGNAL_BIND=0.0.0.0:9002 webrtc-signal-server   # tenant B
+MPC_SIGNAL_BIND=0.0.0.0:9001 starlab-signal-server   # tenant A
+MPC_SIGNAL_BIND=0.0.0.0:9002 starlab-signal-server   # tenant B
 ```
 
 **Option 2 — namespacing on a shared server (small code change).** Add a

@@ -23,7 +23,7 @@ NAMES=(alice bob carol dave erin frank)
 # Nuclear fallback: no UI, no network — prove the whole ceremony in ~5s.
 if [ "${NUCLEAR:-0}" = "1" ]; then
   echo "NUCLEAR fallback: full ${2:-2}-of-${N} DKG + signing, self-contained:"
-  cargo run --release --quiet -p frost-mpc-cli -- \
+  cargo run --release --quiet -p starlab-cli -- \
     simulate --nodes "$N" --threshold "${2:-2}" --sign "live investor demo"
   exit $?
 fi
@@ -31,14 +31,14 @@ fi
 command -v tmux >/dev/null || { echo "tmux not found — use NUCLEAR=1 $0"; exit 1; }
 
 echo "Building release binaries (tui + signal server)…"
-cargo build --release --quiet -p tui-node -p webrtc-signal-server
+cargo build --release --quiet -p starlab-client -p starlab-signal-server
 
 SESSION=mpcdemo
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
 # Pane 0: the local signal server.
 tmux new-session -d -s "$SESSION" -n demo \
-  "MPC_SIGNAL_BIND=127.0.0.1:${PORT} cargo run --release --quiet -p webrtc-signal-server; read"
+  "MPC_SIGNAL_BIND=127.0.0.1:${PORT} cargo run --release --quiet -p starlab-signal-server; read"
 sleep 2  # let it bind before nodes dial
 
 # One pane per node, each with a UNIQUE --device-id (duplicate ids collide on
@@ -46,7 +46,7 @@ sleep 2  # let it bind before nodes dial
 for i in $(seq 0 $((N-1))); do
   dev="${NAMES[$i]:-node$i}"
   tmux split-window -t "$SESSION" \
-    "cargo run --release --quiet --bin frost-mpc-tui -p tui-node -- --device-id ${dev} --signal-server ${URL}; read"
+    "cargo run --release --quiet --bin starlab-tui -p starlab-client -- --device-id ${dev} --signal-server ${URL}; read"
   tmux select-layout -t "$SESSION" tiled
 done
 

@@ -22,13 +22,13 @@ The only coverage exclusion option available is:
 
 ## Files Still Included in Coverage
 Despite configuration attempts, these files cannot be excluded with current Bun capabilities:
-- `packages/@frost-mpc/core-wasm/pkg/frost_mpc_core_wasm.js` — auto-generated `wasm-pack` bindings (linked into the extension at build time by WXT)
+- `packages/@starlab/core-wasm/pkg/starlab_core_wasm.js` — auto-generated `wasm-pack` bindings (linked into the extension at build time by WXT)
 - `apps/browser-extension/tests/entrypoints/offscreen/test-utils.ts` — Bun test helpers
 
 Earlier drafts of this section referenced these files at
-`pkg/frost_mpc.js` and `src/entrypoints/offscreen/test-utils.ts`
+`pkg/starlab_mpc.js` and `src/entrypoints/offscreen/test-utils.ts`
 respectively — both paths moved during the monorepo migration
-(WASM bindings live in the shared `@frost-mpc/core-wasm` package;
+(WASM bindings live in the shared `@starlab/core-wasm` package;
 test utilities live under the extension's `tests/` tree, not
 `src/`). Historical coverage percentages (45.93% func / 49.02% line
 for the WASM bindings; 69.23% func / 70.59% line for the test
@@ -69,11 +69,11 @@ mv pkg/ generated/
 Filter the generated `coverage/lcov.info` file:
 ```bash
 # Remove unwanted files from LCOV report.
-# Real wasm-pack output filename is frost_mpc_core_wasm.js under
-# packages/@frost-mpc/core-wasm/pkg/ — earlier drafts of this
-# command used the pre-monorepo 'frost_mpc.js' name which no
+# Real wasm-pack output filename is starlab_core_wasm.js under
+# packages/@starlab/core-wasm/pkg/ — earlier drafts of this
+# command used the pre-monorepo 'starlab_mpc.js' name which no
 # longer exists.
-grep -v "SF:.*pkg/frost_mpc_core_wasm.js" coverage/lcov.info > coverage/filtered.info
+grep -v "SF:.*pkg/starlab_core_wasm.js" coverage/lcov.info > coverage/filtered.info
 grep -v "SF:.*test-utils.ts" coverage/filtered.info > coverage/final.info
 ```
 

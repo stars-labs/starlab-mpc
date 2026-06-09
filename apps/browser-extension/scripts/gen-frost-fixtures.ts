@@ -5,9 +5,9 @@
 // Re-run with: `bun run scripts/gen-frost-fixtures.ts` from the
 // browser-extension directory. The output is stable across runs
 // for a given WASM build — regenerate whenever the on-disk
-// keystore schema in packages/@frost-mpc/frost-core changes.
+// keystore schema in packages/@starlab/core changes.
 
-import wasmInit, { FrostDkgSecp256k1, FrostDkgEd25519 } from '@frost-mpc/core-wasm';
+import wasmInit, { FrostDkgSecp256k1, FrostDkgEd25519 } from '@starlab/core-wasm';
 import { writeFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';

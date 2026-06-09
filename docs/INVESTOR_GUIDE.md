@@ -53,13 +53,13 @@ first), **run the live demo**, and a **fallback ladder** whose bottom rung canno
 
 ```bash
 # once per device
-git clone <repo> && cd frost-mpc
+git clone <repo> && cd starlab-mpc
 nix develop                      # or have the toolchain installed
 
 # Track A (raw CLI): build the CLI
-cargo build --release -p frost-mpc-cli      # binary: ./target/release/frost-mpc-cli
+cargo build --release -p starlab-cli      # binary: ./target/release/starlab-cli
 # Track B (TUI): build the TUI
-cargo build --release -p tui-node
+cargo build --release -p starlab-client
 ```
 
 - **Internet access** for the live path (`wss://panda.qzz.io`). No internet? See §6 rung 1.
@@ -100,7 +100,7 @@ fall back (§6). This is the single most important step — it's the answer to "
 you make sure there's no 出事, in private, first.
 
 > Why it's trustworthy: `preflight` runs `scripts/demo/ceremony.sh`, which launches a real
-> N-node FROST ceremony as **separate `frost-mpc-cli` processes** — each its own process
+> N-node FROST ceremony as **separate `starlab-cli` processes** — each its own process
 > with its own on-disk keystore, talking over real WebRTC through a real (local) signal
 > server. Nothing is faked in a single address space; it's the exact code path the real
 > clients use.
@@ -123,7 +123,7 @@ not ours — confirms the signature.
 > | "It's pre-recorded / canned." | The investor **picks the message** on the spot. The signature changes; it still verifies. |
 > | "The key was generated once and hard-coded." | A **fresh wallet is created live** via DKG; the key differs every run and depends on all three machines' randomness. |
 
-> **Protocol transport.** Each node runs `frost-mpc-cli serve`, which speaks
+> **Protocol transport.** Each node runs `starlab-cli serve`, which speaks
 > **newline-delimited JSON**: you type a command object on stdin, it prints event objects on
 > stdout. Investors literally see the wire protocol — nothing hidden.
 
@@ -134,17 +134,17 @@ visible.
 
 ```bash
 # alice
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id alice --keystore ~/.frost_alice \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 
 # bob
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id bob --keystore ~/.frost_bob \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 
 # carol
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id carol --keystore ~/.frost_carol \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 ```
@@ -273,7 +273,7 @@ that same 32-byte key — a valid Solana account. Paste it into
 The strongest version: the MPC wallet signs an actual Solana transfer and it lands on-chain,
 visible in a public block explorer. Division of labour (this is what makes it credible): the
 **standard `@solana/web3.js` library** builds and submits the transaction; our **raw
-`frost-mpc-cli` only signs**. Helper: `scripts/demo/solana_onchain.mjs`.
+`starlab-cli` only signs**. Helper: `scripts/demo/solana_onchain.mjs`.
 
 > **Always derive the address from `group_public_key`** (`solana_onchain.mjs address
 > <groupKeyHex>`), not from the `dkg_complete` event's `address` field — that field is
@@ -332,7 +332,7 @@ Open the printed `https://explorer.solana.com/tx/…?cluster=devnet` link on the
 Each participant launches the terminal UI on their own laptop:
 
 ```bash
-cargo run --release --bin frost-mpc-tui -p tui-node -- \
+cargo run --release --bin starlab-tui -p starlab-client -- \
   --device-id alice \
   --signal-server wss://panda.qzz.io \
   --room "$ROOM"
@@ -375,7 +375,7 @@ quorum keeps signing, and every pre-refresh share becomes dead.
 
 ```bash
 # On the node holding the wallet — rotate all shares (same address, fresh shares):
-frost-mpc-cli reshare --wallet-id <W> --room "$ROOM"
+starlab-cli reshare --wallet-id <W> --room "$ROOM"
 #   → retained signers approve by running `session join` (or `serve --auto-approve`)
 #     on the announced reshare session, exactly like a co-signed transaction.
 
@@ -398,7 +398,7 @@ The refresh preserves the invariants you point at:
 
 > **Proof without a live setup:** `scripts/demo/ceremony.sh … --reshare` runs the whole
 > refresh across real separate processes and asserts the address is preserved; the engine is
-> also verified in the test suite (`cargo test -p frost-mpc-cli`). See
+> also verified in the test suite (`cargo test -p starlab-cli`). See
 > `docs/RECOVERY_AND_RESHARING.md` for the full threat model + talking points.
 
 ---
@@ -411,7 +411,7 @@ bottom one is bulletproof. Rehearse rungs 2–3 so switching is muscle memory.
 | Rung | Trigger | Action |
 |---|---|---|
 | **0. Live** | normal | Multi-device via `wss://panda.qzz.io` + a shared `--room`. |
-| **1. Local / LAN server** | internet flaky / panda unreachable | One laptop: `MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p webrtc-signal-server`. Everyone restarts with `--signal-server ws://<laptop-LAN-ip>:9000` (a local server needs **no** room). Same demo, no internet. |
+| **1. Local / LAN server** | internet flaky / panda unreachable | One laptop: `MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p starlab-signal-server`. Everyone restarts with `--signal-server ws://<laptop-LAN-ip>:9000` (a local server needs **no** room). Same demo, no internet. |
 | **2. One laptop, visual** (TUI) | a participant's device misbehaves | `scripts/demo/demo-local.sh` → local server + 3 TUI nodes in a tmux grid on ONE machine. Still looks multi-party. |
 | **3. Nuclear (cannot fail)** | everything is on fire | `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → spins a local signal server and runs a full DKG + threshold signing across **real separate processes** in seconds, self-contained (no internet). Prints the group key + signature; verify with §3.3. "Here is the cryptography working, right now — three independent processes, no fakery." |
 
@@ -482,7 +482,7 @@ PASSWORD:     demo                             # throwaway, never a real one
 PRE-FLIGHT:   SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh     # all ✅ → go
 
 — Track A (raw CLI) —
-START (each):  frost-mpc-cli serve --curve ed25519 --device-id <name> \
+START (each):  starlab-cli serve --curve ed25519 --device-id <name> \
                  --keystore ~/.frost_<name> --signal-server wss://panda.qzz.io --room "$ROOM"
 alice:         {"cmd":"create_wallet","threshold":2,"total":3,"password":"demo"}
 bob,carol:     {"cmd":"join_session","session_id":"<dkg_…>","password":"demo"}

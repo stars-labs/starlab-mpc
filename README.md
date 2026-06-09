@@ -27,8 +27,8 @@ MPC Wallet enables threshold signatures where private keys are split across mult
 
 ```bash
 # Clone the repository
-git clone https://github.com/hecoinfo/frost-mpc.git
-cd frost-mpc
+git clone https://github.com/hecoinfo/starlab-mpc.git
+cd starlab-mpc
 
 # Install dependencies
 bun install
@@ -57,9 +57,9 @@ bun run dev
 #### Terminal UI
 
 ```bash
-# Run the TUI application (binary name is frost-mpc-tui,
-# lives in the tui-node package)
-cargo run -p tui-node --bin frost-mpc-tui -- --device-id Device-001
+# Run the TUI application (binary name is starlab-tui,
+# lives in the starlab-client package)
+cargo run -p starlab-client --bin starlab-tui -- --device-id Device-001
 ```
 
 Inside the TUI, navigate with arrow keys → `Create New Wallet`
@@ -70,7 +70,7 @@ line-mode REPL.)
 
 #### Desktop Application
 
-The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)**. It consumes this repo's `tui-node` library (engine + `core::*Manager`) as a dependency.
+The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)**. It consumes this repo's `starlab-client` library (engine + `core::*Manager`) as a dependency.
 
 ## Documentation
 
@@ -88,15 +88,15 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 - [UI Components](apps/browser-extension/docs/ui/README.md) - UI implementation and components
 
 #### Terminal UI (TUI)
-- [TUI Documentation](apps/tui-node/docs/README.md) - Terminal UI comprehensive guide
-- [TUI Architecture](apps/tui-node/docs/architecture/ARCHITECTURE.md) - System architecture
-- [DKG Flows](apps/tui-node/docs/architecture/DKG_FLOWS.md) - Distributed key generation flows
-- [User Guide](apps/tui-node/docs/guides/USER_GUIDE.md) - Complete user manual
-- [Protocol Specs](apps/tui-node/docs/protocol/) - WebRTC and keystore session protocols
-- [Offline Mode](apps/tui-node/docs/guides/offline-mode.md) - Air-gapped operation guide
+- [TUI Documentation](apps/tui/docs/README.md) - Terminal UI comprehensive guide
+- [TUI Architecture](apps/tui/docs/architecture/ARCHITECTURE.md) - System architecture
+- [DKG Flows](apps/tui/docs/architecture/DKG_FLOWS.md) - Distributed key generation flows
+- [User Guide](apps/tui/docs/guides/USER_GUIDE.md) - Complete user manual
+- [Protocol Specs](apps/tui/docs/protocol/) - WebRTC and keystore session protocols
+- [Offline Mode](apps/tui/docs/guides/offline-mode.md) - Air-gapped operation guide
 
 #### Native Desktop Application
-- Moved to its own repo: **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)** (Iced GUI consuming this repo's `tui-node`).
+- Moved to its own repo: **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)** (Iced GUI consuming this repo's `starlab-client`).
 
 #### Signal Server
 - [Signal Server Guide](apps/signal-server/docs/README.md) - WebRTC signaling server
@@ -111,7 +111,7 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ### 🚀 Deployment & Operations
 - [Deployment Guide](docs/deployment/README.md) - Production deployment instructions
 - [Cloudflare Deployment](docs/deployment/CLOUDFLARE_DEPLOYMENT.md) - Deploy to Cloudflare Workers
-- [TUI Deployment Guide](apps/tui-node/docs/DEPLOYMENT_GUIDE.md) - Deploy TUI application
+- [TUI Deployment Guide](apps/tui/docs/DEPLOYMENT_GUIDE.md) - Deploy TUI application
 
 ### 🔍 Implementation Details
 - [Implementation Docs](docs/implementation/) - Feature implementation details
@@ -124,15 +124,15 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ## Project Structure
 
 ```
-frost-mpc/
+starlab-mpc/
 ├── apps/                         # Applications
 │   ├── browser-extension/        # Chrome/Firefox extension (→ stars-labs/starlab-wallet)
-│   ├── cli-node/                 # Headless CLI (frost-mpc-cli) — conformance oracle
-│   ├── tui-node/                 # Terminal UI application (Ratatui)
+│   ├── cli/                 # Headless CLI (starlab-cli) — conformance oracle
+│   ├── starlab-client/                 # Terminal UI application (Ratatui)
 │   └── signal-server/            # WebRTC signaling (server + Cloudflare Worker)
 │   # Desktop GUI moved to stars-labs/starlab-desktop (Iced)
 │
-├── packages/@frost-mpc/         # Shared packages
+├── packages/@starlab/         # Shared packages
 │   ├── frost-core/               # FROST protocol implementation (Rust)
 │   ├── core-wasm/                # WebAssembly bindings
 │   ├── blockchain/               # Multi-chain support (Ethereum/Solana/Bitcoin)
@@ -186,13 +186,13 @@ The MPC Wallet is designed around threshold cryptography primitives:
 
 - Root secret entropy is split via FROST DKG — the combined private key
   never exists in memory on any single participant
-- Keystore at rest is PBKDF2 + AES-256-GCM (see `packages/@frost-mpc/frost-core/src/keystore.rs`)
+- Keystore at rest is PBKDF2 + AES-256-GCM (see `packages/@starlab/core/src/keystore.rs`)
 - Peer-to-peer traffic rides WebRTC (DTLS-SRTP); signaling over WSS
 - FROST implementation comes from the [ZCash Foundation](https://github.com/ZcashFoundation/frost)
   crates (`frost-core 2.2`, `frost-ed25519 2.2`, `frost-secp256k1 2.2`)
 
 No third-party security audit has been performed on this codebase as a
-whole. Report vulnerabilities via [GitHub Security Advisories](https://github.com/hecoinfo/frost-mpc/security/advisories/new).
+whole. Report vulnerabilities via [GitHub Security Advisories](https://github.com/hecoinfo/starlab-mpc/security/advisories/new).
 
 ## Performance
 
@@ -231,8 +231,8 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 
 ### Community
 
-- [GitHub Issues](https://github.com/hecoinfo/frost-mpc/issues) - Report bugs
-- [GitHub Discussions](https://github.com/hecoinfo/frost-mpc/discussions) - Ask questions
+- [GitHub Issues](https://github.com/hecoinfo/starlab-mpc/issues) - Report bugs
+- [GitHub Discussions](https://github.com/hecoinfo/starlab-mpc/discussions) - Ask questions
 - [Documentation](docs/) - Full documentation in this repo
 
 ## Roadmap
@@ -240,10 +240,10 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 ### Shipped (through early 2025)
 - [x] Browser extension (Chrome / Firefox) — FROST DKG + threshold
   signing + EIP-1193 / EIP-6963 dApp integration
-- [x] Terminal UI (`apps/tui-node/`) — keyboard-driven FROST
+- [x] Terminal UI (`apps/tui/`) — keyboard-driven FROST
   frontend with online (WebRTC mesh) + offline (SD-card) modes
 - [x] Desktop application — Iced GUI reusing this repo's
-  `tui-node::core::*Manager` types; now in its own repo
+  `starlab-client::core::*Manager` types; now in its own repo
   **[stars-labs/starlab-desktop](https://github.com/stars-labs/starlab-desktop)**
 - [x] Cloudflare Worker signal server (Rust-over-WASM) and
   standalone `cargo`-built signal server
@@ -268,7 +268,7 @@ scheduled delivery date; contributions welcome via PR. See
 - [ ] Hardware-wallet co-signer integration (Ledger / Trezor).
 - [ ] Additional blockchains beyond Ethereum (secp256k1) + Solana
   (ed25519) — each new chain needs per-curve address derivation
-  + encoding work (see `packages/@frost-mpc/blockchain/`).
+  + encoding work (see `packages/@starlab/blockchain/`).
 - [ ] Structured audit-log emission (the absent feature flagged
   across the security docs).
 
@@ -277,7 +277,7 @@ scheduled delivery date; contributions welcome via PR. See
 The workspace-level `Cargo.toml` declares `license = "Apache-2.0"`.
 Individual crates under `packages/` and `apps/signal-server/` set their
 own — see each crate's `Cargo.toml` for specifics
-(`packages/@frost-mpc/blockchain` is MIT; signal-server is dual
+(`packages/@starlab/blockchain` is MIT; signal-server is dual
 MIT-or-Apache-2.0; everything else Apache-2.0). A repo-root `LICENSE`
 file hasn't been committed yet — contribute the Apache-2.0 text
 (or whichever single license you pick for the project) to settle
@@ -295,11 +295,11 @@ the ambiguity.
 If you use this software in your research, please cite:
 
 ```bibtex
-@software{frost_mpc,
+@software{starlab_mpc,
   title = {MPC Wallet: Multi-Party Computation Wallet},
   author = {MPC Wallet Team},
   year = {2025},
-  url = {https://github.com/hecoinfo/frost-mpc}
+  url = {https://github.com/hecoinfo/starlab-mpc}
 }
 ```
 

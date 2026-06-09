@@ -34,7 +34,7 @@ BASE="${SIGNAL:-wss://panda.qzz.io}"
 CURVE="${CURVE:-secp256k1}"
 THRESHOLD="${THRESHOLD:-2}"
 TOTAL="${TOTAL:-3}"
-CLI="./target/release/frost-mpc-cli"
+CLI="./target/release/starlab-cli"
 uuid() { python3 -c 'import uuid;print("rehearsal-"+uuid.uuid4().hex)'; }
 ROOM="${ROOM:-$(uuid)}"
 
@@ -45,7 +45,7 @@ if [ "${#ROOM}" -lt 16 ]; then
 fi
 
 echo "Building CLI (release)…"
-cargo build --release --quiet -p frost-mpc-cli || { echo "build failed"; exit 1; }
+cargo build --release --quiet -p starlab-cli || { echo "build failed"; exit 1; }
 
 bold() { printf '\033[1m%s\033[0m\n' "$1"; }
 echo

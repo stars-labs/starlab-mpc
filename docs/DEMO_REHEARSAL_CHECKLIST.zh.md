@@ -13,8 +13,8 @@ Wi‑Fi 掉线、二进制冷启动）。请配合指南一起使用：[`INVESTO
 
 ## T‑1 天 — 准备工作
 
-- [ ] **每台设备上都已构建二进制。** 在每台笔记本上运行 `cargo build --release -p frost-mpc-cli`。
-      确认 `--curve ed25519` 存在：`frost-mpc-cli serve --help | grep -i curve`。
+- [ ] **每台设备上都已构建二进制。** 在每台笔记本上运行 `cargo build --release -p starlab-cli`。
+      确认 `--curve ed25519` 存在：`starlab-cli serve --help | grep -i curve`。
 - [ ] **运行独立验证的机器上已安装 Node.js**（如果要展示链上交易，还需安装
       `@solana/web3.js`：在仓库根目录运行 `bun install`）。
 - [ ] **确定要讲的曲线方案：** ed25519（Solana）——它是可以独立验证的那一个。
@@ -50,7 +50,7 @@ Wi‑Fi 掉线、二进制冷启动）。请配合指南一起使用：[`INVESTO
        以及/或 `finalize` → 打开浏览器链接并显示已确认的交易。
 8. [ ] **门限戏剧性演示**（指南 §3.5）：alice 尝试独自签名 → 超时 → 加上 bob 重试 → 完成。
 9. [ ] **恢复环节**（指南 §5，可选）：在持有钱包的节点上运行
-       `frost-mpc-cli reshare --wallet-id <W> --room "$ROOM"`，让保留下来的签名方
+       `starlab-cli reshare --wallet-id <W> --room "$ROOM"`，让保留下来的签名方
        `session join` 它 → 相同的 `group_public_key`、钱包继续可签、被移除设备的分片作废。
        即"丢失/轮换一台设备，地址不变"的故事。*（没有现场环境？重新分享引擎已在
        `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --reshare` 一条命令即可自包含证明

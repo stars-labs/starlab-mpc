@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import NetworkService from '../../src/services/networkService';
 import { mainnet, sepolia, polygon, arbitrum } from 'viem/chains';
-import type { Chain } from '@frost-mpc/types/network';
+import type { Chain } from '@starlab/types/network';
 
 // Create comprehensive mock for Chrome storage
 const mockStorage = {

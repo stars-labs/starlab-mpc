@@ -2,7 +2,7 @@
 
 **Status:** Authoritative design note (matches shipped code as of this commit)
 **Scope:** how one root secret yields per-curve threshold wallets, and — critically — **what can and cannot be recovered**, and from what.
-**Code:** `packages/@frost-mpc/frost-core/src/{root_secret.rs, unified_dkg.rs, curve_registry.rs, keystore.rs}`
+**Code:** `packages/@starlab/core/src/{root_secret.rs, unified_dkg.rs, curve_registry.rs, keystore.rs}`
 
 ---
 
@@ -134,8 +134,8 @@ the password and the keystore is opaque ciphertext. So the real backup unit is
 ## 6. Cross-references
 
 - Derivation grammar, versioning, domain separation, salt decision:
-  `packages/@frost-mpc/frost-core/src/root_secret.rs` (module docs + tests).
-- N-curve DKG engine: `packages/@frost-mpc/frost-core/src/curve_registry.rs`.
-- Encrypted share storage: `packages/@frost-mpc/frost-core/src/keystore.rs`.
+  `packages/@starlab/core/src/root_secret.rs` (module docs + tests).
+- N-curve DKG engine: `packages/@starlab/core/src/curve_registry.rs`.
+- Encrypted share storage: `packages/@starlab/core/src/keystore.rs`.
 - Which chains can actually *verify* the resulting signatures:
   [`SIGNATURE_CHAIN_COMPATIBILITY.md`](SIGNATURE_CHAIN_COMPATIBILITY.md).

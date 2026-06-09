@@ -18,13 +18,13 @@ set -uo pipefail   # NOT -e: several cases expect non-zero exits
 cd "$(dirname "$0")/../.."
 
 BASE="${SIGNAL:-wss://panda.qzz.io}"
-CLI="./target/release/frost-mpc-cli"
+CLI="./target/release/starlab-cli"
 PASS=0; FAIL=0
 ok()  { printf '  \033[32m✅ %s\033[0m\n' "$1"; PASS=$((PASS+1)); }
 bad() { printf '  \033[31m❌ %s\033[0m\n' "$1"; FAIL=$((FAIL+1)); }
 uuid(){ python3 -c 'import uuid;print(uuid.uuid4())'; }
 
-echo "Building CLI (release)…"; cargo build --release --quiet -p frost-mpc-cli || { echo build failed; exit 1; }
+echo "Building CLI (release)…"; cargo build --release --quiet -p starlab-cli || { echo build failed; exit 1; }
 echo "Target signal server: $BASE"
 
 # --- helpers ---------------------------------------------------------------

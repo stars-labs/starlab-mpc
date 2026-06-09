@@ -12,7 +12,7 @@ not as a reference for tests that already exist.
 
 Existing functional coverage that does real MPC flows (without
 a dedicated E2E harness): see the examples at
-`apps/tui-node/examples/hybrid_mode_e2e_test.rs` +
+`apps/tui/examples/hybrid_mode_e2e_test.rs` +
 `webrtc_mesh_e2e_test.rs` + the Bun test suite under
 `apps/browser-extension/tests/entrypoints/background/`. Those are
 the real de facto E2E baselines today.
@@ -339,7 +339,7 @@ jobs:
 
 1. ✅ `README.md` — multiple (repo root, apps/, docs/, tests/
    subtrees all have their own)
-2. ✅ `apps/tui-node/docs/architecture/ARCHITECTURE.md` —
+2. ✅ `apps/tui/docs/architecture/ARCHITECTURE.md` —
    detailed system design with diagrams
 3. ✅ `docs/testing/TESTING.md` — comprehensive testing guide
 4. ❌ `API.md` — does not exist; real API surface is
@@ -349,10 +349,10 @@ jobs:
 5. ❌ `DEPLOYMENT.md` — does not exist; real deployment docs
    are `docs/deployment/README.md`,
    `docs/deployment/CLOUDFLARE_DEPLOYMENT.md`, and
-   `apps/tui-node/docs/DEPLOYMENT_GUIDE.md`
+   `apps/tui/docs/DEPLOYMENT_GUIDE.md`
 6. ✅ `CLAUDE.md` (repo root) — architecture + conventions
    for Claude Code sessions
 
 All documentation reflects the Elm-architecture migration
 (the pre-migration entry type was named `AppRunner`; it's now
-`ElmApp<C>` — see `apps/tui-node/src/elm/app.rs:25`).
+`ElmApp<C>` — see `apps/tui/src/elm/app.rs:25`).

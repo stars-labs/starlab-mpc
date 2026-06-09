@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "@frost-mpc/monorepo",
+      "name": "@starlab/monorepo",
       "devDependencies": {
         "@solana/web3.js": "^1.98.4",
         "npm-run-all": "^4.1.5",
@@ -11,11 +11,11 @@
       },
     },
     "apps/browser-extension": {
-      "name": "@frost-mpc/browser-extension",
+      "name": "@starlab/browser-extension",
       "version": "0.0.0",
       "dependencies": {
-        "@frost-mpc/core-wasm": "workspace:*",
-        "@frost-mpc/types": "workspace:*",
+        "@starlab/core-wasm": "workspace:*",
+        "@starlab/types": "workspace:*",
         "@tailwindcss/vite": "^4.3.0",
         "tailwindcss": "^4.3.0",
         "uuid": "^14.0.0",
@@ -37,15 +37,15 @@
         "wxt": "^0.20.26",
       },
     },
-    "packages/@frost-mpc/core-wasm": {
-      "name": "@frost-mpc/core-wasm",
+    "packages/@starlab/core-wasm": {
+      "name": "@starlab/core-wasm",
       "version": "0.1.0",
       "devDependencies": {
         "wasm-pack": "^0.13.1",
       },
     },
-    "packages/@frost-mpc/types": {
-      "name": "@frost-mpc/types",
+    "packages/@starlab/types": {
+      "name": "@starlab/types",
       "version": "0.1.0",
       "devDependencies": {
         "typescript": "^5.8.3",
@@ -147,11 +147,11 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.25", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-vNk6aEwybGtawWmy/PzwnGDOjCkLWSD2wqvjGGAgOAwCGWySYXfYoxt00IJkTF+8Lb57DwOb3Aa0o9CApepiYQ=="],
 
-    "@frost-mpc/browser-extension": ["@frost-mpc/browser-extension@workspace:apps/browser-extension"],
+    "@starlab/browser-extension": ["@starlab/browser-extension@workspace:apps/browser-extension"],
 
-    "@frost-mpc/core-wasm": ["@frost-mpc/core-wasm@workspace:packages/@frost-mpc/core-wasm"],
+    "@starlab/core-wasm": ["@starlab/core-wasm@workspace:packages/@starlab/core-wasm"],
 
-    "@frost-mpc/types": ["@frost-mpc/types@workspace:packages/@frost-mpc/types"],
+    "@starlab/types": ["@starlab/types@workspace:packages/@starlab/types"],
 
     "@napi-rs/wasm-runtime": ["@napi-rs/wasm-runtime@1.1.4", "", { "dependencies": { "@tybys/wasm-util": "^0.10.1" }, "peerDependencies": { "@emnapi/core": "^1.7.1", "@emnapi/runtime": "^1.7.1" } }, "sha512-3NQNNgA1YSlJb/kMH1ildASP9HW7/7kYnRI2szWJaofaS1hWmbGI4H+d3+22aGzXXN9IJ+n+GiFVcGipJP18ow=="],
 
@@ -1303,7 +1303,7 @@
 
     "@devicefarmer/adbkit/debug": ["debug@4.3.7", "", { "dependencies": { "ms": "^2.1.3" } }, "sha512-Er2nc/H7RrMXZBFCEim6TCmMk02Z8vLC2Rbi1KEBggpo0fS6l0S1nnapwmIi3yW/+GOJap1Krg4w0Hg80oCqgQ=="],
 
-    "@frost-mpc/types/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+    "@starlab/types/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@pnpm/network.ca-file/graceful-fs": ["graceful-fs@4.2.10", "", {}, "sha512-9ByhssR2fPVsNZj478qUUbKfmL0+t5BDVyjShtyZZLiK7ZDAArFFfopyOTj0M05wE2tJPisA4iTnnXl2YoPvOA=="],
 

@@ -35,11 +35,11 @@ import { PopupMessageHandler, OffscreenMessageHandler } from './messageHandlers'
 import { KeepaliveController } from './keepaliveController';
 
 // Import types
-import { AppState, INITIAL_APP_STATE } from "@frost-mpc/types/appstate";
-import { SessionProposal, SessionResponse, SessionInfo } from "@frost-mpc/types/session";
+import { AppState, INITIAL_APP_STATE } from "@starlab/types/appstate";
+import { SessionProposal, SessionResponse, SessionInfo } from "@starlab/types/session";
 import { getSignalServerUrl } from "../../config/signal-server";
-import { MeshStatusType, MeshStatus } from "@frost-mpc/types/mesh";
-import { DkgState } from "@frost-mpc/types/dkg";
+import { MeshStatusType, MeshStatus } from "@starlab/types/mesh";
+import { DkgState } from "@starlab/types/dkg";
 import {
     type JsonRpcRequest,
     type PopupToBackgroundMessage,
@@ -60,8 +60,8 @@ import {
     type BackgroundMessage,
     type OffscreenMessage,
     type PopupMessage,
-} from "@frost-mpc/types/messages";
-import { ServerMsg, ClientMsg, WebSocketMessagePayload, WebRTCSignal } from "@frost-mpc/types/websocket";
+} from "@starlab/types/messages";
+import { ServerMsg, ClientMsg, WebSocketMessagePayload, WebRTCSignal } from "@starlab/types/websocket";
 
 // ===================================================================
 // SERVICE INITIALIZATION AND GLOBAL STATE

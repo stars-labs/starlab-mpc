@@ -8,7 +8,7 @@
      * This is the DKG *initiator* flow only. Joiner side is Ext-1e.
      */
     import { createEventDispatcher } from "svelte";
-    import { MESSAGE_TYPES } from "@frost-mpc/types/messages";
+    import { MESSAGE_TYPES } from "@starlab/types/messages";
     import Button from "../lib/ui/Button.svelte";
     import Icon from "../lib/ui/Icon.svelte";
     import { guideError } from "../utils/error-guidance";

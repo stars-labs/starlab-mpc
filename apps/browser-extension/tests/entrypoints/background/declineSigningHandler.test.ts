@@ -16,10 +16,10 @@ import * as mockImports from "../../wxt-imports-mock";
 mock.module("#imports", () => mockImports);
 
 import { PopupMessageHandler } from "../../../src/entrypoints/background/messageHandlers";
-import type { SessionInfo } from "@frost-mpc/types/session";
-import { DkgState } from "@frost-mpc/types/dkg";
-import { MeshStatusType } from "@frost-mpc/types/mesh";
-import type { AppState } from "@frost-mpc/types/appstate";
+import type { SessionInfo } from "@starlab/types/session";
+import { DkgState } from "@starlab/types/dkg";
+import { MeshStatusType } from "@starlab/types/mesh";
+import type { AppState } from "@starlab/types/appstate";
 
 function signingInvite(overrides: Partial<SessionInfo> = {}): SessionInfo {
     return {

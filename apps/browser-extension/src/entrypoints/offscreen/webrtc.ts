@@ -1,6 +1,6 @@
-import { SessionInfo, DkgState, MeshStatus, MeshStatusType } from "@frost-mpc/types/appstate";
-import { WebRTCAppMessage } from "@frost-mpc/types/webrtc";
-import { WebSocketMessagePayload, WebRTCSignal } from "@frost-mpc/types/websocket";
+import { SessionInfo, DkgState, MeshStatus, MeshStatusType } from "@starlab/types/appstate";
+import { WebRTCAppMessage } from "@starlab/types/webrtc";
+import { WebSocketMessagePayload, WebRTCSignal } from "@starlab/types/websocket";
 
 export { DkgState, MeshStatusType }; // Export DkgState and MeshStatusType
 
@@ -204,7 +204,7 @@ export class WebRTCManager {
   /**
    * FROST participant identifiers are derived from the SORTED participant
    * device-id order — this MUST match the Rust core's `canonical_identifier`
-   * (apps/tui-node/src/protocal/dkg.rs), which does `participants.sort()` then
+   * (apps/tui/src/protocal/dkg.rs), which does `participants.sort()` then
    * `position + 1`. The signal server grows the participant list in *join*
    * order, which is generally NOT sorted; if we used it as-is, our `indexOf`
    * based identifiers would disagree with the Rust nodes and a mixed
@@ -1827,7 +1827,7 @@ export class WebRTCManager {
     );
 
     const { FrostDkgSecp256k1, FrostDkgEd25519 } = await import(
-      "@frost-mpc/core-wasm"
+      "@starlab/core-wasm"
     );
     const instance =
       blockchain === "ethereum"

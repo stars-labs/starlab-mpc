@@ -1,4 +1,4 @@
-# webrtc-signal-server
+# starlab-signal-server
 
 A general WebRTC signal server for device-to-device communication, written in Rust and powered by async networking and WebSockets.
 
@@ -11,16 +11,16 @@ A general WebRTC signal server for device-to-device communication, written in Ru
 
 ## Usage
 
-From the frost-mpc monorepo root:
+From the starlab-mpc monorepo root:
 
 ```sh
-cargo build -p webrtc-signal-server --release
+cargo build -p starlab-signal-server --release
 ```
 
 Run the server (default port: 9000):
 
 ```sh
-cargo run -p webrtc-signal-server --release
+cargo run -p starlab-signal-server --release
 ```
 
 The server listens for WebSocket connections on `0.0.0.0:9000`.
@@ -86,7 +86,7 @@ MIT OR Apache-2.0
 
 ## Repository
 
-This crate lives in the [frost-mpc monorepo](https://github.com/hecoinfo/frost-mpc)
+This crate lives in the [starlab-mpc monorepo](https://github.com/hecoinfo/starlab-mpc)
 under `apps/signal-server/server/`. It was previously published from
 `stars-labs/crypto-rust-tools` before being absorbed into the monorepo;
 older crates.io metadata may still point there.

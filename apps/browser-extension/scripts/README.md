@@ -12,7 +12,7 @@ Utility scripts for development, testing, and building the MPC Wallet extension.
   manually when the logger-noise review is due.
 
 ### `/` (top-level)
-- `gen-frost-fixtures.ts` — generate FROST test fixtures (real 2-of-3 DKG round 1/2 packages, signing shares) used by the bun-test suites under `../test-data/real-*`. Re-run whenever the on-disk keystore schema in `packages/@frost-mpc/frost-core` changes.
+- `gen-frost-fixtures.ts` — generate FROST test fixtures (real 2-of-3 DKG round 1/2 packages, signing shares) used by the bun-test suites under `../test-data/real-*`. Re-run whenever the on-disk keystore schema in `packages/@starlab/core` changes.
 - `test-dkg-ui.sh` — headless UI smoke-test for the DKG flow.
 
 ## Usage

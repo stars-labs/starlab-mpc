@@ -1,7 +1,7 @@
 /**
  * Signal-server URL config, single source of truth.
  *
- * The default is `wss://panda.qzz.io` (see `apps/tui-node/src/elm/model.rs`),
+ * The default is `wss://panda.qzz.io` (see `apps/tui/src/elm/model.rs`),
  * which points at the Cloudflare Worker variant of the signal server — the
  * TUI and the extension must share this default so a TUI node and an
  * extension can see each other's session broadcasts.

@@ -2,7 +2,7 @@
 
 **Status:** Authoritative caveat (matches shipped code)
 **Scope:** which chains can actually **verify** a FROST threshold signature, and the sharp exception for standard Ethereum-family EOAs.
-**Code:** `apps/tui-node/src/blockchain_config.rs` (chain↔curve table + `signing_caveat`), `packages/@frost-mpc/blockchain/`
+**Code:** `apps/tui/src/blockchain_config.rs` (chain↔curve table + `signing_caveat`), `packages/@starlab/blockchain/`
 
 ---
 
@@ -94,7 +94,7 @@ standard EVM EOA transfer is supported** for a FROST wallet.
 
 ## 4. Cross-references
 
-- Chain↔curve table and the caveat helper: `apps/tui-node/src/blockchain_config.rs`.
+- Chain↔curve table and the caveat helper: `apps/tui/src/blockchain_config.rs`.
 - Address derivation (correct for all listed chains): same file,
   `generate_address_for_chain`.
 - Why a secp256k1 and an ed25519 wallet are different keys (not one key across

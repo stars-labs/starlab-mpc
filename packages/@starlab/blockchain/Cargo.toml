@@ -1,0 +1,43 @@
+[package]
+name = "starlab-blockchain"
+version = "0.1.0"
+edition = "2024"
+authors = ["MPC Wallet Team"]
+description = "Blockchain support for MPC Wallet"
+license = "MIT"
+
+[dependencies]
+# Error types via #[derive(thiserror::Error)] on BlockchainError.
+thiserror = "2.0.9"
+
+# Hex + base58 encoding used by ethereum.rs / solana.rs / bitcoin.rs for
+# transaction-hash display + signature serialization.
+hex = "0.4.3"
+
+# serde_json::Value is the metadata type in ParsedTransaction /
+# SignatureData. No direct `serde` use — `serde` is pulled in
+# transitively via serde_json.
+serde_json = "1.0.143"
+
+# Solana SDK is imported as `use solana_sdk::bs58;` in solana.rs, but
+# the bs58::decode/encode methods actually called (.into_vec,
+# .into_string) come from the bs58 crate directly — solana_sdk's
+# re-export is a leaner subset. Both deps therefore stay paired. No
+# other solana-* crate is touched by this library's source (an old
+# ethers/web3/k256/spl-token layer existed only for example code that
+# has since been removed).
+solana-sdk = "4.0.1"
+bs58 = "0.5.1"
+
+# Hashing for transaction hashes:
+#   sha2 (Sha256) — bitcoin.rs, solana.rs
+#   sha3 (Keccak256) — ethereum.rs
+sha2 = "0.11.0"
+sha3 = "0.11.0"
+
+[lib]
+name = "starlab_mpc_blockchain"
+path = "src/mod.rs"
+
+# (No dev-dependencies: the clap-based example binaries were removed. Re-add a
+# [dev-dependencies] block here if example/integration code returns.)

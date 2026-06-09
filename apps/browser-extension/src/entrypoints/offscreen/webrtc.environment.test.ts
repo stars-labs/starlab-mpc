@@ -1,7 +1,7 @@
 // Environment difference test for FROST DKG in production vs test
 import { describe, it, test, expect, beforeAll, beforeEach, afterEach, afterAll, jest } from 'bun:test';
 import { DkgState, WebRTCManager } from './webrtc';
-import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@frost-mpc/core-wasm';
+import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@starlab/core-wasm';
 
 describe('FROST DKG Environment Difference Analysis', () => {
   let wasmInitialized = false;

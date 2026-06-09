@@ -1,12 +1,12 @@
 {
-  "name": "@frost-mpc/monorepo",
+  "name": "@starlab/monorepo",
   "description": "MPC Wallet Monorepo - Multi-Party Computation wallet with FROST signatures",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "workspaces": [
     "apps/*",
-    "packages/@frost-mpc/*"
+    "packages/@starlab/*"
   ],
   "scripts": {
     "dev": "bun run dev:extension",
@@ -14,8 +14,8 @@
     "dev:all": "bun run build:wasm && run-p dev:*",
     "build": "./scripts/build-all.sh",
     "build:extension": "cd apps/browser-extension && bun run build",
-    "build:wasm": "cd packages/@frost-mpc/core-wasm && bun run build",
-    "build:wasm:dev": "cd packages/@frost-mpc/core-wasm && bun run build:dev",
+    "build:wasm": "cd packages/@starlab/core-wasm && bun run build",
+    "build:wasm:dev": "cd packages/@starlab/core-wasm && bun run build:dev",
     "test": "./scripts/test-all.sh",
     "test:extension": "cd apps/browser-extension && bun test",
     "clean": "./scripts/clean-all.sh",

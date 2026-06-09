@@ -12,8 +12,8 @@
 import type {
     BackgroundToOffscreenWrapper,
     OffscreenMessage
-} from "@frost-mpc/types/messages";
-import { AppState } from "@frost-mpc/types/appstate";
+} from "@starlab/types/messages";
+import { AppState } from "@starlab/types/appstate";
 import { getSignalServerUrl } from "../../config/signal-server";
 
 /**

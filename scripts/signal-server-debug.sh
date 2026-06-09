@@ -67,7 +67,7 @@ stop_server() {
     fi
 
     # Also check for any running signal server processes
-    local pids=$(pgrep -f "webrtc-signal-server" || true)
+    local pids=$(pgrep -f "starlab-signal-server" || true)
     if [ ! -z "$pids" ]; then
         print_warning "Found signal server processes: $pids"
         for pid in $pids; do
@@ -76,7 +76,7 @@ stop_server() {
         done
         sleep 2
         # Force kill if still running
-        pids=$(pgrep -f "webrtc-signal-server" || true)
+        pids=$(pgrep -f "starlab-signal-server" || true)
         if [ ! -z "$pids" ]; then
             for pid in $pids; do
                 print_warning "Force stopping process $pid..."
@@ -113,10 +113,10 @@ start_server() {
 
     if [ "$log_level" = "release" ]; then
         cargo build --release
-        BINARY="$PROJECT_ROOT/target/release/webrtc-signal-server"
+        BINARY="$PROJECT_ROOT/target/release/starlab-signal-server"
     else
         cargo build
-        BINARY="$PROJECT_ROOT/target/debug/webrtc-signal-server"
+        BINARY="$PROJECT_ROOT/target/debug/starlab-signal-server"
     fi
 
     if [ ! -f "$BINARY" ]; then
@@ -226,7 +226,7 @@ show_status() {
 
     # Check for any signal server processes
     echo ""
-    local pids=$(pgrep -f "webrtc-signal-server" || true)
+    local pids=$(pgrep -f "starlab-signal-server" || true)
     if [ ! -z "$pids" ]; then
         print_warning "Found signal server processes: $pids"
     fi
@@ -308,7 +308,7 @@ debug_mode() {
     print_info "Press Ctrl+C to stop"
     echo ""
 
-    "$PROJECT_ROOT/target/debug/webrtc-signal-server" 2>&1 | tee "$debug_log"
+    "$PROJECT_ROOT/target/debug/starlab-signal-server" 2>&1 | tee "$debug_log"
 }
 
 # Function to show help

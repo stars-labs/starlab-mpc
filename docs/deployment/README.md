@@ -12,8 +12,8 @@ the production signaling path runs on a Cloudflare Worker.
 | Signal server (edge) | Cloudflare Worker | `wrangler deploy` from `apps/signal-server/cloudflare-worker/` — see [CLOUDFLARE_DEPLOYMENT.md](CLOUDFLARE_DEPLOYMENT.md) |
 | Signal server (self-host) | Native Rust binary from `apps/signal-server/server/` | systemd service behind an HTTPS terminator (nginx/caddy/Cloudflare Tunnel). Binds `0.0.0.0:9000`. Stateless, no DB, no Redis. |
 | Browser extension | `bun run build` (Chrome MV3) / `bun run build:firefox` | Chrome Web Store / AMO distribution, or sideload via `.output/<browser>-mv3` |
-| TUI wallet | `cargo build --release --bin frost-mpc-tui` | End-user distribution — not a server deployment; single static binary. |
-| Native desktop | `cargo build --release -p frost-mpc-native` | End-user Slint desktop binary. |
+| TUI wallet | `cargo build --release --bin starlab-tui` | End-user distribution — not a server deployment; single static binary. |
+| Native desktop | `cargo build --release -p starlab-mpc-native` | End-user Slint desktop binary. |
 
 ## Cloudflare Worker signal server
 
@@ -36,10 +36,10 @@ and holds all state in memory.
 
 ```bash
 # Build
-cargo build --release -p webrtc-signal-server
+cargo build --release -p starlab-signal-server
 
 # Run (foreground)
-./target/release/webrtc-signal-server
+./target/release/starlab-signal-server
 #   -> "Signal server listening on 0.0.0.0:9000"
 ```
 
@@ -53,7 +53,7 @@ After=network.target
 [Service]
 Type=simple
 User=signal-server
-ExecStart=/opt/frost-mpc/webrtc-signal-server
+ExecStart=/opt/starlab-mpc/starlab-signal-server
 Restart=on-failure
 RestartSec=5s
 LimitNOFILE=65536
@@ -75,7 +75,7 @@ bun run build             # -> .output/chrome-mv3/ (default target)
 bun run build:firefox     # -> .output/firefox-mv2/
 
 # Package for web-store upload
-cd .output/chrome-mv3 && zip -r ../../frost-mpc-chrome.zip .
+cd .output/chrome-mv3 && zip -r ../../starlab-mpc-chrome.zip .
 ```
 
 Install unpacked during development via `chrome://extensions` →
@@ -136,9 +136,9 @@ What is **not** supported today (deliberately — or because the repo
 never shipped it):
 
 - No Dockerfile or docker-compose.yml for any component (the old
-  tui-node Dockerfile + compose were pre-monorepo and got removed
+  starlab-client Dockerfile + compose were pre-monorepo and got removed
   rather than carried as broken examples — see
-  `apps/tui-node/docs/DEPLOYMENT_GUIDE.md` for the history).
+  `apps/tui/docs/DEPLOYMENT_GUIDE.md` for the history).
 - No Kubernetes manifests.
 - No Redis / database layer — the signal server is stateless and
   holds session state in process memory.

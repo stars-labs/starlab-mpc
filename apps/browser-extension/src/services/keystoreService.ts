@@ -20,7 +20,7 @@ import type {
     WalletFile,
     BlockchainInfo,
     NewAccountSession
-} from "@frost-mpc/types/keystore";
+} from "@starlab/types/keystore";
 
 export class KeystoreService {
     private static instance: KeystoreService;

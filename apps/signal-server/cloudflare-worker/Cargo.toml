@@ -1,10 +1,10 @@
 [package]
-name = "webrtc-signal-server-cloudflare-worker"
+name = "starlab-signal-server-cloudflare-worker"
 version = "0.1.0"
 edition = "2024"
 authors = ["xiongchenyu <xiongchenyu6@gmail.com>"]
 description = "General WebRTC signal server For Device to Device Communication"
-repository = "https://github.com/hecoinfo/frost-mpc"
+repository = "https://github.com/hecoinfo/starlab-mpc"
 license = "MIT OR Apache-2.0"
 
 [package.metadata.release]

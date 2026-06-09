@@ -1,7 +1,7 @@
 // solana_onchain.mjs — put a REAL Solana transaction on-chain, signed by the
 // MPC wallet (#A). Division of labour that makes it credible:
 //   - the STANDARD @solana/web3.js library builds + submits the transaction
-//   - our raw `frost-mpc-cli` produces the signature (the only thing we made)
+//   - our raw `starlab-cli` produces the signature (the only thing we made)
 // So a skeptic trusts the Solana lib for everything except the signature, and
 // the signature is a plain Ed25519 signature their own tools verify.
 //
@@ -9,7 +9,7 @@
 //   node solana_onchain.mjs address  <groupKeyHex>
 //   node solana_onchain.mjs airdrop  <groupKeyHex> [sol]
 //   node solana_onchain.mjs prepare  <groupKeyHex> <toBase58|self> <lamports>   # prints MSG hex to sign
-//       -> (sign MSG with the MPC wallet:  frost-mpc-cli sign --encoding hex --message <MSG> ...)
+//       -> (sign MSG with the MPC wallet:  starlab-cli sign --encoding hex --message <MSG> ...)
 //   node solana_onchain.mjs finalize <signatureHex>                              # submits, prints explorer URL
 //
 // Cluster defaults to devnet; override with SOLANA_RPC.

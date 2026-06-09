@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'bun:test';
 import { DkgState, WebRTCManager, MeshStatusType } from './webrtc'; // Adjust path as necessary
 import { Buffer } from 'buffer';
-import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@frost-mpc/core-wasm'; // Corrected import
+import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@starlab/core-wasm'; // Corrected import
 
 function hexEncode(str: string): string {
     return Buffer.from(str, 'utf8').toString('hex');

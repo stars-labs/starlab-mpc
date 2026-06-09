@@ -1,6 +1,6 @@
 # Unified networked DKG — one wallet, all chains (ETH+BTC+SOL+Sui)
 
-**Goal:** the tui-node networked (WebRTC mesh) DKG produces a wallet holding BOTH
+**Goal:** the starlab-client networked (WebRTC mesh) DKG produces a wallet holding BOTH
 ed25519 + secp256k1 keys from a single root secret, so one wallet shows
 Ethereum/Bitcoin (secp256k1) + Solana/Sui (ed25519). Driven by frost-core's
 `UnifiedDkg` (crypto already implemented; the browser/core-wasm already uses it).
@@ -10,7 +10,7 @@ The desktop (starlab-desktop) consumes the multi-curve wallet and shows all chai
 `frost_core::keys::dkg::part1::<C>` — one curve per ceremony. `UnifiedDkg` is
 concrete (ed25519+secp256k1) and isn't wired into the mesh transport.
 
-**Reference:** `packages/@frost-mpc/core-wasm/src/lib.rs` (UnifiedDkg over the
+**Reference:** `packages/@starlab/core-wasm/src/lib.rs` (UnifiedDkg over the
 browser mesh) defines the wire shape we must match for cross-client interop:
 `UnifiedRound1Package { ed25519, secp256k1 }`, `UnifiedRound2Packages`.
 

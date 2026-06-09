@@ -7,7 +7,7 @@
 // boundary, so it's where wire-protocol / round-accounting mismatches surface.
 //
 // Prereqs (see tests/interop/README.md):
-//   - `cargo build --release -p frost-mpc-cli`
+//   - `cargo build --release -p starlab-cli`
 //   - `bun run build`               (produces .output/chrome-mv3)
 //   - `bunx playwright install chromium`
 //   - INTEROP_SIGNAL set to a reachable signal server (default: deployed worker)

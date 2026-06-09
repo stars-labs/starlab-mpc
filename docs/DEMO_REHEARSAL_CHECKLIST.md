@@ -15,8 +15,8 @@ point into it).
 
 ## T‑1 day — preparation
 
-- [ ] **Binaries built on every device.** `cargo build --release -p frost-mpc-cli` on
-      each laptop. Confirm `--curve ed25519` exists: `frost-mpc-cli serve --help | grep -i curve`.
+- [ ] **Binaries built on every device.** `cargo build --release -p starlab-cli` on
+      each laptop. Confirm `--curve ed25519` exists: `starlab-cli serve --help | grep -i curve`.
 - [ ] **Node.js present** on the machine that will run the independent verification (and,
       if showing on‑chain, `@solana/web3.js` installed: `bun install` at repo root).
 - [ ] **Decide the curve story:** ed25519 (Solana) — it's the independently verifiable one.
@@ -58,7 +58,7 @@ point into it).
 8. [ ] **Threshold drama** (guide §3.5): alice tries to sign alone → it times out → repeat
        with bob → it completes.
 9. [ ] **Recovery beat** (guide §5, optional): on the wallet-holding node run
-       `frost-mpc-cli reshare --wallet-id <W> --room "$ROOM"` and have the retained signers
+       `starlab-cli reshare --wallet-id <W> --room "$ROOM"` and have the retained signers
        `session join` it → same `group_public_key`, the wallet keeps signing, the dropped
        device's share is dead. The "lose/rotate a device, same address" story. *(No live
        setup? `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --reshare` proves it

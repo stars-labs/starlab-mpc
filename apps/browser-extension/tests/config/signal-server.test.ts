@@ -23,7 +23,7 @@ describe('Signal server config', () => {
     });
 
     it('default matches the TUI URL', () => {
-        // If this assertion fails, check `apps/tui-node/src/elm/model.rs`
+        // If this assertion fails, check `apps/tui/src/elm/model.rs`
         // — if the TUI moved its default, we probably need to move too.
         expect(DEFAULT_SIGNAL_SERVER_URL).toBe('wss://panda.qzz.io');
     });

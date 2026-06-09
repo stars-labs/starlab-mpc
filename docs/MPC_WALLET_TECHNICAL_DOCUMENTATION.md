@@ -115,7 +115,7 @@ The MPC Wallet follows a **distributed, peer-to-peer architecture**:
 The project is organized as a monorepo with shared dependencies:
 
 ```
-frost-mpc/
+starlab-mpc/
 ├── apps/
 │   ├── browser-extension/          # WXT + Svelte 5, MV3
 │   │   ├── src/entrypoints/        # background / popup / offscreen / content
@@ -130,8 +130,8 @@ frost-mpc/
 │   │   ├── src/ui_callback.rs      # NativeUICallback (Send-bridge onto Slint loop)
 │   │   └── ui/main_enhanced.slint  # Slint UI, compiled by build.rs
 │   │
-│   ├── tui-node/                   # Ratatui Elm-architecture TUI
-│   │   ├── src/bin/                # frost-mpc-tui binary entry
+│   ├── starlab-client/                   # Ratatui Elm-architecture TUI
+│   │   ├── src/bin/                # starlab-tui binary entry
 │   │   ├── src/elm/                # Model / Update / View / Command,
 │   │   │                           # per-screen components, and the
 │   │   │                           # real runtime WebRTC driver at
@@ -153,7 +153,7 @@ frost-mpc/
 │       ├── server/                 # Standalone tokio + tokio-tungstenite
 │       └── cloudflare-worker/      # Rust-over-WASM via `worker` crate
 │
-├── packages/@frost-mpc/
+├── packages/@starlab/
 │   ├── frost-core/                 # FROST wrapper: unified_dkg, hd_derivation,
 │   │                               # traits, ed25519, secp256k1, keystore, root_secret
 │   ├── core-wasm/                  # wasm-bindgen wrapper around frost-core
@@ -173,13 +173,13 @@ in-tree; rename would be a broad refactor and is not blocking.
 
 ## Core Components
 
-### 1. FROST Protocol Core (`packages/@frost-mpc/frost-core`)
+### 1. FROST Protocol Core (`packages/@starlab/core`)
 
 The heart of the MPC wallet, implementing the FROST threshold signature scheme.
 
 #### Key Modules
 
-Real layout — see `packages/@frost-mpc/frost-core/src/`:
+Real layout — see `packages/@starlab/core/src/`:
 
 ```
 lib.rs                   # Re-exports + wiring
@@ -286,7 +286,7 @@ Separately, in the offscreen context:
    `signingCommitments`, `signingShares`). See CLAUDE.md for the
    signing pipeline.
 
-### 3. Terminal UI Application (`apps/tui-node`)
+### 3. Terminal UI Application (`apps/tui`)
 
 A feature-rich terminal interface for advanced users and automated operations.
 
@@ -307,7 +307,7 @@ vary with `wallet_count`:
 Earlier drafts printed a numbered-hotkey layout
 (`[1] Wallet / [2] DKG / [3] Sign / [4] Session / [5] Network /
 [6] Settings / [Q] Quit`) with a right-hand pane showing
-`Current Wallet: frost_mpc_01 / Address: 0x742d35Cc6634C053... /
+`Current Wallet: starlab_mpc_01 / Address: 0x742d35Cc6634C053... /
 Balance: 1.234 ETH / Connected Peers: 2/3 / Session Status: Active`.
 None of that is real:
 
@@ -325,7 +325,7 @@ None of that is real:
 
 The TUI is built on the [tui-realm](https://github.com/veeso/tuirealm)
 Elm architecture. The real entry struct is `ElmApp<C>`
-(`apps/tui-node/src/elm/app.rs`), parameterized over a FROST ciphersuite:
+(`apps/tui/src/elm/app.rs`), parameterized over a FROST ciphersuite:
 
 ```rust
 pub struct ElmApp<C: frost_core::Ciphersuite> {
@@ -339,7 +339,7 @@ pub struct ElmApp<C: frost_core::Ciphersuite> {
 }
 ```
 
-Longer-lived business logic lives in `tui-node::core::*Manager`
+Longer-lived business logic lives in `starlab-client::core::*Manager`
 types (`WalletManager`, `SessionManager`, `DkgManager`, `SigningManager`,
 `OfflineManager`, `ConnectionManager`) — these are shared with the
 native-node app via the `UICallback` trait. See CLAUDE.md for that
@@ -447,7 +447,7 @@ Real on-disk layout is **one JSON file per wallet** at
 `~/.frost_keystore/<device_id>/<curve>/<wallet_id>.json` —
 there is NO wrapping `{ "wallets": [...] }` container. The
 serialized shape is the `WalletFile` struct
-(`apps/tui-node/src/keystore/models.rs:438-453`):
+(`apps/tui/src/keystore/models.rs:438-453`):
 
 ```json
 {
@@ -471,7 +471,7 @@ serialized shape is the `WalletFile` struct
 ```
 
 Metadata is serialized from the `WalletMetadata` struct at
-`apps/tui-node/src/keystore/models.rs:222-291`. Notable details:
+`apps/tui/src/keystore/models.rs:222-291`. Notable details:
 
 - `session_id` is the real field name; `wallet_id` is a
   `#[serde(alias)]` for backward-compat reads.
@@ -500,7 +500,7 @@ the broader keystore-layout retraction.
 #### Encryption Scheme
 
 - **Key Derivation**: PBKDF2-HMAC-SHA256 with 100,000 iterations
-  (constant `PBKDF2_ITERATIONS` in `apps/tui-node/src/keystore/encryption.rs`).
+  (constant `PBKDF2_ITERATIONS` in `apps/tui/src/keystore/encryption.rs`).
 - **Encryption + Authentication**: AES-256-GCM. GCM provides
   confidentiality and authenticity in one pass — there is no separate
   HMAC layer; the GCM auth tag is the MAC.
@@ -566,7 +566,7 @@ avoids `window.ethereum` to not clobber other wallets.
 
 ### Terminal UI
 
-`apps/tui-node/` is structured around the Elm architecture in
+`apps/tui/` is structured around the Elm architecture in
 `src/elm/` (Model/Update/View via tui-realm) plus the longer-lived
 `src/core/` managers that are shared with native-node. Key modules:
 
@@ -592,13 +592,13 @@ pub trait UIProvider: Send + Sync { /* methods */ }
 
 Two distinct trait surfaces — not the same thing:
 
-  - **`UIProvider`** (`apps/tui-node/src/elm/provider.rs:24`):
+  - **`UIProvider`** (`apps/tui/src/elm/provider.rs:24`):
     abstracts the TUI Elm-loop's view of a UI backend. The TUI's
     ratatui rendering path implements it; test-only
     `NoOpUIProvider` also implements it for headless test runs.
-  - **`UICallback`** (`apps/tui-node/src/core/mod.rs:244`): the
+  - **`UICallback`** (`apps/tui/src/core/mod.rs:244`): the
     event-push surface used by the non-Elm managers in
-    `tui-node::core`. Native-node implements THIS trait via
+    `starlab-client::core`. Native-node implements THIS trait via
     `NativeUICallback` (`apps/native-node/src/ui_callback.rs:25`)
     to bridge onto the Slint event loop. Browser-extension and
     TUI don't need a separate UICallback impl because the Elm
@@ -611,7 +611,7 @@ sentence.
 
 ### Native Desktop
 
-`apps/native-node/` re-uses `tui_node::core::*Manager` types as the
+`apps/native-node/` re-uses `starlab_client::core::*Manager` types as the
 business-logic backend and presents them through a Slint UI. Entry
 points:
 
@@ -715,7 +715,7 @@ from the registry when their creator disconnects.
 #### Standalone Rust server (`apps/signal-server/server/`)
 
 Tokio + `tokio-tungstenite`. Binds `0.0.0.0:9000`, no env vars, no
-HTTP health endpoint. Run via `cargo run -p webrtc-signal-server`.
+HTTP health endpoint. Run via `cargo run -p starlab-signal-server`.
 
 #### Cloudflare Worker variant (`apps/signal-server/cloudflare-worker/`)
 
@@ -822,7 +822,7 @@ rustup target add wasm32-unknown-unknown  # for core-wasm
 curl -fsSL https://bun.sh/install | bash
 ```
 
-`wasm-pack` is a devDependency of `packages/@frost-mpc/core-wasm`
+`wasm-pack` is a devDependency of `packages/@starlab/core-wasm`
 so `bun install` at the repo root pulls it in — no separate
 `cargo install wasm-pack` needed. There is no watch-script
 infrastructure; earlier drafts of this section recommended
@@ -834,8 +834,8 @@ workspace.
 #### 1. Clone Repository
 
 ```bash
-git clone https://github.com/hecoinfo/frost-mpc.git
-cd frost-mpc
+git clone https://github.com/hecoinfo/starlab-mpc.git
+cd starlab-mpc
 ```
 
 #### 2. Install Dependencies
@@ -851,7 +851,7 @@ cargo build --workspace
 #### 3. Build WASM Module
 
 ```bash
-cd packages/@frost-mpc/core-wasm
+cd packages/@starlab/core-wasm
 wasm-pack build --target web --out-dir pkg
 ```
 
@@ -863,7 +863,7 @@ cd apps/browser-extension
 bun run build
 
 # Terminal UI
-cd apps/tui-node
+cd apps/tui
 cargo build --release
 
 # Native Desktop
@@ -889,14 +889,14 @@ bun run dev
 
 ```bash
 # Run with debug logging
-cd apps/tui-node
+cd apps/tui
 RUST_LOG=debug cargo run -- --device-id Dev-001
 
 # Run tests
 cargo test
 
 # Run in offline mode (air-gapped; toggled at runtime via a CLI flag,
-# not a Cargo feature — see apps/tui-node/docs/guides/offline-mode.md)
+# not a Cargo feature — see apps/tui/docs/guides/offline-mode.md)
 cargo run -- --device-id Dev-001 --offline
 ```
 
@@ -909,7 +909,7 @@ cargo run
 
 # Build for distribution
 cargo build --release
-# Binary at: target/release/frost-mpc-native
+# Binary at: target/release/starlab-mpc-native
 ```
 
 ### Testing
@@ -921,7 +921,7 @@ cargo build --release
 cargo test --workspace
 
 # Run specific test suite
-cargo test -p tui-node
+cargo test -p starlab-client
 
 # Coverage: no `cargo tarpaulin` / llvm-cov config ships today —
 # earlier drafts of this doc showed a tarpaulin command that
@@ -946,13 +946,13 @@ No automated full-mesh E2E harness exists yet — see
 1. **DKG Test Flow**
    ```bash
    # Terminal 1
-   cargo run -p tui-node -- --device-id Device-001
+   cargo run -p starlab-client -- --device-id Device-001
    
    # Terminal 2
-   cargo run -p tui-node -- --device-id Device-002
+   cargo run -p starlab-client -- --device-id Device-002
    
    # Terminal 3
-   cargo run -p tui-node -- --device-id Device-003
+   cargo run -p starlab-client -- --device-id Device-003
    ```
 
 2. **Browser Extension Test**
@@ -973,7 +973,7 @@ Full deployment guide lives in [`docs/deployment/README.md`](deployment/README.m
 
 - **Cloudflare Worker signal server**: canonical production path.
   `wrangler deploy` from `apps/signal-server/cloudflare-worker/`.
-- **Self-hosted signal server**: `cargo build --release -p webrtc-signal-server`
+- **Self-hosted signal server**: `cargo build --release -p starlab-signal-server`
   → systemd service behind an HTTPS terminator. Binds `0.0.0.0:9000`;
   reads zero env vars; stateless. No Dockerfile or docker-compose
   ships in-tree today.
@@ -1017,7 +1017,7 @@ extension don't share infrastructure:
   events. Filter via the `RUST_LOG` env var:
 
   ```bash
-  RUST_LOG=tui_node=debug,webrtc=info frost-mpc-tui --device-id alice
+  RUST_LOG=starlab_client=debug,webrtc=info starlab-tui --device-id alice
   ```
 
   Most ceremony-relevant logs are at `info`; verbose mesh / FROST
@@ -1087,10 +1087,10 @@ flow from `personal_sign` to aggregate signature.
 
 ### Terminal UI CLI Arguments
 
-Authoritative definitions in `apps/tui-node/src/bin/frost-mpc-tui.rs`:
+Authoritative definitions in `apps/tui/src/bin/starlab-tui.rs`:
 
 ```
-frost-mpc-tui [OPTIONS]
+starlab-tui [OPTIONS]
 
 OPTIONS:
     --device-id <ID>           FROST participant identity.
@@ -1099,7 +1099,7 @@ OPTIONS:
                                Default: wss://xiongchenyu.dpdns.org
     --offline                  Run in offline (SD-card air-gap) mode.
     --log-location <PATH>      Log file path.
-                               Default: ~/.frost_keystore/logs/frost-mpc.log
+                               Default: ~/.frost_keystore/logs/starlab-mpc.log
     --log-level <LEVEL>        error | warn | info | debug | trace
                                Default: info
 ```
@@ -1110,14 +1110,14 @@ is fixed at `~/.frost_keystore/` (see the Core Components section).
 
 The TUI itself is a keyboard-driven Ratatui app, not a REPL with typed
 commands. Keybindings are hardcoded in `src/elm/update.rs` and the
-per-screen components; see `apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md`.
+per-screen components; see `apps/tui/docs/KEYBOARD_NAVIGATION_GUIDE.md`.
 
 ### WebSocket signal protocol
 
 Shape-compatible with the TUI's wire format. Top-level serde tag is
 `type` (`snake_case`), each envelope has peer addressing + session
-context as inline fields. Authoritative: `apps/tui-node/src/protocal/signal.rs`
-and the TypeScript mirror in `packages/@frost-mpc/types/src/session.ts`.
+context as inline fields. Authoritative: `apps/tui/src/protocal/signal.rs`
+and the TypeScript mirror in `packages/@starlab/types/src/session.ts`.
 
 Message types actually used:
 
@@ -1163,13 +1163,13 @@ is the extent of deliberate optimization work in this codebase.
 Earlier drafts of this section (including my 41d5ca0 commit) listed
 three supposedly-real optimizations:
 
-  - `apps/tui-node/src/elm/adaptive_event_loop.rs` — adaptive
+  - `apps/tui/src/elm/adaptive_event_loop.rs` — adaptive
     poll-interval ramp
-  - `apps/tui-node/src/elm/channel_config.rs` — bounded mpsc channels
-  - `apps/tui-node/src/protocal/session_handler.rs` — deterministic
+  - `apps/tui/src/elm/channel_config.rs` — bounded mpsc channels
+  - `apps/tui/src/protocal/session_handler.rs` — deterministic
     session derivation
 
-**None of those files exist** (`find apps/tui-node/src -name
+**None of those files exist** (`find apps/tui/src -name
 "adaptive_event_loop*" -o -name "channel_config*" -o -name
 "session_handler*"` returns empty, and no types named
 `AdaptiveEventLoop` / `ChannelConfig` / `UpdateStrategy` are
@@ -1212,7 +1212,7 @@ but production use has only been exercised at small cohorts (2-of-3,
   directly-routable networks. No TURN infra ships with this repo —
   symmetric-NAT peers are unreachable in any configuration.
   Adding STUN to the TUI is a straightforward hand-edit at
-  `apps/tui-node/src/network/webrtc.rs:285` (and the matching
+  `apps/tui/src/network/webrtc.rs:285` (and the matching
   `src/elm/webrtc_signaling.rs:387`).
 
 ---
@@ -1241,7 +1241,7 @@ curl -v https://xiongchenyu.dpdns.org/
 # reachability failure here means your outbound UDP path is broken.
 
 # Enable debug logging
-RUST_LOG=debug cargo run -p tui-node --bin frost-mpc-tui
+RUST_LOG=debug cargo run -p starlab-client --bin starlab-tui
 ```
 
 #### 2. WebRTC Connection Issues
@@ -1305,8 +1305,8 @@ section described a `ProtocolAnalyzer` counting `Round1`/`Round2`/`Round3`
 messages in a trace, which is not backed by any real type in source.
 The practical tools are:
 
-- `RUST_LOG=tui_node=debug` (or a finer scope like `tui_node::protocal::dkg=trace`)
-  + the session log at `~/.frost_keystore/logs/frost-mpc.log`
+- `RUST_LOG=starlab_client=debug` (or a finer scope like `starlab_client::protocal::dkg=trace`)
+  + the session log at `~/.frost_keystore/logs/starlab-mpc.log`
 - `chrome://webrtc-internals` for the browser side
 - `wscat -c wss://xiongchenyu.dpdns.org/` + `Register` / `ListDevices`
   ClientMsg payloads for manual signal-server probes
@@ -1340,10 +1340,10 @@ The codebase does not currently expose stable numeric error codes
 (`E001` etc.). Errors surface as strongly-typed variants in the Rust
 crates and as descriptive strings in the browser extension. Real
 Rust types live per-domain: `KeystoreError` in
-`apps/tui-node/src/keystore/mod.rs:24`, `FrostKeystoreError` in
+`apps/tui/src/keystore/mod.rs:24`, `FrostKeystoreError` in
 `src/keystore/frost_keystore.rs:19`, `OfflineError` in
 `src/offline/mod.rs:24`, `CoreError` in `src/core/mod.rs:21`; plus
-upstream `FrostError` from `packages/@frost-mpc/frost-core` with
+upstream `FrostError` from `packages/@starlab/core` with
 `SigningError` / other variants. No top-level `src/errors.rs`
 umbrella file exists.
 
@@ -1385,7 +1385,7 @@ No third-party security audit has been performed on this codebase.
 Earlier drafts of this appendix listed a "2024-Q4 Internal: FROST
 implementation: Passed" line that had no corresponding audit report
 in the repo — fabricated and removed. Report vulnerabilities via
-[GitHub Security Advisories](https://github.com/hecoinfo/frost-mpc/security/advisories/new).
+[GitHub Security Advisories](https://github.com/hecoinfo/starlab-mpc/security/advisories/new).
 
 The FROST protocol implementation itself comes from the
 [ZCash Foundation's audited `frost-*` crates](https://github.com/ZcashFoundation/frost)
@@ -1436,7 +1436,7 @@ a common `frost-core` backend and interoperate over a WebRTC mesh
 established by a small signal server. It's early-stage development
 software — no tagged release, no third-party security audit, no
 hardware-wallet integration, no benchmarks. For the latest state see
-the repository at [github.com/hecoinfo/frost-mpc](https://github.com/hecoinfo/frost-mpc).
+the repository at [github.com/hecoinfo/starlab-mpc](https://github.com/hecoinfo/starlab-mpc).
 
 Open contributions tracked in the repo rather than in this doc —
 check `git log` and the `CLAUDE.md` file at the workspace root for

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
-import init, { FrostDkgSecp256k1, FrostDkgEd25519 } from "@frost-mpc/core-wasm";
+import init, { FrostDkgSecp256k1, FrostDkgEd25519 } from "@starlab/core-wasm";
 
 /**
  * Test WASM keystore import functionality with real FROST fixtures.

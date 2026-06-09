@@ -119,9 +119,9 @@ apps/browser-extension/
 ├── wxt.config.ts         # WXT framework config
 └── package.json          # Bun workspace member
 
-# Types and shared schemas live in the workspace `@frost-mpc/types`
+# Types and shared schemas live in the workspace `@starlab/types`
 # package, NOT under the extension's own `src/`:
-packages/@frost-mpc/types/src/
+packages/@starlab/types/src/
 ├── messages.ts           # All cross-context message types
 ├── appstate.ts           # SupportedChain + app state
 └── session.ts            # SessionInfo
@@ -211,7 +211,7 @@ differ from earlier drafts:
 // Earlier drafts of this doc showed:
 //   type: 'CREATE_WALLET', payload: { name, threshold, participants }
 // Real type: CREATE_DKG_WALLET (see MESSAGE_TYPES enum in
-// packages/@frost-mpc/types/src/messages.ts:314 — earlier drafts
+// packages/@starlab/types/src/messages.ts:314 — earlier drafts
 // of this note cited :303, which was stale; the block has grown
 // as MESSAGE_TYPES entries accumulated)
 
@@ -266,5 +266,5 @@ has a condensed version covering the critical sequence.
 ## Support
 
 For issues and questions:
-- [GitHub Issues](https://github.com/hecoinfo/frost-mpc/issues)
+- [GitHub Issues](https://github.com/hecoinfo/starlab-mpc/issues)
 - [Documentation](../../../docs/)

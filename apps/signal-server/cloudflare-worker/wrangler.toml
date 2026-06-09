@@ -1,4 +1,4 @@
-name = "webrtc-signal-server-cloudflare-worker"
+name = "starlab-signal-server-cloudflare-worker"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-05-08"
 account_id = "2764ae0fd9a5cb92c9ac67708620e54c"

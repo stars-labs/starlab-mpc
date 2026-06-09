@@ -1,7 +1,7 @@
 /**
  * Tolerant parser for `session_info` payloads received over the
  * WebSocket signal server. Mirrors TUI's behaviour in
- * `apps/tui-node/src/elm/command.rs::parse_session_info`:
+ * `apps/tui/src/elm/command.rs::parse_session_info`:
  *
  * - Required fields: session_id, total, threshold.
  * - Defaulted fields (TUI fills in when absent):
@@ -19,7 +19,7 @@
  * caller (webSocketManager) logs and drops malformed payloads rather
  * than throwing.
  */
-import type { SessionInfo, SessionTypeTag } from "@frost-mpc/types/session";
+import type { SessionInfo, SessionTypeTag } from "@starlab/types/session";
 
 export function parseSessionInfoFromWire(raw: unknown): SessionInfo | null {
     if (typeof raw !== "object" || raw === null) {

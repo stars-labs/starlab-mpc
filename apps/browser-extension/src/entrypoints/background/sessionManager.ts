@@ -9,13 +9,13 @@
 // - Session state validation
 // ===================================================================
 
-import { AppState } from "@frost-mpc/types/appstate";
-import { SessionInfo, SessionProposal, SessionResponse } from "@frost-mpc/types/session";
-import { MeshStatus } from "@frost-mpc/types/mesh";
-import { DkgState } from "@frost-mpc/types/dkg";
+import { AppState } from "@starlab/types/appstate";
+import { SessionInfo, SessionProposal, SessionResponse } from "@starlab/types/session";
+import { MeshStatus } from "@starlab/types/mesh";
+import { DkgState } from "@starlab/types/dkg";
 import { WebSocketClient } from "./websocket";
-import { validateSessionProposal, validateSessionAcceptance } from "@frost-mpc/types/messages";
-import type { BackgroundToPopupMessage, OffscreenMessage } from "@frost-mpc/types/messages";
+import { validateSessionProposal, validateSessionAcceptance } from "@starlab/types/messages";
+import type { BackgroundToPopupMessage, OffscreenMessage } from "@starlab/types/messages";
 import { buildWireSessionInfo } from "../../utils/session-parse";
 
 // Session persistence removed - sessions are ephemeral for security

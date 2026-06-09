@@ -15,8 +15,8 @@
  * 4. `unsubscribe()` actually detaches the listener.
  */
 import { describe, it, expect, jest, beforeEach } from "bun:test";
-import { DkgState } from "@frost-mpc/types/dkg";
-import { MeshStatusType } from "@frost-mpc/types/mesh";
+import { DkgState } from "@starlab/types/dkg";
+import { MeshStatusType } from "@starlab/types/mesh";
 import { StateManager } from "../../../src/entrypoints/background/stateManager";
 
 function makeStateManager() {

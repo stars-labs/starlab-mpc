@@ -6,10 +6,10 @@ Successfully decoupled cryptographic curve selection from specific blockchain ch
 
 ## ✅ Completed Changes
 
-### 1. Type System Updates (`packages/@frost-mpc/types/src/appstate.ts`)
+### 1. Type System Updates (`packages/@starlab/types/src/appstate.ts`)
 
 Note: types were hoisted out of `apps/browser-extension/src/types/` into
-the shared `@frost-mpc/types` package as part of the monorepo
+the shared `@starlab/types` package as part of the monorepo
 restructure — earlier drafts of this doc referenced the old
 extension-local path.
 
@@ -27,7 +27,7 @@ export type SupportedChain =
 ```
 
 **Added Curve Compatibility System** (real signatures — verified at
-`packages/@frost-mpc/types/src/appstate.ts:183-200`):
+`packages/@starlab/types/src/appstate.ts:183-200`):
 ```typescript
 export const CURVE_COMPATIBLE_CHAINS: Record<string, SupportedChain[]> = {
   'secp256k1': ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base'],
@@ -205,5 +205,5 @@ bun test             # Bun test suite (see docs/testing/TESTING.md)
 
 The multi-Layer-2 foundation was merged in the monorepo-migration
 milestone (see `docs/CHANGELOG.md`). This doc records what changed;
-consult the live source at `packages/@frost-mpc/types/src/appstate.ts`
+consult the live source at `packages/@starlab/types/src/appstate.ts`
 for the current canonical list of supported chains.

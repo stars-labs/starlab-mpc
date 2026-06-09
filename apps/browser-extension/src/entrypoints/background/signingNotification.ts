@@ -24,7 +24,7 @@
  * signing invite via appState.invites.
  */
 
-import type { SessionInfo } from "@frost-mpc/types/session";
+import type { SessionInfo } from "@starlab/types/session";
 
 const NOTIFICATION_ID_PREFIX = "mpc-signing-req:";
 

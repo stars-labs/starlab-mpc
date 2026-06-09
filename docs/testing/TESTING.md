@@ -4,7 +4,7 @@ Covers the browser-extension test suite. For the Rust side, see
 `cargo test --workspace` plus
 [`docs/testing/RUN_TEST_INSTRUCTIONS.md`](./RUN_TEST_INSTRUCTIONS.md)
 for the 3-node manual mesh smoke test. (Earlier drafts of this
-line pointed at `apps/tui-node/docs/RUN_TEST_INSTRUCTIONS.md` —
+line pointed at `apps/tui/docs/RUN_TEST_INSTRUCTIONS.md` —
 that path doesn't exist; the file lives at the workspace `docs/`
 level, not under the TUI crate.)
 
