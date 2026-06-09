@@ -1,6 +1,5 @@
 //! Adapter to integrate TUI node's shared core with native UI
 
-use slint::Weak;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 use tui_node::core::{
@@ -15,8 +14,7 @@ use tui_node::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use tui_node::elm::model::{WalletConfig, WalletMode};
 use tui_node::elm::{Message, Model};
 
-use crate::slint_generatedMainWindow::MainWindow;
-use crate::ui_callback::NativeUICallback;
+use crate::ui_callback::{NativeUICallback, UiEvent};
 
 /// Default DKG shape for the native "Create wallet" button. The native UI
 /// doesn't yet collect threshold/total/curve, so we default to a 2-of-3
@@ -91,17 +89,17 @@ impl CoreAdapter {
     /// instance is one curve; launch again with a different curve for the other
     /// family.
     pub fn new(
-        window: Weak<MainWindow>,
+        ui_tx: UnboundedSender<UiEvent>,
         device_id: String,
         keystore_path: String,
         signal_url: String,
         curve: String,
     ) -> Self {
         let state = Arc::new(CoreState::new());
-        let ui_callback: Arc<dyn UICallback> = Arc::new(NativeUICallback::new(window));
+        let ui_callback: Arc<dyn UICallback> = Arc::new(NativeUICallback::new(ui_tx));
 
-        // on_sync: mirror the runner's model into the Slint UI after every
-        // message. Reuses NativeUICallback's Slint conversions; the async
+        // on_sync: mirror the runner's model into the UI after every
+        // message. Reuses NativeUICallback's channel pushes; the async
         // pushes are spawned since on_sync itself is synchronous. Curve-agnostic
         // (operates on Model), so it's shared by both spawn fns below.
         let cb_for_sync = ui_callback.clone();

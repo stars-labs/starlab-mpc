@@ -1,14 +1,17 @@
 [package]
-name = "mpc-wallet-native"
+name = "frost-mpc-native"
 version = "0.1.0"
 edition = "2024"
-description = "Native MPC Wallet Node with Slint UI"
+description = "Native MPC Wallet Node with Iced UI (MIT-licensed GUI stack)"
 license = "Apache-2.0"
 
 [dependencies]
-# Slint UI. femtovg renderer for better font rendering; winit backend
-# for X11, Wayland, and native on macOS/Windows.
-slint = { version = "1.9.1", features = ["backend-winit", "backend-winit-x11", "backend-winit-wayland", "renderer-winit-femtovg"] }
+# Iced UI (Elm architecture, MIT-licensed). Replaces the Slint stack —
+# Slint's licensing is unsuitable for a proprietary product, Iced is MIT.
+# The default backend (wgpu) + tiny-skia fallback covers X11, Wayland,
+# macOS and Windows. `tokio` feature wires Iced's executor to the same
+# Tokio runtime the core managers run on.
+iced = { version = "0.14", features = ["tokio"] }
 
 # tui-node::core::* is the business-logic backend — WalletManager,
 # SessionManager, DkgManager, OfflineManager, ConnectionManager,
@@ -16,8 +19,8 @@ slint = { version = "1.9.1", features = ["backend-winit", "backend-winit-x11", "
 tui-node = { path = "../tui-node" }
 hex = "0.4"
 
-# Async runtime for the Slint event-loop bridge + tokio::task::spawn_blocking
-# for rfd dialogs.
+# Async runtime for the core managers + the mpsc UICallback bridge +
+# tokio::task::spawn_blocking for rfd dialogs.
 tokio = { version = "1.42.0", features = ["full"] }
 
 # For serde_json::json! macro usage in UI-event payloads.
@@ -31,19 +34,15 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 
 # Native file-open / save dialogs for keystore import/export and SD-card
-# folder picker. Backend: GTK on Linux, NSSavePanel / NSOpenPanel on
-# macOS, IFileDialog COM on Windows.
+# folder picker.
 rfd = "0.15"
 
 # Required by tui-node::core::UICallback trait (`#[async_trait]` on the
 # NativeUICallback impl) and for timestamp formatting in log-event
-# payloads pushed to the Slint UI.
+# payloads pushed to the UI.
 async-trait = "0.1.83"
 chrono = { version = "0.4.39", features = ["serde"] }
 
 [[bin]]
-name = "mpc-wallet-native"
+name = "frost-mpc-native"
 path = "src/main.rs"
-
-[build-dependencies]
-slint-build = "1.9.1"
