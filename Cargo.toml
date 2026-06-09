@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "apps/tui-node",
-    "apps/cli-node",
+    "apps/tui",
+    "apps/cli",
     "apps/signal-server/server",
     "apps/signal-server/cloudflare-worker",
-    "packages/@frost-mpc/frost-core",
-    "packages/@frost-mpc/core-wasm",
-    "packages/@frost-mpc/blockchain",
+    "packages/@starlab/core",
+    "packages/@starlab/core-wasm",
+    "packages/@starlab/blockchain",
 ]
 resolver = "2"
 
@@ -15,7 +15,7 @@ version = "0.1.0"
 authors = ["MPC Wallet Team"]
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/hecoinfo/frost-mpc"
+repository = "https://github.com/hecoinfo/starlab-mpc"
 
 [workspace.dependencies]
 # Common dependencies shared across workspace members

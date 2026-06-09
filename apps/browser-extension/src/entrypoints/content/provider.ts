@@ -6,7 +6,7 @@ import type {
     ContentToInjectedMsg,
     JsonRpcRequest,
     JsonRpcResponse
-} from "@frost-mpc/types/messages";
+} from "@starlab/types/messages";
 
 // 定义消息接口
 export interface ContentMessage {

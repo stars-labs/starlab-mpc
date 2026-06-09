@@ -96,10 +96,10 @@ standalone server and the Worker).
 
 After deployment, test with:
 ```bash
-cargo run --bin frost-mpc-tui -p tui-node -- --device-id mpc-1
+cargo run --bin starlab-tui -p starlab-client -- --device-id mpc-1
 # Create a session
 
-cargo run --bin frost-mpc-tui -p tui-node -- --device-id mpc-2
+cargo run --bin starlab-tui -p starlab-client -- --device-id mpc-2
 # Should see the session from mpc-1
 ```
 

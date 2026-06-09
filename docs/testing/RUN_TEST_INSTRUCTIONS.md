@@ -5,27 +5,27 @@ you're at the repo root (wherever that is on your machine — no
 hardcoded paths).
 
 For an automated smoke test instead, see `scripts/smoke-dkg.sh`
-(repo root) and the cluster helpers in `apps/tui-node/scripts/`
-(`build-tui-node.sh`, `launch-3node-cluster.sh`,
+(repo root) and the cluster helpers in `apps/tui/scripts/`
+(`build-starlab-client.sh`, `launch-3node-cluster.sh`,
 `monitor-cluster.sh`, `health-check.sh`, `run-signal-server.sh`).
-There is no README inside `apps/tui-node/scripts/` — earlier
+There is no README inside `apps/tui/scripts/` — earlier
 drafts linked to one, but the scripts are self-documenting via
 top-of-file comments.
 
 ## Build first
 
 ```bash
-cargo build -p tui-node --bin frost-mpc-tui
+cargo build -p starlab-client --bin starlab-tui
 ```
 
 The instructions below assume the debug binary is at
-`./target/debug/frost-mpc-tui` (the default workspace target
+`./target/debug/starlab-tui` (the default workspace target
 directory).
 
 ## Terminal 1 — MPC-1 (session creator)
 
 ```bash
-RUST_LOG=info ./target/debug/frost-mpc-tui --device-id mpc-1
+RUST_LOG=info ./target/debug/starlab-tui --device-id mpc-1
 ```
 
 Navigate with arrow keys:
@@ -37,7 +37,7 @@ Navigate with arrow keys:
 ## Terminal 2 — MPC-2 (joiner)
 
 ```bash
-RUST_LOG=info ./target/debug/frost-mpc-tui --device-id mpc-2
+RUST_LOG=info ./target/debug/starlab-tui --device-id mpc-2
 ```
 
 1. Select **Join Session** from the main menu.
@@ -47,7 +47,7 @@ RUST_LOG=info ./target/debug/frost-mpc-tui --device-id mpc-2
 ## Terminal 3 — MPC-3 (joiner)
 
 ```bash
-RUST_LOG=info ./target/debug/frost-mpc-tui --device-id mpc-3
+RUST_LOG=info ./target/debug/starlab-tui --device-id mpc-3
 ```
 
 Same steps as MPC-2.
@@ -56,22 +56,22 @@ Same steps as MPC-2.
 > `Press n for "New Wallet"` / `Press d for "Discover Wallets"` /
 > `Press j`. None of those bindings exist — the TUI navigates by
 > arrow keys + Enter. See
-> [`apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md`](../../apps/tui-node/docs/KEYBOARD_NAVIGATION_GUIDE.md)
+> [`apps/tui/docs/KEYBOARD_NAVIGATION_GUIDE.md`](../../apps/tui/docs/KEYBOARD_NAVIGATION_GUIDE.md)
 > for the authoritative keybind table.
 
 ## What should happen
 
 1. MPC-1's Join Session list shows "👥 Participants (3/3):" once
    both joiners connect (real format at
-   `apps/tui-node/src/elm/components/join_session.rs:329`).
+   `apps/tui/src/elm/components/join_session.rs:329`).
 2. All three nodes establish pairwise WebRTC connections (mesh).
 3. The ceremony emits "🚀 Mesh ready! Starting real DKG protocol…"
-   (real at `apps/tui-node/src/elm/command.rs:1268`) and DKG
+   (real at `apps/tui/src/elm/command.rs:1268`) and DKG
    kicks off automatically.
 
 Earlier drafts of this checklist claimed MPC-2/MPC-3 show a
 "Connected to other participants" banner — that string doesn't
-exist in `apps/tui-node/src/` (grep returns zero hits). The
+exist in `apps/tui/src/` (grep returns zero hits). The
 joiner screens just render the same participant-list UI as
 MPC-1 with progressively growing `Participants (N/3)` counts.
 
@@ -79,7 +79,7 @@ MPC-1 with progressively growing `Participants (N/3)` counts.
 
 Run with `RUST_LOG=info` (or `debug`) to see the per-peer
 WebRTC lifecycle. Grep-friendly log lines from
-`apps/tui-node/src/network/webrtc.rs`:
+`apps/tui/src/network/webrtc.rs`:
 
 - `✅ WebRTC connection ESTABLISHED with <device_id>`
   (`webrtc.rs:370`) — per-peer success
@@ -96,10 +96,10 @@ uppercase string isn't emitted. The real log uses
 
 By default the TUI connects to the production signal server
 (`wss://xiongchenyu.dpdns.org`, per the `--signal-server` default
-in `apps/tui-node/src/bin/frost-mpc-tui.rs`). To run against a
+in `apps/tui/src/bin/starlab-tui.rs`). To run against a
 local signal server instead, pass `--signal-server ws://localhost:9000`
 and start the server in a fourth terminal:
 
 ```bash
-cargo run -p webrtc-signal-server
+cargo run -p starlab-signal-server
 ```

@@ -9,7 +9,7 @@ workspace member.
 
 - [`INVESTOR_GUIDE.md`](INVESTOR_GUIDE.md) — **the single investor demo
   guide** (中文: `INVESTOR_GUIDE.zh.md`). Two tracks: **A** = raw
-  `frost-mpc-cli` across three machines (ed25519), signature verified by an
+  `starlab-cli` across three machines (ed25519), signature verified by an
   *external* tool (Node/Python/OpenSSL), key shown as a real Solana address;
   **B** = the polished TUI multi-device demo (air-gap, multi-chain). Includes
   talking points, the "one device can't sign alone" proof, on-chain beat,
@@ -75,11 +75,11 @@ workspace member.
 
 Each app and package has its own docs subtree:
 
-- [`apps/tui-node/docs/`](../apps/tui-node/docs/) — largest
+- [`apps/tui/docs/`](../apps/tui/docs/) — largest
   subtree; architecture, protocol, keyboard handling, keystore
   internals. The many historical phase-summary / dev-journal
   docs have been moved under
-  [`apps/tui-node/docs/archive/dev-journal/`](../apps/tui-node/docs/archive/dev-journal/)
+  [`apps/tui/docs/archive/dev-journal/`](../apps/tui/docs/archive/dev-journal/)
   with a per-doc index explaining what each artefact documents
   (mostly retrospectives of fixes that have long since
   landed).

@@ -8,9 +8,9 @@
  */
 import { describe, it, expect, beforeEach, mock, jest } from "bun:test";
 import { SessionManager } from "../../../src/entrypoints/background/sessionManager";
-import { DkgState } from "@frost-mpc/types/dkg";
-import { MeshStatusType } from "@frost-mpc/types/mesh";
-import type { AppState } from "@frost-mpc/types/appstate";
+import { DkgState } from "@starlab/types/dkg";
+import { MeshStatusType } from "@starlab/types/mesh";
+import type { AppState } from "@starlab/types/appstate";
 
 function makeWsClientMock() {
     const announcedPayloads: Array<Record<string, unknown>> = [];

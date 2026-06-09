@@ -35,7 +35,7 @@ wrangler tail
 ## wrangler.toml (as shipped)
 
 ```toml
-name = "webrtc-signal-server-cloudflare-worker"
+name = "starlab-signal-server-cloudflare-worker"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-05-08"
 account_id = "…"                                     # your account ID

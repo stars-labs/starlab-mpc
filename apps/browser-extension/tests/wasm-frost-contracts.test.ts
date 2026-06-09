@@ -11,7 +11,7 @@
  */
 
 import { describe, test, expect, beforeAll } from 'bun:test';
-import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@frost-mpc/core-wasm';
+import wasmInit, { FrostDkgEd25519, FrostDkgSecp256k1 } from '@starlab/core-wasm';
 
 beforeAll(async () => {
     await wasmInit();

@@ -21,7 +21,7 @@ export interface DAppPermission {
 export class PermissionService {
     private static instance: PermissionService;
     private permissions: Map<string, DAppPermission> = new Map();
-    private readonly STORAGE_KEY = "frost_mpc_dapp_permissions";
+    private readonly STORAGE_KEY = "starlab_mpc_dapp_permissions";
     private initialized: boolean = false;
     private initPromise: Promise<void> | null = null;
     

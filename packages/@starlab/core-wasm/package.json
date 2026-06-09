@@ -1,0 +1,25 @@
+{
+  "name": "@starlab/core-wasm",
+  "version": "0.1.0",
+  "description": "FROST MPC WASM bindings for MPC Wallet",
+  "type": "module",
+  "main": "./pkg/starlab_core_wasm.js",
+  "types": "./pkg/starlab_core_wasm.d.ts",
+  "exports": {
+    ".": {
+      "import": "./pkg/starlab_core_wasm.js",
+      "types": "./pkg/starlab_core_wasm.d.ts"
+    }
+  },
+  "files": [
+    "pkg"
+  ],
+  "scripts": {
+    "build": "wasm-pack build --target web --out-dir pkg",
+    "build:dev": "wasm-pack build --dev --target web --out-dir pkg",
+    "clean": "rm -rf pkg target"
+  },
+  "devDependencies": {
+    "wasm-pack": "^0.13.1"
+  }
+}

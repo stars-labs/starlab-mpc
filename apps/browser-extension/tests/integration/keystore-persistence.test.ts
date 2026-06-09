@@ -3,7 +3,7 @@ import { REAL_WEBCRYPTO } from '../setup-bun';
 import { KeystoreManager } from '../../src/services/keystoreManager';
 import { KeystoreService } from '../../src/services/keystoreService';
 import { resetStorageData } from '../__mocks__/imports';
-import type { KeyShareData, ExtensionWalletMetadata } from "@frost-mpc/types/keystore";
+import type { KeyShareData, ExtensionWalletMetadata } from "@starlab/types/keystore";
 
 // Mock chrome.storage
 const mockStorage = {

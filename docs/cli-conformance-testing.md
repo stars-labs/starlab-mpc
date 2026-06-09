@@ -2,8 +2,8 @@
 
 **Status:** Design proposal (no implementation yet)
 **Owner:** MPC wallet team
-**Scope:** `apps/cli-node` as the test oracle and automated peer for the whole MPC stack
-**Related:** `apps/tui-node`, `apps/native-node`, `apps/browser-extension`, `apps/signal-server`
+**Scope:** `apps/cli` as the test oracle and automated peer for the whole MPC stack
+**Related:** `apps/tui`, `apps/native-node`, `apps/browser-extension`, `apps/signal-server`
 
 ---
 
@@ -14,10 +14,10 @@ protocol:
 
 | Client | Language | Core | UI |
 |---|---|---|---|
-| TUI node (`apps/tui-node`) | Rust | `tui_node::elm` + `tui_node::core` | Ratatui |
-| Native node (`apps/native-node`) | Rust | reuses `tui_node::core` + `HeadlessRunner` | Slint |
-| CLI node (`apps/cli-node`) | Rust | reuses `tui_node::elm::HeadlessRunner` | JSONL stdin/stdout |
-| Browser extension (`apps/browser-extension`) | TypeScript + WASM | independent reimpl of FROST glue over `@frost-mpc/core-wasm` | Svelte 5 |
+| TUI node (`apps/tui`) | Rust | `starlab_client::elm` + `starlab_client::core` | Ratatui |
+| Native node (`apps/native-node`) | Rust | reuses `starlab_client::core` + `HeadlessRunner` | Slint |
+| CLI node (`apps/cli`) | Rust | reuses `starlab_client::elm::HeadlessRunner` | JSONL stdin/stdout |
+| Browser extension (`apps/browser-extension`) | TypeScript + WASM | independent reimpl of FROST glue over `@starlab/core-wasm` | Svelte 5 |
 
 Three of the four (TUI, native, CLI) share the **same Rust Elm core**. The extension is a
 **separate implementation** of the same ceremony, sharing only the FROST primitives (via
@@ -229,7 +229,7 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 ```
                          ┌─────────────────────────────────────────────┐
                          │              Shared Rust Elm core            │
-                         │     tui_node::elm  +  tui_node::core         │
+                         │     starlab_client::elm  +  starlab_client::core         │
                          └───────▲──────────────▲──────────────▲────────┘
                                  │              │              │
                     ┌────────────┴──┐   ┌───────┴──────┐  ┌────┴─────────┐
@@ -290,7 +290,7 @@ the Rust core.
 **What:** For each flow, capture the **exact sequence of wire messages** (the
 `relay`/`announce_session`/`session_available`/… frames as serialized JSON) plus the
 **JSONL event stream** the CLI emits, and freeze them as golden files under
-`apps/cli-node/tests/fixtures/`.
+`apps/cli/tests/fixtures/`.
 
 **How:** Add a `--trace <path>` option to `serve`/`simulate` (see §7) that tees every wire
 frame sent/received and every `CliEvent` emitted, with **volatile fields redacted/
@@ -343,7 +343,7 @@ Three sub-harnesses, one per non-CLI client:
 
 #### L3·0 — CLI ↔ CLI across processes (foundation) ✅
 
-Before any cross-*client* interop, the substrate is two real `frost-mpc-cli
+Before any cross-*client* interop, the substrate is two real `starlab-cli
 serve` **binaries** driven over JSONL, with the signal server in-process. This
 is the first thing to exercise the compiled bin's stdin/stdout surface (the lib
 tests never do) and the first place teardown is real OS process death — which is
@@ -482,7 +482,7 @@ the bug to the client's non-shared layer by construction.
 
 ## 7. Required CLI enhancements
 
-Small, additive changes to `apps/cli-node` to support the harness. None change existing
+Small, additive changes to `apps/cli` to support the harness. None change existing
 behavior by default.
 
 1. **`session_announced` event.** When a `serve` node *creates* a session (DKG or
@@ -518,7 +518,7 @@ All five are backward-compatible and independently shippable.
 ## 8. Repository layout
 
 ```
-apps/cli-node/
+apps/cli/
   src/...                         # existing
   tests/
     e2e_dkg.rs                    # existing — extend into the L1 matrix
@@ -539,7 +539,7 @@ scripts/
                                   #       run PTY (TUI) / Playwright (extension) drivers
 ```
 
-TUI PTY driver (L3b) lives under `apps/tui-node/tests/` or `scripts/conformance/` depending
+TUI PTY driver (L3b) lives under `apps/tui/tests/` or `scripts/conformance/` depending
 on whether `portable-pty` becomes a dev-dependency of the crate or an external script.
 
 ---
@@ -559,7 +559,7 @@ The existing `.github/workflows/ci.yml` (rust job + extension bun job) is extend
 `bun install`s, builds the extension, boots `apps/signal-server`, and runs Playwright.
 
 Golden regeneration is a deliberate, reviewed action (`BLESS=1 cargo test -p
-frost-mpc-cli`), so a protocol change shows up as a fixture diff in the PR.
+starlab-cli`), so a protocol change shows up as a fixture diff in the PR.
 
 ---
 
@@ -662,10 +662,10 @@ None had any prior test.
 A static check of the extension's independent crypto answered the most important L4
 question without a browser:
 
-- **Address derivation.** The extension's WASM (`@frost-mpc/core-wasm`) derives Ethereum
+- **Address derivation.** The extension's WASM (`@starlab/core-wasm`) derives Ethereum
   addresses via `frost-core::Secp256k1Curve::get_eth_address`, which **decompresses the key
   correctly** (`k256::from_sec1_bytes → to_encoded_point(false) → keccak(X‖Y)[12..]`). So
-  bug #2 was specific to the divergent `tui_node::blockchain_config` impl (now fixed to
+  bug #2 was specific to the divergent `starlab_client::blockchain_config` impl (now fixed to
   match); the extension was already correct. Pin this with the same golden vectors when the
   browser harness lands.
 - **FROST compatibility.** `core-wasm` builds on the same `frost_secp256k1` / `frost_ed25519`

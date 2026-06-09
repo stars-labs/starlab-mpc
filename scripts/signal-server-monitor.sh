@@ -42,7 +42,7 @@ print_header() {
 
 # Get server process info
 get_server_info() {
-    local pid=$(pgrep -f "webrtc-signal-server" | head -1)
+    local pid=$(pgrep -f "starlab-signal-server" | head -1)
     if [ ! -z "$pid" ]; then
         echo "$pid"
     else

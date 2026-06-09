@@ -1,7 +1,7 @@
 // Orchestrate CLI co-signer peers for the L3c interop harness (#33).
 //
 // Reuses the verified `scripts/demo/serve_autojoin.py` reactive driver: each
-// peer spawns a `frost-mpc-cli serve` node that auto-joins the DKG session the
+// peer spawns a `starlab-cli serve` node that auto-joins the DKG session the
 // EXTENSION creates and auto-approves signing. We parse the driver's
 // machine-readable `RESULT <node> dkg_complete <wallet> <addr> <groupkey>` /
 // `RESULT <node> signature_complete <hash> <sig>` lines.
@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "../../../..");
 const DRIVER = path.join(REPO_ROOT, "scripts/demo/serve_autojoin.py");
-const CLI_BIN = path.join(REPO_ROOT, "target/release/frost-mpc-cli");
+const CLI_BIN = path.join(REPO_ROOT, "target/release/starlab-cli");
 
 export type DkgResult = { wallet: string; address: string; groupKey: string };
 
@@ -37,7 +37,7 @@ export function freshRoom(): string {
 export function ensurePrereqs(): void {
   if (!fs.existsSync(CLI_BIN)) {
     throw new Error(
-      `CLI binary not found at ${CLI_BIN}. Run \`cargo build --release -p frost-mpc-cli\`.`,
+      `CLI binary not found at ${CLI_BIN}. Run \`cargo build --release -p starlab-cli\`.`,
     );
   }
   if (!fs.existsSync(DRIVER)) {

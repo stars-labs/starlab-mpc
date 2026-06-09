@@ -33,10 +33,10 @@
  */
 import { describe, it, expect, beforeEach, jest } from "bun:test";
 import { SessionManager } from "../../../src/entrypoints/background/sessionManager";
-import { DkgState } from "@frost-mpc/types/dkg";
-import { MeshStatusType } from "@frost-mpc/types/mesh";
-import type { AppState } from "@frost-mpc/types/appstate";
-import type { SessionInfo } from "@frost-mpc/types/session";
+import { DkgState } from "@starlab/types/dkg";
+import { MeshStatusType } from "@starlab/types/mesh";
+import type { AppState } from "@starlab/types/appstate";
+import type { SessionInfo } from "@starlab/types/session";
 
 function makeInvite(overrides: Partial<SessionInfo> = {}): SessionInfo {
     return {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""serve_autojoin.py — drive one `frost-mpc-cli serve` node hands-off.
+"""serve_autojoin.py — drive one `starlab-cli serve` node hands-off.
 
 A reactive JSONL driver for the rehearsal harness (#30). It spawns a CLI
 `serve` daemon and:
@@ -44,7 +44,7 @@ def main():
     ap.add_argument("--signal", required=True)
     ap.add_argument("--room", default="")
     ap.add_argument("--curve", default="secp256k1")
-    ap.add_argument("--cli", default="./target/release/frost-mpc-cli")
+    ap.add_argument("--cli", default="./target/release/starlab-cli")
     ap.add_argument("--pw-var", default=os.environ.get("MPC_PW_VAR", "MPC_REHEARSAL_PW"),
                     help="env var name holding the wallet password")
     args = ap.parse_args()

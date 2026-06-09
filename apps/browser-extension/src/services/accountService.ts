@@ -1,6 +1,6 @@
-import { Account } from "@frost-mpc/types/account";
+import { Account } from "@starlab/types/account";
 import { KeystoreManager } from './keystoreManager';
-import type { NewAccountSession } from "@frost-mpc/types/keystore";
+import type { NewAccountSession } from "@starlab/types/keystore";
 
 type AccountChangeCallback = (account: Account | null) => void;
 

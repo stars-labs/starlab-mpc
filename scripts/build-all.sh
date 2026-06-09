@@ -6,20 +6,20 @@ set -e
 echo "🔨 Building MPC Wallet Monorepo..."
 
 # Build WASM package first
-echo "📦 Building @frost-mpc/core-wasm..."
-cd packages/@frost-mpc/core-wasm
+echo "📦 Building @starlab/core-wasm..."
+cd packages/@starlab/core-wasm
 bun run build
 cd ../../..
 
 # Build TypeScript types package
-echo "📦 Building @frost-mpc/types..."
-cd packages/@frost-mpc/types
+echo "📦 Building @starlab/types..."
+cd packages/@starlab/types
 bun run build
 cd ../../..
 
-# Note: `@frost-mpc/utils` used to be listed here but the package
+# Note: `@starlab/utils` used to be listed here but the package
 # was never created in the monorepo transform; the previous script
-# would error out at `cd packages/@frost-mpc/utils`.
+# would error out at `cd packages/@starlab/utils`.
 
 # Build browser extension
 echo "🌐 Building browser extension..."
@@ -29,7 +29,7 @@ cd ../..
 
 # Build the Rust workspace (engine + cli + tui + signal-server; the GUI
 # products live in their own repos).
-echo "🦀 Building Rust workspace (cli + tui-node + frost-core + signal-server)..."
+echo "🦀 Building Rust workspace (cli + starlab-client + frost-core + signal-server)..."
 cargo build --workspace
 
 echo "✅ Build complete!"

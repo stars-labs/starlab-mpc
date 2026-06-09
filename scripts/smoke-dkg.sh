@@ -2,7 +2,7 @@
 #
 # smoke-dkg.sh — 3-node FROST DKG end-to-end smoke test.
 #
-# Drives (or observes) three `frost-mpc-tui` instances and asserts they
+# Drives (or observes) three `starlab-tui` instances and asserts they
 # converge on the same group verifying key. Designed to give a PASS/FAIL
 # verdict in <60s so iterations on the Elm/DKG code get a tight loop.
 #
@@ -57,10 +57,10 @@ done
 # ---------------------------------------------------------------
 # Prereqs
 # ---------------------------------------------------------------
-BINARY="$REPO_ROOT/target/debug/frost-mpc-tui"
+BINARY="$REPO_ROOT/target/debug/starlab-tui"
 if [[ ! -x "$BINARY" ]]; then
     echo ">> Binary not found, building…"
-    cargo build -p tui-node --bin frost-mpc-tui 2>&1 | tail -5
+    cargo build -p starlab-client --bin starlab-tui 2>&1 | tail -5
     [[ -x "$BINARY" ]] || { echo "FAIL: build produced no binary" >&2; exit 1; }
 fi
 
@@ -74,7 +74,7 @@ fi
 # ---------------------------------------------------------------
 LOG_FILES=()
 for id in "${DEVICE_IDS[@]}"; do
-    log="$REPO_ROOT/frost-mpc-$id.log"
+    log="$REPO_ROOT/starlab-mpc-$id.log"
     : > "$log"  # truncate
     LOG_FILES+=("$log")
 done
@@ -103,9 +103,9 @@ if [[ "$MODE" == "manual" ]]; then
     cat <<EOF
 >> Manual mode. Open 3 terminals and in each run (from this repo root):
 
-    target/debug/frost-mpc-tui --device-id mpc-1
-    target/debug/frost-mpc-tui --device-id mpc-2
-    target/debug/frost-mpc-tui --device-id mpc-3
+    target/debug/starlab-tui --device-id mpc-1
+    target/debug/starlab-tui --device-id mpc-2
+    target/debug/starlab-tui --device-id mpc-3
 
    Drive mpc-1 through CreateWallet → ThresholdConfig → …; drive mpc-2 and
    mpc-3 through JoinSession. This watcher will wait up to ${TIMEOUT_SECS}s
@@ -142,7 +142,7 @@ while :; do
     all_have_key=true
     for id in "${DEVICE_IDS[@]}"; do
         if [[ -z "${KEYS[$id]:-}" ]]; then
-            log="$REPO_ROOT/frost-mpc-$id.log"
+            log="$REPO_ROOT/starlab-mpc-$id.log"
             # Skip if log file still empty (process not writing yet).
             [[ -s "$log" ]] || { all_have_key=false; continue; }
             if grep -q "$SUCCESS_MARKER" "$log"; then
@@ -190,7 +190,7 @@ echo
 echo "PASS: 3-node DKG converged on $ref_key in ${elapsed}s."
 echo
 echo "Leftover artifacts:"
-echo "  - Per-device logs: frost-mpc-mpc-{1,2,3}.log"
+echo "  - Per-device logs: starlab-mpc-mpc-{1,2,3}.log"
 if [[ "$MODE" == "tmux" ]]; then
     echo "  - tmux session 'mpc-smoke' (kill with: tmux kill-session -t mpc-smoke)"
 fi

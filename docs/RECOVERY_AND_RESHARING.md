@@ -118,7 +118,7 @@ plumbing:
   the WebRTC mesh. A new session type `reshare` (alongside `dkg`/`signing`).
 - **Client engine:** drive `resharing::refresh` over the mesh (the per-participant round
   packages instead of the in-process loop). Output share replaces the on-disk keystore.
-- **CLI surface (proposed):** `frost-mpc-cli reshare --wallet-id <id> --keep alice,bob`
+- **CLI surface (proposed):** `starlab-cli reshare --wallet-id <id> --keep alice,bob`
   (the surviving/retained set) + `session join` for the others — same UX shape as
   `wallet create`. *(Removing a device = omit it from `--keep`. Adding a fresh device is a
   separate keystore-restore/enrollment step, not a flag here — see §2b.)*
@@ -156,6 +156,6 @@ offer.
 
 ## 7. Cross-references
 - Seed vs share, recovery matrix: [`MULTI_CURVE_DERIVATION.md`](MULTI_CURVE_DERIVATION.md)
-- Encrypted keystore: `packages/@frost-mpc/frost-core/src/keystore.rs`
+- Encrypted keystore: `packages/@starlab/core/src/keystore.rs`
 - Refresh primitive: `frost-core::keys::refresh` (upstream 2.2)
-- DKG engine the reshare path would extend: `packages/@frost-mpc/frost-core/src/{unified_dkg,curve_registry}.rs`
+- DKG engine the reshare path would extend: `packages/@starlab/core/src/{unified_dkg,curve_registry}.rs`

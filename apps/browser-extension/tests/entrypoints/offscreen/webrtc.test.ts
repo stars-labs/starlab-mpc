@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import wasmInit from '@frost-mpc/core-wasm';
+import wasmInit from '@starlab/core-wasm';
 import { beforeAll } from 'bun:test';
 
 // Export helper functions for use in other test files

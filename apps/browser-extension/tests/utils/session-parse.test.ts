@@ -18,16 +18,16 @@ import {
     parseSessionInfoFromWire,
     buildWireSessionInfo,
 } from "../../src/utils/session-parse";
-import type { SessionInfo } from "@frost-mpc/types/session";
+import type { SessionInfo } from "@starlab/types/session";
 
 describe("parseSessionInfoFromWire", () => {
     it("accepts a minimal TUI-shaped DKG announcement", () => {
         const wire = {
             session_id: "dkg_abc",
-            proposer_id: "tui-node-1",
+            proposer_id: "starlab-client-1",
             total: 3,
             threshold: 2,
-            participants: ["tui-node-1"],
+            participants: ["starlab-client-1"],
             session_type: "dkg",
             curve_type: "secp256k1",
             coordination_type: "Network",

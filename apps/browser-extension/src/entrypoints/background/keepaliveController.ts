@@ -23,7 +23,7 @@
 // that IS happening doesn't die under our feet.
 // ===================================================================
 
-import { DkgState } from "@frost-mpc/types/dkg";
+import { DkgState } from "@starlab/types/dkg";
 
 /** Message shape sent to offscreen. Must carry `target: "offscreen"`
  *  so the offscreen entrypoint routes it correctly and non-offscreen

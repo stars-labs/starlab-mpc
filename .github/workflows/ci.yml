@@ -28,11 +28,11 @@ jobs:
 
       # This repo is the headless engine + terminal clients. The GUI products
       # (browser extension, Iced desktop in stars-labs/starlab-desktop) live
-      # elsewhere. The headless stack (cli, tui-node, signal-server) covers the
+      # elsewhere. The headless stack (cli, starlab-client, signal-server) covers the
       # real DKG/signing path.
       - name: Unit tests
-        run: cargo test -p frost-mpc-cli -p webrtc-signal-server --locked
-             && cargo test -p tui-node --lib --locked
+        run: cargo test -p starlab-cli -p starlab-signal-server --locked
+             && cargo test -p starlab-client --lib --locked
 
       # The end-to-end tests are #[ignore] by default (real WebRTC over
       # loopback). They need full UDP / link-local connectivity for ICE, which
@@ -44,21 +44,21 @@ jobs:
       # docs/cli-conformance-testing.md §9). They pass locally in ~80s.
       - name: End-to-end DKG + threshold signing (real FROST/WebRTC)
         continue-on-error: true
-        run: cargo test -p frost-mpc-cli --test e2e_dkg --locked -- --ignored --test-threads=1
+        run: cargo test -p starlab-cli --test e2e_dkg --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
       # L1 conformance matrix (docs/cli-conformance-testing.md): the full
       # (n,t) DKG + quorum-signing table, reporting every shape that breaks.
       - name: L1 conformance matrix (DKG/sign over all shapes)
         continue-on-error: true
-        run: cargo test -p frost-mpc-cli --test conformance_matrix --locked -- --ignored --test-threads=1
+        run: cargo test -p starlab-cli --test conformance_matrix --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
       # L3 process isolation across two real `serve` binaries: DKG, malformed-
       # input survival, and LIFE-2 cold-start signing after a real restart.
       - name: L3 serve-process interop (DKG + signing + error handling)
         continue-on-error: true
-        run: cargo test -p frost-mpc-cli --test l3_serve_process --locked -- --ignored --test-threads=1
+        run: cargo test -p starlab-cli --test l3_serve_process --locked -- --ignored --test-threads=1
         timeout-minutes: 12
 
       # L2 wire-frame golden: captures the real signal-server protocol via a
@@ -66,7 +66,7 @@ jobs:
       # extension must match).
       - name: L2 wire-protocol golden (recording proxy; DKG + signing)
         continue-on-error: true
-        run: cargo test -p frost-mpc-cli --test wire_trace --locked -- --ignored --test-threads=1
+        run: cargo test -p starlab-cli --test wire_trace --locked -- --ignored --test-threads=1
         timeout-minutes: 10
 
   extension:
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # The extension tests load the REAL core-wasm glue (not a mock) and import
-      # @frost-mpc/types subpaths (e.g. .../dkg) that resolve to the types
+      # @starlab/types subpaths (e.g. .../dkg) that resolve to the types
       # package's `dist/` — neither is committed, so both must be built here.
       - name: Install Rust toolchain (wasm32 for wasm-pack)
         uses: dtolnay/rust-toolchain@stable
@@ -94,17 +94,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       # `--ignore-scripts`: the extension's postinstall (`wxt prepare`) imports
-      # @frost-mpc/types/* and would fail before `dist/` exists. Skip lifecycle
+      # @starlab/types/* and would fail before `dist/` exists. Skip lifecycle
       # scripts at install, build the deps, then prepare explicitly.
       - run: bun install --frozen-lockfile --ignore-scripts
 
       # Invoke wasm-pack from PATH (the jetli-installed binary), NOT `bun run
       # build:wasm` — the npm shim's binary wasn't downloaded under --ignore-scripts.
       - name: Build core-wasm (tests load the real WASM glue)
-        run: cd packages/@frost-mpc/core-wasm && wasm-pack build --target web --out-dir pkg
+        run: cd packages/@starlab/core-wasm && wasm-pack build --target web --out-dir pkg
 
-      - name: Build shared types (provides @frost-mpc/types/* dist subpaths)
-        run: bun run --filter '@frost-mpc/types' build
+      - name: Build shared types (provides @starlab/types/* dist subpaths)
+        run: bun run --filter '@starlab/types' build
 
       - name: Prepare WXT (now that types dist exists)
         run: cd apps/browser-extension && bunx wxt prepare

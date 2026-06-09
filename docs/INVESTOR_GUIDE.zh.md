@@ -33,13 +33,13 @@
 
 ```bash
 # once per device
-git clone <repo> && cd frost-mpc
+git clone <repo> && cd starlab-mpc
 nix develop                      # or have the toolchain installed
 
 # Track A (raw CLI): build the CLI
-cargo build --release -p frost-mpc-cli      # binary: ./target/release/frost-mpc-cli
+cargo build --release -p starlab-cli      # binary: ./target/release/starlab-cli
 # Track B (TUI): build the TUI
-cargo build --release -p tui-node
+cargo build --release -p starlab-client
 ```
 
 - 在线路径需要**联网**（`wss://panda.qzz.io`）。没有网络？见 §6 第 1 级。
@@ -74,7 +74,7 @@ SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh
 它会**端到端**跑完整的 DKG（2-of-2 / 2-of-3 / 3-of-5）和门限签名，每个只需几秒，然后检查信令服务器是否可达。全部 ✅ → 可以开始。任何 ❌ → 修好它，或降级（§6）。这是最重要的一步 —— 它就是对"出事怎么办"的回答：你先在私下确保根本不会出事。
 
 > 为什么它值得信任：`preflight` 运行 `scripts/demo/ceremony.sh`，它把一个真实的 N 节点
-> FROST 仪式作为**彼此独立的 `frost-mpc-cli` 进程**拉起 —— 每个进程都有自己的磁盘密钥库，
+> FROST 仪式作为**彼此独立的 `starlab-cli` 进程**拉起 —— 每个进程都有自己的磁盘密钥库，
 > 通过真实的 WebRTC、经由真实的（本地）信令服务器通信。没有任何东西在单一进程里造假，
 > 它与真实客户端走的是同一条代码路径。
 
@@ -94,7 +94,7 @@ SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh
 > | "这是预录的 / 提前准备好的。" | 由投资人**当场指定消息**。签名随之改变；它仍然能通过验证。 |
 > | "密钥是一次性生成后硬编码进去的。" | **现场通过 DKG 创建一个全新的钱包**；密钥每次运行都不同，并依赖于三台机器各自的随机数。 |
 
-> **协议传输层。** 每个节点运行 `frost-mpc-cli serve`，它说的是
+> **协议传输层。** 每个节点运行 `starlab-cli serve`，它说的是
 > **以换行符分隔的 JSON**：你在 stdin 上输入一个命令对象，它在 stdout 上打印事件对象。
 > 投资人字面上能看到线路协议 —— 没有任何隐藏。
 
@@ -104,17 +104,17 @@ SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh
 
 ```bash
 # alice
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id alice --keystore ~/.frost_alice \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 
 # bob
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id bob --keystore ~/.frost_bob \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 
 # carol
-./target/release/frost-mpc-cli serve --curve ed25519 \
+./target/release/starlab-cli serve --curve ed25519 \
   --device-id carol --keystore ~/.frost_carol \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 ```
@@ -238,7 +238,7 @@ openssl pkeyutl -verify -pubin -inkey pub.pem -rawin -in msg.bin -sigfile sig.bi
 
 ### 3.4 进阶：一笔真实的 Solana 区块链交易
 
-最有力的版本：MPC 钱包签署一笔真实的 Solana 转账，并让它上链，可在公开的区块浏览器中看到。分工（这正是它可信的原因）：由**标准的 `@solana/web3.js` 库**来构建并提交交易；我们的**原生 `frost-mpc-cli` 只负责签名**。辅助脚本：`scripts/demo/solana_onchain.mjs`。
+最有力的版本：MPC 钱包签署一笔真实的 Solana 转账，并让它上链，可在公开的区块浏览器中看到。分工（这正是它可信的原因）：由**标准的 `@solana/web3.js` 库**来构建并提交交易；我们的**原生 `starlab-cli` 只负责签名**。辅助脚本：`scripts/demo/solana_onchain.mjs`。
 
 > **始终从 `group_public_key` 派生地址**（`solana_onchain.mjs address
 > <groupKeyHex>`），而不是从 `dkg_complete` 事件的 `address` 字段派生 —— 该字段目前对 ed25519
@@ -293,7 +293,7 @@ node scripts/demo/solana_onchain.mjs finalize <signatureHex>          # submits;
 每位参与者在自己的笔记本上启动终端界面：
 
 ```bash
-cargo run --release --bin frost-mpc-tui -p tui-node -- \
+cargo run --release --bin starlab-tui -p starlab-client -- \
   --device-id alice \
   --signal-server wss://panda.qzz.io \
   --room "$ROOM"
@@ -332,7 +332,7 @@ cargo run --release --bin frost-mpc-tui -p tui-node -- \
 
 ```bash
 # 在持有钱包的节点上 —— 轮换所有分片（地址不变，分片全新）：
-frost-mpc-cli reshare --wallet-id <W> --room "$ROOM"
+starlab-cli reshare --wallet-id <W> --room "$ROOM"
 #   → 保留下来的签名方在被广播的 reshare 会话上执行 `session join`
 #     （或 `serve --auto-approve`）来批准，就像一笔多方共签的交易。
 
@@ -351,7 +351,7 @@ scripts/demo/ceremony.sh --nodes 3 --threshold 2 --reshare
 > 单密钥的托管钱包做不到这其中任何一点。"
 
 > **无需现场搭建的证明：** `scripts/demo/ceremony.sh … --reshare` 在真实的独立进程上跑完
-> 整个刷新，并断言地址保持不变；该引擎同时也在测试套件里被验证（`cargo test -p frost-mpc-cli`）。
+> 整个刷新，并断言地址保持不变；该引擎同时也在测试套件里被验证（`cargo test -p starlab-cli`）。
 > 完整的威胁模型 + 话术见 `docs/RECOVERY_AND_RESHARING.md`。
 
 ---
@@ -363,7 +363,7 @@ scripts/demo/ceremony.sh --nodes 3 --threshold 2 --reshare
 | 级别 | 触发条件 | 操作 |
 |---|---|---|
 | **0. 在线** | 正常 | 通过 `wss://panda.qzz.io` + 一个共享 `--room` 进行多设备演示。 |
-| **1. 本地 / 局域网服务器** | 网络不稳 / panda 不可达 | 一台笔记本：`MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p webrtc-signal-server`。所有人用 `--signal-server ws://<笔记本的局域网-ip>:9000` 重启（本地服务器**不需要**房间）。同样的演示，无需互联网。 |
+| **1. 本地 / 局域网服务器** | 网络不稳 / panda 不可达 | 一台笔记本：`MPC_SIGNAL_BIND=0.0.0.0:9000 cargo run --release -p starlab-signal-server`。所有人用 `--signal-server ws://<笔记本的局域网-ip>:9000` 重启（本地服务器**不需要**房间）。同样的演示，无需互联网。 |
 | **2. 单台笔记本，视觉版**（TUI） | 某位参与者的设备出问题 | `scripts/demo/demo-local.sh` → 在一台机器上、用 tmux 网格跑本地服务器 + 3 个 TUI 节点。看起来仍然像多方。 |
 | **3. 核选项（绝不失败）** | 一切都着火了 | `scripts/demo/ceremony.sh --nodes 3 --threshold 2 --curve ed25519 --sign "we closed the round"` → 拉起一个本地信令服务器，在**彼此独立的真实进程**上跑完整的 DKG + 门限签名，几秒完成，自包含（无需互联网）。它打印群公钥 + 签名；用 §3.3 来验证。"这就是密码学，此刻正在工作 —— 三个独立进程，没有任何造假。" |
 
@@ -431,7 +431,7 @@ PASSWORD:     demo                             # throwaway, never a real one
 PRE-FLIGHT:   SIGNAL=wss://panda.qzz.io scripts/demo/preflight.sh     # all ✅ → go
 
 — Track A (raw CLI) —
-START (each):  frost-mpc-cli serve --curve ed25519 --device-id <name> \
+START (each):  starlab-cli serve --curve ed25519 --device-id <name> \
                  --keystore ~/.frost_<name> --signal-server wss://panda.qzz.io --room "$ROOM"
 alice:         {"cmd":"create_wallet","threshold":2,"total":3,"password":"demo"}
 bob,carol:     {"cmd":"join_session","session_id":"<dkg_…>","password":"demo"}

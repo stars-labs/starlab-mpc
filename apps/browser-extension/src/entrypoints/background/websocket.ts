@@ -4,7 +4,7 @@ import type {
     WebSocketClientMsg,
     WebSocketServerMsg,
     OffscreenToBackgroundMsg
-} from "@frost-mpc/types/messages";
+} from "@starlab/types/messages";
 
 type MessageCallback = (message: WebSocketServerMsg) => void;
 type ErrorCallback = (error: Event) => void;
@@ -102,7 +102,7 @@ export class WebSocketClient {
      * Announce a session (DKG or Signing) to the signal server. The
      * server stores it in its Durable Object and broadcasts a
      * `session_available` frame to every OTHER connected device — the
-     * same channel TUI uses (see `apps/tui-node/src/elm/command.rs`
+     * same channel TUI uses (see `apps/tui/src/elm/command.rs`
      * near line 555 + signal-server's cloudflare-worker lib.rs:218).
      *
      * `sessionInfo` must already be in the TUI-compatible wire shape

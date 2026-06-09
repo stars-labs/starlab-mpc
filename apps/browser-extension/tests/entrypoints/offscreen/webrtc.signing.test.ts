@@ -9,7 +9,7 @@ import {
     createTestDkgInstances,
     cleanupDkgInstances
 } from './test-utils';
-import { FrostDkgEd25519 } from '@frost-mpc/core-wasm';
+import { FrostDkgEd25519 } from '@starlab/core-wasm';
 
 let originalConsoleLog: any;
 let originalConsoleError: any;

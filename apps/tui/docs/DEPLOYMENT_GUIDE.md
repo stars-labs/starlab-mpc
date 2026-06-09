@@ -1,0 +1,226 @@
+# TUI Node Deployment Guide
+
+Covers running the standalone Rust signal server + one or more TUI
+nodes. For the browser extension + native-node + Cloudflare-Worker
+paths, see the workspace-level `docs/deployment/README.md` +
+`docs/deployment/CLOUDFLARE_DEPLOYMENT.md`.
+
+## Quick Start
+
+Scripts referenced below live at **`apps/tui/scripts/`** (not
+`./scripts/` at the repo root — that's a different set for
+workspace-wide build/test/clean).
+
+```bash
+# From the repo root
+cd apps/tui
+
+# Build the signal server binary (release mode)
+./scripts/build-signal-server.sh
+
+# Build the TUI binary
+./scripts/build-starlab-client.sh
+
+# Launch signal server + 3 TUI nodes locally
+./scripts/launch-3node-cluster.sh
+
+# Health check (verifies signal server is reachable + each node is up)
+./scripts/health-check.sh [--verbose]
+
+# Continuous monitoring
+./scripts/monitor-cluster.sh
+```
+
+## Deployment methods
+
+### Method 1: direct invocation
+
+Start signal server:
+
+```bash
+# The signal server binds 0.0.0.0:9000 unconditionally — no env var
+# controls this today (verified: signal-server/server/src/main.rs
+# reads zero env vars). If you need a different port, patch main.rs.
+cargo run --release -p starlab-signal-server
+```
+
+Or use the wrapper script:
+
+```bash
+./scripts/run-signal-server.sh
+```
+
+Start TUI nodes in separate terminals:
+
+```bash
+# Terminal 1
+cargo run -p starlab-client --bin starlab-tui -- \
+  --signal-server ws://localhost:9000 --device-id mpc-1
+
+# Terminal 2
+cargo run -p starlab-client --bin starlab-tui -- \
+  --signal-server ws://localhost:9000 --device-id mpc-2
+
+# Terminal 3
+cargo run -p starlab-client --bin starlab-tui -- \
+  --signal-server ws://localhost:9000 --device-id mpc-3
+```
+
+Omit `--signal-server` to use the default
+`wss://xiongchenyu.dpdns.org` (the Cloudflare Worker deployment
+bound to that domain).
+
+### Method 2: systemd
+
+The repo does NOT ship pre-built systemd unit files — earlier
+drafts of this guide referenced `systemd/mpc-signal-server.service`
++ `starlab-mpc-cluster.target` + `starlab-mpc-node@.service` that
+don't exist (verified: no `systemd/` dir, no `.service` files in
+the tree).
+
+For a self-hosted production deployment, write your own unit files
+adapted from the template in `docs/deployment/README.md` § "systemd
+unit template". The binary paths are whatever you place under
+`/opt/starlab-mpc/` or similar after `cargo build --release`.
+
+## Configuration
+
+### Signal server
+
+Reads zero environment variables. Binds `0.0.0.0:9000` as hardcoded
+in `apps/signal-server/server/src/main.rs:35`. To change the bind
+address, edit that line (or add a CLI flag + wire it through).
+
+### TUI node
+
+Accepts these CLI flags (authoritative:
+`apps/tui/src/bin/starlab-tui.rs`):
+
+| Flag                      | Default                           |
+|---------------------------|-----------------------------------|
+| `--device-id <ID>`        | hostname                          |
+| `--signal-server <URL>`   | `wss://xiongchenyu.dpdns.org`     |
+| `--offline`               | (off)                             |
+| `--log-location <PATH>`   | `~/.frost_keystore/logs/starlab-mpc.log` |
+| `--log-level <LEVEL>`     | `info`                            |
+
+Environment: only `HOME` (to compute the keystore path), `RUST_LOG`
+(tracing-subscriber directive), and `PERF_MONITORING` (enables
+the `perf_monitor` instrumentation) are consulted.
+
+There is no `DATA_DIR` env var — the keystore location is fixed at
+`~/.frost_keystore` (see the keystore-directory fix in 22ae959).
+
+## Health checks and monitoring
+
+Real helper scripts live in two places:
+
+**Repo-root `scripts/`** (signal-server focused):
+
+```bash
+# Continuous signal-server health monitor (polls WS upgrade on a loop)
+./scripts/signal-server-monitor.sh
+
+# Debug runner that starts the signal server with verbose logging
+./scripts/signal-server-debug.sh
+```
+
+**`apps/tui/scripts/`** (node + cluster focused):
+
+```bash
+# Per-node health check
+./apps/tui/scripts/health-check.sh
+
+# 3-node cluster monitoring
+./apps/tui/scripts/monitor-cluster.sh
+```
+
+(Correction to earlier drafts of this section: an earlier retraction
+here claimed `health-check.sh` / `monitor-cluster.sh` /
+`launch-3node-cluster.sh` didn't exist in-tree. They don't exist at
+the repo-root `scripts/` level, but they DO exist under
+`apps/tui/scripts/`. The earlier `ls scripts/`-based check was
+scoped too narrowly. Full list:
+`apps/tui/scripts/{build-signal-server,build-starlab-client,
+health-check,launch-3node-cluster,monitor-cluster,run-signal-server}.sh`.)
+
+There is no `/health` HTTP endpoint on the signal server (earlier
+drafts of this guide showed `curl -v http://localhost:9000/health`
+— that returns 400 or connection-closed because the server only
+accepts WebSocket upgrades). Real reachability probe:
+
+```bash
+# WebSocket upgrade attempt — success = TCP/TLS reach + server alive
+wscat -c ws://localhost:9000/
+```
+
+## Testing the deployment
+
+```bash
+# Single node against a running signal server
+cargo run -p starlab-client --bin starlab-tui -- \
+  --signal-server ws://localhost:9000 --device-id test-node
+
+# Smoke DKG test (runs the whole workspace test suite)
+./scripts/smoke-dkg.sh
+
+# 3-node cluster launcher — spins up three starlab-tui processes
+# with distinct --device-id values against a running signal server
+./apps/tui/scripts/launch-3node-cluster.sh
+```
+
+(Correction: an earlier retraction here claimed
+`launch-3node-cluster.sh` didn't exist. It exists at
+`apps/tui/scripts/launch-3node-cluster.sh` — the earlier
+`ls scripts/` check only surveyed the repo-root scripts/ dir.)
+
+The `examples/webrtc_mesh_e2e_test.rs` binary also exercises
+3-peer mesh behaviour in-process for smoke coverage without needing
+three real TUI instances. For a fully manual walkthrough (good for
+debugging), see
+[`docs/testing/RUN_TEST_INSTRUCTIONS.md`](../../../docs/testing/RUN_TEST_INSTRUCTIONS.md).
+
+## Resource requirements
+
+Not yet benchmarked — earlier drafts of this guide quoted specific
+figures (`Signal Server: ~50MB RAM / ~100-200MB per TUI node /
+100+ concurrent nodes`) without a source. Real sizing depends on
+concurrent-peer load + the number of active DKG/signing
+ceremonies; start small and scale vertically. WebRTC full-mesh
+degree is `n·(n-1)/2` peer connections — keep cohorts small or
+provision accordingly.
+
+## Not currently supported
+
+- **Docker deployment**: the `Dockerfile` + `docker-compose.yml`
+  that used to live at `apps/tui/` were written for a
+  pre-monorepo, pre-edition-2024 layout (Rust 1.75, single-crate
+  `COPY Cargo.lock`). They were removed rather than carried as
+  broken examples. Reintroducing Docker deployment would need a
+  Dockerfile at the workspace root with `FROM rust:1.85+` and a
+  proper multi-stage build covering every workspace member crate.
+- **systemd units**: see Method 2 above — write your own from the
+  workspace-level template.
+- **Kubernetes manifests / Helm charts**: not shipped; see
+  `docs/deployment/README.md` § "Not supported" for the full
+  absent-infra list.
+- **Prometheus `/metrics`**: not implemented. Operational visibility
+  is stdout/stderr via `tracing` + the `--log-location` file.
+
+## Security notes
+
+- Run the signal server as a non-root user. Because the binary
+  binds a privileged port below 1024 only if you terminate TLS
+  in front (see `docs/deployment/README.md` for nginx / caddy /
+  Cloudflare Tunnel options), port 9000 is fine for an
+  unprivileged user.
+- Firewall 9000/tcp inbound (or whatever port your TLS proxy
+  exposes). WebRTC traffic is peer-to-peer after signaling, so
+  the signal server doesn't proxy media/data.
+- Keystore files under `~/.frost_keystore/<device_id>/` are
+  PBKDF2-HMAC-SHA256 (100k) + AES-256-GCM encrypted `.json`
+  files (`<wallet_id>.json`, `WalletFile` envelope at
+  `apps/tui/src/keystore/models.rs:438-453`; earlier drafts
+  of this line said `.dat` — that's a legacy / pre-WalletFile
+  format not shipped today). The password is what gates them —
+  don't store the password next to the keystore file.

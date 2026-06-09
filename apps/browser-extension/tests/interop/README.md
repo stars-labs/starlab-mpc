@@ -2,7 +2,7 @@
 
 The highest-value, highest-cost test layer: it crosses the **Rust-core ↔
 independent-TypeScript/WASM** boundary. The extension acts as the DKG initiator;
-`frost-mpc-cli serve` nodes act as the other co-signers. We assert the
+`starlab-cli serve` nodes act as the other co-signers. We assert the
 cross-implementation invariant from `docs/cli-conformance-testing.md` §5.4:
 **all participants agree on the group public key**, and a threshold signature
 produced with the extension in the mesh **verifies**.
@@ -10,7 +10,7 @@ produced with the extension in the mesh **verifies**.
 ```
    extension (TS + WASM)  ──┐
                             ├── signal server (room-scoped) ── WebRTC mesh ── DKG + signing
-   2× frost-mpc-cli serve ─┘            (Rust core)
+   2× starlab-cli serve ─┘            (Rust core)
 ```
 
 ## Files
@@ -18,7 +18,7 @@ produced with the extension in the mesh **verifies**.
 | File | Role |
 |---|---|
 | `fixtures.ts` | Loads the built MV3 extension into a headed, persistent Chromium and resolves its extension id. |
-| `cli-peers.ts` | Spawns N `frost-mpc-cli serve` co-signers via `scripts/demo/serve_autojoin.py`; parses their `RESULT … dkg_complete/signature_complete` lines. |
+| `cli-peers.ts` | Spawns N `starlab-cli serve` co-signers via `scripts/demo/serve_autojoin.py`; parses their `RESULT … dkg_complete/signature_complete` lines. |
 | `extension-actions.ts` | All popup UI steps in one place (room config is data-testid-stable; create/sign are first-run-verify). |
 | `boundary.pw.ts` | **Runnable smoke** — loads the extension, saves a strong room. No CLI/server needed. |
 | `dkg-signing.pw.ts` | **Full interop** — ext + 2 CLI DKG + signing; group-key cross-assert. |
@@ -30,7 +30,7 @@ produced with the extension in the mesh **verifies**.
 
 ```bash
 # from repo root
-cargo build --release -p frost-mpc-cli        # the CLI peers
+cargo build --release -p starlab-cli        # the CLI peers
 cd apps/browser-extension
 bun run build                                  # produces .output/chrome-mv3
 bunx playwright install chromium               # one-time browser download

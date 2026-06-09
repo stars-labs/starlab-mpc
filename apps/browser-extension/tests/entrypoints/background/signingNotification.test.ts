@@ -20,7 +20,7 @@ import {
     SigningNotifier,
     buildMessagePreview,
 } from "../../../src/entrypoints/background/signingNotification";
-import type { SessionInfo } from "@frost-mpc/types/session";
+import type { SessionInfo } from "@starlab/types/session";
 
 function makeNotifier() {
     const calls: Array<{ id: string; options: any }> = [];

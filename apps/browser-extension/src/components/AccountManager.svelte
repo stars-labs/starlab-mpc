@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import type { Account } from "@frost-mpc/types/account";
+    import type { Account } from "@starlab/types/account";
     import AccountService from '../services/accountService';
     
     export let blockchain: 'ethereum' | 'solana' = 'ethereum';

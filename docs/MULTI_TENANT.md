@@ -47,8 +47,8 @@ acceptable for separate investor cohorts / customers on one endpoint.
   visibility at all). Device-id collisions only matter *within* a tenant.
 - Perfect for investor demos: give each cohort its own URL.
 ```bash
-MPC_SIGNAL_BIND=0.0.0.0:9001 webrtc-signal-server   # tenant / cohort A
-MPC_SIGNAL_BIND=0.0.0.0:9002 webrtc-signal-server   # tenant / cohort B
+MPC_SIGNAL_BIND=0.0.0.0:9001 starlab-signal-server   # tenant / cohort A
+MPC_SIGNAL_BIND=0.0.0.0:9002 starlab-signal-server   # tenant / cohort B
 ```
 Clients: `--signal-server ws://<host>:9001` (CLI/TUI) or the extension's signal
 setting.
@@ -137,7 +137,7 @@ and share the **same** URL with all ceremony participants. Use a `<role>-<n>`
 device-id convention within a room.
 
 ### Verification
-- `sanitize_room` unit tests (host): `cargo test -p webrtc-signal-server-cloudflare-worker` (5 pass).
+- `sanitize_room` unit tests (host): `cargo test -p starlab-signal-server-cloudflare-worker` (5 pass).
 - Edge build: `cargo check --target wasm32-unknown-unknown` (or `worker-build --release`).
 - End-to-end isolation (manual / miniflare): connect device `a` to `?room=x` and
   device `b` to `?room=y`; `a`'s `request_active_sessions` and the `devices`

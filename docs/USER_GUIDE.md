@@ -4,8 +4,8 @@ This guide explains how to use all **four clients** to create threshold wallets
 across multiple devices and tenants, sign with them, and use the supported
 chains.
 
-- **CLI** — `frost-mpc-cli` (headless, scriptable; LLM/automation/servers)
-- **TUI** — `frost-mpc-tui` (terminal UI; online + offline/air-gap)
+- **CLI** — `starlab-cli` (headless, scriptable; LLM/automation/servers)
+- **TUI** — `starlab-tui` (terminal UI; online + offline/air-gap)
 - **Native** — desktop GUI (Slint)
 - **Extension** — Chrome/Firefox browser wallet (dApp provider + popup)
 
@@ -97,14 +97,14 @@ isolated instance. Rules:
 
 ### CLI
 ```bash
-cargo build --release -p frost-mpc-cli      # binary: target/release/frost-mpc-cli
+cargo build --release -p starlab-cli      # binary: target/release/starlab-cli
 # common flags: --device-id --keystore --signal-server --room
 #   passwords: --password-file <f>  (preferred)  | --password-env VAR | --password <p>
 ```
 
 ### TUI
 ```bash
-cargo run --release --bin frost-mpc-tui -p tui-node -- \
+cargo run --release --bin starlab-tui -p starlab-client -- \
   --device-id alice --signal-server wss://panda.qzz.io --room "$ROOM"
 # add --offline for air-gapped (SD-card) mode (no network)
 ```
@@ -114,7 +114,7 @@ cargo run --release --bin frost-mpc-tui -p tui-node -- \
 MPC_DEVICE_ID=alice MPC_ROOM="$ROOM" \
   MPC_SIGNAL_SERVER=wss://panda.qzz.io \
   MPC_CURVE=secp256k1 \                            # or ed25519 for Solana/Sui/Aptos/NEAR
-  cargo run --release -p frost-mpc-native        # needs `nix develop` for graphics
+  cargo run --release -p starlab-mpc-native        # needs `nix develop` for graphics
 ```
 
 ### Extension
@@ -137,7 +137,7 @@ wallet shared by `alice`, `bob`, `carol`.
 ### CLI (creator + joiner)
 Creator (`alice`):
 ```bash
-frost-mpc-cli serve --device-id alice --keystore /tmp/ks-alice \
+starlab-cli serve --device-id alice --keystore /tmp/ks-alice \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 # then on its stdin (JSONL):
 {"cmd":"connect"}
@@ -146,14 +146,14 @@ frost-mpc-cli serve --device-id alice --keystore /tmp/ks-alice \
 ```
 Joiners (`bob`, `carol`):
 ```bash
-frost-mpc-cli serve --device-id bob --keystore /tmp/ks-bob \
+starlab-cli serve --device-id bob --keystore /tmp/ks-bob \
   --signal-server wss://panda.qzz.io --room "$ROOM"
 {"cmd":"connect"}
 {"cmd":"list_sessions"}                 # discovers the announced session
 {"id":2,"cmd":"join_session","session_id":"dkg_…","password":"…"}
 ```
-One-shot equivalents also exist: `frost-mpc-cli wallet create …` (creator,
-blocks until done) and `frost-mpc-cli session join …`.
+One-shot equivalents also exist: `starlab-cli wallet create …` (creator,
+blocks until done) and `starlab-cli session join …`.
 
 When all three have joined, DKG runs (seconds). Every participant ends with the
 **same group address** — verify they match.
@@ -196,7 +196,7 @@ Approver (a co-signer):
 {"cmd":"approve_signing","session_id":"sign_…","password":"…"}
 ```
 The initiator emits `{"event":"signature_complete","signature":"0x…"}`.
-Or one-shot: `frost-mpc-cli sign --wallet-id … --message … --room … …`.
+Or one-shot: `starlab-cli sign --wallet-id … --message … --room … …`.
 An auto-approving co-signer (gated by an allowlist/budget) can run
 `serve --auto-approve --approve-wallet <id> --approve-password-file <f>`.
 
@@ -288,18 +288,18 @@ extension↔CLI run) lives in **`docs/INTEROP_EXT_CLI.md`**. Summary:
 ROOM=$(uuidgen)                         # one shared strong room per wallet/tenant
 
 # CLI
-frost-mpc-cli serve   --device-id <id> --keystore <dir> --signal-server wss://panda.qzz.io --room "$ROOM"
-frost-mpc-cli wallet  create --name w --threshold 2 --total 3 --curve secp256k1 --room "$ROOM" --device-id <id> --password-file <f>
-frost-mpc-cli sign    --wallet-id <id> --message hi --room "$ROOM" --device-id <id> --password-file <f>
+starlab-cli serve   --device-id <id> --keystore <dir> --signal-server wss://panda.qzz.io --room "$ROOM"
+starlab-cli wallet  create --name w --threshold 2 --total 3 --curve secp256k1 --room "$ROOM" --device-id <id> --password-file <f>
+starlab-cli sign    --wallet-id <id> --message hi --room "$ROOM" --device-id <id> --password-file <f>
 
 # Self-contained end-to-end smoke test (real multi-process DKG + signing + reshare over a local server):
 scripts/demo/ceremony.sh --nodes 3 --threshold 2 --sign hi --reshare   # add --signal wss://… --room "$ROOM" for a hosted server
 
 # TUI
-frost-mpc-tui --device-id <id> --signal-server wss://panda.qzz.io --room "$ROOM" [--offline]
+starlab-tui --device-id <id> --signal-server wss://panda.qzz.io --room "$ROOM" [--offline]
 
 # Native (MPC_CURVE=secp256k1|ed25519, one curve per launch)
-MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CURVE=secp256k1 cargo run --release -p frost-mpc-native
+MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CURVE=secp256k1 cargo run --release -p starlab-mpc-native
 
 # Extension: ⚙ Settings → Signal server room → Generate/paste "$ROOM" → Save → reopen popup
 ```

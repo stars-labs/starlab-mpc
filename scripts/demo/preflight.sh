@@ -2,7 +2,7 @@
 # preflight.sh — investor-demo health check. Run this 10 minutes before the
 # demo (and once on each device). It proves the WHOLE MPC stack — DKG +
 # threshold signing + the cryptography — works end to end in seconds, using
-# the SAME real path the demo uses: every node is its own `frost-mpc-cli`
+# the SAME real path the demo uses: every node is its own `starlab-cli`
 # process with its own on-disk keystore, talking over real WebRTC through a
 # real signal server (a local one for the self-contained checks). Nothing is
 # faked in a single process. If this is green, the stack is healthy; if it's
@@ -26,14 +26,14 @@ bad()  { printf '  \033[31m❌ %s\033[0m\n' "$1"; FAIL=$((FAIL+1)); }
 hdr()  { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 hdr "0. Build the binaries (release)"
-if cargo build --release --quiet -p frost-mpc-cli -p webrtc-signal-server 2>/tmp/preflight_build.log; then
-  ok "frost-mpc-cli + signal server built"
+if cargo build --release --quiet -p starlab-cli -p starlab-signal-server 2>/tmp/preflight_build.log; then
+  ok "starlab-cli + signal server built"
 else
   bad "build failed — see /tmp/preflight_build.log"; exit 1
 fi
 
 # Each ceremony spins a LOCAL signal server, runs a full N-process DKG (each
-# node a separate frost-mpc-cli process) and, with --sign, a real threshold
+# node a separate starlab-cli process) and, with --sign, a real threshold
 # signing — exiting 0 only if every node agreed and the signature was produced.
 hdr "1. Online DKG (the core MPC ceremony, real multi-process)"
 for spec in "2 2" "2 3" "3 5"; do

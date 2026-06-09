@@ -1604,87 +1604,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frost-mpc-blockchain"
-version = "0.1.0"
-dependencies = [
- "bs58",
- "hex",
- "serde_json",
- "sha2 0.11.0",
- "sha3 0.11.0",
- "solana-sdk",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "frost-mpc-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "frost-core",
- "frost-ed25519",
- "frost-mpc-core",
- "frost-secp256k1",
- "futures-util",
- "hex",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "tui-node",
- "webrtc-signal-server",
-]
-
-[[package]]
-name = "frost-mpc-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64",
- "bs58",
- "clap",
- "frost-core",
- "frost-ed25519",
- "frost-ristretto255",
- "frost-secp256k1",
- "getrandom 0.4.2",
- "hex",
- "hkdf 0.13.0",
- "hmac 0.13.0",
- "k256",
- "password-hash 0.6.1",
- "pbkdf2 0.12.2",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "sha3 0.11.0",
- "thiserror 2.0.18",
-]
-
-[[package]]
-name = "frost-mpc-core-wasm"
-version = "0.1.0"
-dependencies = [
- "console_error_panic_hook",
- "frost-ed25519",
- "frost-mpc-core",
- "frost-secp256k1",
- "getrandom 0.2.17",
- "getrandom 0.4.2",
- "hex",
- "rand_core 0.6.4",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "frost-rerandomized"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5127,6 +5046,156 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "starlab-blockchain"
+version = "0.1.0"
+dependencies = [
+ "bs58",
+ "hex",
+ "serde_json",
+ "sha2 0.11.0",
+ "sha3 0.11.0",
+ "solana-sdk",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "starlab-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "frost-core",
+ "frost-ed25519",
+ "frost-secp256k1",
+ "futures-util",
+ "hex",
+ "serde",
+ "serde_json",
+ "starlab-client",
+ "starlab-core",
+ "starlab-signal-server",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "starlab-client"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "arboard",
+ "argon2",
+ "async-trait",
+ "base64",
+ "bech32",
+ "bs58",
+ "chrono",
+ "clap",
+ "crossterm",
+ "elliptic-curve",
+ "ethers-core",
+ "frost-core",
+ "frost-ed25519",
+ "frost-secp256k1",
+ "futures-util",
+ "gethostname",
+ "getrandom 0.4.2",
+ "hex",
+ "k256",
+ "pbkdf2 0.12.2",
+ "rand 0.10.1",
+ "ratatui",
+ "ripemd",
+ "rlp 0.6.1",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sha3 0.10.9",
+ "solana-sdk",
+ "starlab-core",
+ "starlab-signal-server",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
+ "tuirealm",
+ "uuid",
+ "webrtc",
+]
+
+[[package]]
+name = "starlab-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64",
+ "bs58",
+ "clap",
+ "frost-core",
+ "frost-ed25519",
+ "frost-ristretto255",
+ "frost-secp256k1",
+ "getrandom 0.4.2",
+ "hex",
+ "hkdf 0.13.0",
+ "hmac 0.13.0",
+ "k256",
+ "password-hash 0.6.1",
+ "pbkdf2 0.12.2",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sha3 0.11.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "starlab-core-wasm"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "frost-ed25519",
+ "frost-secp256k1",
+ "getrandom 0.2.17",
+ "getrandom 0.4.2",
+ "hex",
+ "rand_core 0.6.4",
+ "serde_json",
+ "starlab-core",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "starlab-signal-server"
+version = "0.1.1"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
+name = "starlab-signal-server-cloudflare-worker"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "worker",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5637,54 +5706,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
-]
-
-[[package]]
-name = "tui-node"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "arboard",
- "argon2",
- "async-trait",
- "base64",
- "bech32",
- "bs58",
- "chrono",
- "clap",
- "crossterm",
- "elliptic-curve",
- "ethers-core",
- "frost-core",
- "frost-ed25519",
- "frost-mpc-core",
- "frost-secp256k1",
- "futures-util",
- "gethostname",
- "getrandom 0.4.2",
- "hex",
- "k256",
- "pbkdf2 0.12.2",
- "rand 0.10.1",
- "ratatui",
- "ripemd",
- "rlp 0.6.1",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "sha3 0.10.9",
- "solana-sdk",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-subscriber",
- "tuirealm",
- "uuid",
- "webrtc",
- "webrtc-signal-server",
 ]
 
 [[package]]
@@ -6205,27 +6226,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "webrtc-util",
-]
-
-[[package]]
-name = "webrtc-signal-server"
-version = "0.1.1"
-dependencies = [
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
-]
-
-[[package]]
-name = "webrtc-signal-server-cloudflare-worker"
-version = "0.1.0"
-dependencies = [
- "futures",
- "serde",
- "serde_json",
- "worker",
 ]
 
 [[package]]

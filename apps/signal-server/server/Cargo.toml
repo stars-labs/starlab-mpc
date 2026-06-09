@@ -1,10 +1,10 @@
 [package]
-name = "webrtc-signal-server"
+name = "starlab-signal-server"
 version = "0.1.1"
 edition = "2024"
 authors = ["xiongchenyu <xiongchenyu6@gmail.com>"]
 description = "General WebRTC signal server For Device to Device Communication"
-repository = "https://github.com/hecoinfo/frost-mpc"
+repository = "https://github.com/hecoinfo/starlab-mpc"
 license = "MIT OR Apache-2.0"
 keywords = ["webrtc", "signal", "server", "device-to-device", "communication"]
 categories = [
@@ -25,5 +25,5 @@ name = "webrtc_signal_server"
 path = "src/lib.rs"
 
 [[bin]]
-name = "webrtc-signal-server"
+name = "starlab-signal-server"
 path = "src/main.rs"

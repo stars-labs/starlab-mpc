@@ -1,7 +1,7 @@
 name: L3c interop (ext ↔ CLI)
 
 # The highest-value / highest-cost conformance layer (#33): drive the REAL MV3
-# browser extension (TS + WASM) against `frost-mpc-cli serve` peers (Rust core)
+# browser extension (TS + WASM) against `starlab-cli serve` peers (Rust core)
 # and assert the cross-implementation invariant — all participants agree on the
 # group key and a threshold signature with the extension in the mesh verifies.
 # See docs/cli-conformance-testing.md §5.4 and apps/browser-extension/tests/interop.
@@ -54,14 +54,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       # `--ignore-scripts`: the extension's postinstall (`wxt prepare`) imports
-      # @frost-mpc/types/* and would fail before its dist/ exists. Build the
+      # @starlab/types/* and would fail before its dist/ exists. Build the
       # deps first, then prepare — mirrors the `extension` job in ci.yml.
       - run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Build core-wasm (the extension loads the real WASM FROST glue)
-        run: cd packages/@frost-mpc/core-wasm && wasm-pack build --target web --out-dir pkg
-      - name: Build shared types (@frost-mpc/types/* dist subpaths)
-        run: bun run --filter '@frost-mpc/types' build
+        run: cd packages/@starlab/core-wasm && wasm-pack build --target web --out-dir pkg
+      - name: Build shared types (@starlab/types/* dist subpaths)
+        run: bun run --filter '@starlab/types' build
       - name: Prepare WXT (now that types dist exists)
         run: cd apps/browser-extension && bunx wxt prepare
 
@@ -70,7 +70,7 @@ jobs:
       - name: Build extension (MV3)
         run: cd apps/browser-extension && bun run build
       - name: Build CLI peers
-        run: cargo build --release -p frost-mpc-cli --locked
+        run: cargo build --release -p starlab-cli --locked
 
       # Playwright's bundled Chromium (its system deps installed via --with-deps)
       # works on ubuntu-latest, so we use it directly — no PLAYWRIGHT_CHROME_PATH.

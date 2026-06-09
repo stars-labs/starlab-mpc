@@ -1,5 +1,5 @@
 {
-  "name": "frost-mpc",
+  "name": "starlab-mpc",
   "type": "module",
   "collaborators": [
     "The wasm-bindgen Developers"
