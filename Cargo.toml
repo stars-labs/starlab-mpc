@@ -38,6 +38,7 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 # a different version than the rest of the tree.
 frost-core = { version = "2.2.0", features = ["serde"] }
 frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
+frost-secp256k1-tr = { version = "2.2.0", features = ["serde"] }
 frost-ed25519 = { version = "2.2.0", features = ["serde"] }
 
 # Async runtime

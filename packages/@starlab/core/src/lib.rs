@@ -3,6 +3,7 @@
 pub mod traits;
 pub mod ed25519;
 pub mod secp256k1;
+pub mod secp256k1_tr;
 pub mod keystore;
 pub mod errors;
 pub mod root_secret;
@@ -19,6 +20,7 @@ pub use keystore::{Keystore, KeystoreData, MultiCurveKeystoreData};
 // Re-export curve implementations
 pub use ed25519::Ed25519Curve;
 pub use secp256k1::Secp256k1Curve;
+pub use secp256k1_tr::Secp256k1TrCurve;
 
 // Re-export unified DKG types
 pub use root_secret::RootSecret;

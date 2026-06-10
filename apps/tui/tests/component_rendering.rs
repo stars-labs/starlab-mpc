@@ -148,7 +148,7 @@ fn dkg_progress_renders_signing_label_after_override() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("TestBackend");
     let mut c = DKGProgressComponent::new("sign-01".to_string(), 3, 2);
-    c.set_ceremony_label("🖊️  Signing");
+    c.set_ceremony(starlab_client::elm::components::dkg_progress::Ceremony::Signing { chain: Some("secp256k1".into()) });
     c.set_round(DKGRound::Round1);
     c.set_websocket_connected(true);
     terminal

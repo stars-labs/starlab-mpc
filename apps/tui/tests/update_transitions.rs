@@ -327,7 +327,7 @@ fn joiner_submit_password_stashes_value_and_dispatches_join_dkg() {
     // DKGProgress happens inside this handler (unlike the creator path,
     // where CreateWallet does the nav).
     match cmd {
-        Some(Command::JoinDKG { session_id }) => {
+        Some(Command::JoinDKG { session_id, .. }) => {
             assert_eq!(session_id, "dkg-test-session");
         }
         other => panic!(
@@ -1523,7 +1523,7 @@ fn submit_password_in_joiner_flow_ignores_stale_pending_sign() {
     );
 
     match cmd {
-        Some(Command::JoinDKG { session_id }) => {
+        Some(Command::JoinDKG { session_id, .. }) => {
             assert_eq!(session_id, "dkg-joiner-flow");
         }
         other => panic!(
@@ -1804,6 +1804,7 @@ fn dkg_key_generated_auto_dispatches_finalize_with_correct_fields() {
                 password,
                 keystore_path,
                 wallet_name,
+                ..
             } => Some((password.clone(), keystore_path.clone(), wallet_name.clone())),
             Command::Batch(children) => children.iter().find_map(find_finalize),
             _ => None,
@@ -1817,11 +1818,15 @@ fn dkg_key_generated_auto_dispatches_finalize_with_correct_fields() {
 
     assert_eq!(password, "hunter2abc", "password must be passed through to the Command verbatim");
     assert_eq!(keystore_path, "/tmp/keystore-unittest");
+    // Derivation matches protocal::dkg::wallet_id_from_session: the first 12
+    // hex digits of the session id ("dkg-abc12345-more" → "dabc12345e"), so
+    // every participant ends up with the same identifier.
     assert_eq!(
-        wallet_name, "wallet-dkg-abc1",
-        "wallet_name must be derived as `wallet-{{first 8 chars of session_id}}` so every \
-         participant ends up with the same identifier"
+        wallet_name,
+        starlab_client::protocal::dkg::wallet_id_from_session("dkg-abc12345-more"),
+        "wallet_name must use the shared wallet_id_from_session derivation"
     );
+    assert_eq!(wallet_name, "dabc12345e");
 }
 
 #[test]
@@ -1951,9 +1956,10 @@ fn dkg_key_generated_derives_wallet_name_idempotently_per_session() {
     let name_2 = run_with_participants(vec!["mpc-1", "mpc-3", "mpc-2"], "mpc-2");
     let name_3 = run_with_participants(vec!["mpc-1", "mpc-2", "mpc-3"], "mpc-3");
 
-    assert_eq!(name_1, "wallet-dkg_abcd", "mpc-1 name");
-    assert_eq!(name_2, "wallet-dkg_abcd", "mpc-2 name");
-    assert_eq!(name_3, "wallet-dkg_abcd", "mpc-3 name");
+    // "dkg_abcd1234rest" → strip dkg_ → first 12 hex digits → "abcd1234e".
+    assert_eq!(name_1, "abcd1234e", "mpc-1 name");
+    assert_eq!(name_2, "abcd1234e", "mpc-2 name");
+    assert_eq!(name_3, "abcd1234e", "mpc-3 name");
     assert_eq!(name_1, name_2);
     assert_eq!(name_2, name_3);
 }

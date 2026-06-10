@@ -1645,6 +1645,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "frost-secp256k1-tr"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff8a25b14bfd5d25deba5edce61ec99c3afb752a1d26630a196bba4cb1c4ca5e"
+dependencies = [
+ "document-features",
+ "frost-core",
+ "frost-rerandomized",
+ "k256",
+ "rand_core 0.6.4",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "funty"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5142,6 +5156,7 @@ dependencies = [
  "frost-ed25519",
  "frost-ristretto255",
  "frost-secp256k1",
+ "frost-secp256k1-tr",
  "getrandom 0.4.2",
  "hex",
  "hkdf 0.13.0",
@@ -5166,6 +5181,7 @@ dependencies = [
  "frost-core",
  "frost-ed25519",
  "frost-secp256k1",
+ "frost-secp256k1-tr",
  "getrandom 0.2.17",
  "getrandom 0.4.2",
  "hex",

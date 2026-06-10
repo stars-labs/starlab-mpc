@@ -1117,3 +1117,331 @@ derive_keystore_impl!(
     frost_secp256k1::Secp256K1Sha256,
     "secp256k1"
 );
+
+
+use frost_secp256k1_tr::{
+    Identifier as Secp256k1TrIdentifier,
+    keys::{KeyPackage as Secp256k1TrKeyPackage, PublicKeyPackage as Secp256k1TrPublicKeyPackage},
+    round1::{SigningCommitments as Secp256k1TrSigningCommitments, SigningNonces as Secp256k1TrSigningNonces},
+    round2::SignatureShare as Secp256k1TrSignatureShare,
+};
+use starlab_core::secp256k1_tr::Secp256k1TrCurve;
+
+// Secp256k1-Taproot (BIP-340) WASM wrapper — same surface as
+// FrostDkgSecp256k1Tr but over the frost-secp256k1-tr ciphersuite, producing
+// BIP-340-verifiable Schnorr signatures for Bitcoin P2TR. Keep using
+// FrostDkgSecp256k1Tr for EVM (#93 4337 path); keystores are NOT
+// interchangeable between the two suites.
+#[wasm_bindgen]
+pub struct FrostDkgSecp256k1Tr {
+    round1_secret: Option<frost_secp256k1_tr::keys::dkg::round1::SecretPackage>,
+    round2_secret: Option<frost_secp256k1_tr::keys::dkg::round2::SecretPackage>,
+    key_package: Option<Secp256k1TrKeyPackage>,
+    public_key_package: Option<Secp256k1TrPublicKeyPackage>,
+    round1_packages: BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round1::Package>,
+    round2_packages: BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round2::Package>,
+    signing_nonces: Option<Secp256k1TrSigningNonces>,
+    signing_commitments: BTreeMap<Secp256k1TrIdentifier, Secp256k1TrSigningCommitments>,
+    signature_shares: BTreeMap<Secp256k1TrIdentifier, Secp256k1TrSignatureShare>,
+    participant_indices: Vec<u16>,
+    threshold: u16,
+    total: u16,
+    participant_index: u16,
+}
+
+impl Default for FrostDkgSecp256k1Tr {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl FrostDkgSecp256k1Tr {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            round1_secret: None,
+            round2_secret: None,
+            key_package: None,
+            public_key_package: None,
+            round1_packages: BTreeMap::new(),
+            round2_packages: BTreeMap::new(),
+            signing_nonces: None,
+            signing_commitments: BTreeMap::new(),
+            signature_shares: BTreeMap::new(),
+            participant_indices: Vec::new(),
+            threshold: 0,
+            total: 0,
+            participant_index: 0,
+        }
+    }
+
+    pub fn init_dkg(&mut self, participant_index: u16, total: u16, threshold: u16) -> Result<(), WasmError> {
+        self.participant_index = participant_index;
+        self.total = total;
+        self.threshold = threshold;
+        self.participant_indices = (1..=total).collect();
+        Ok(())
+    }
+
+    pub fn generate_round1(&mut self) -> Result<String, WasmError> {
+        let identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
+        let mut rng = OsRng;
+        
+        let (round1_secret, round1_package) = Secp256k1TrCurve::dkg_part1(
+            identifier,
+            self.total,
+            self.threshold,
+            &mut rng,
+        )?;
+        
+        self.round1_secret = Some(round1_secret);
+        let package_json = serde_json::to_string(&round1_package)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        Ok(hex::encode(package_json))
+    }
+
+    pub fn add_round1_package(&mut self, participant_index: u16, package_hex: &str) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round1::Package = serde_json::from_slice(&package_json)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
+        self.round1_packages.insert(identifier, package);
+        Ok(())
+    }
+
+    pub fn can_start_round2(&self) -> bool {
+        // frost-core's dkg::part2 expects round1_packages to contain
+        // entries for every OTHER participant — so (total - 1). Our
+        // generate_round1() only stores the local round1_secret and
+        // never self-inserts the public package. Matching both sides
+        // means checking for n-1 here.
+        self.round1_packages.len() == (self.total.saturating_sub(1)) as usize
+            && self.round1_secret.is_some()
+    }
+
+    pub fn generate_round2(&mut self) -> Result<String, WasmError> {
+        let round1_secret = self.round1_secret.clone()
+            .ok_or_else(|| WasmError::new("Round 1 secret not available"))?;
+
+        let (round2_secret, round2_packages) = Secp256k1TrCurve::dkg_part2(
+            round1_secret,
+            &self.round1_packages,
+        )?;
+
+        self.round2_secret = Some(round2_secret);
+
+        let mut packages_map = BTreeMap::new();
+        for (id, package) in round2_packages {
+            // Secp256k1 identifiers serialize as u32 big-endian in the
+            // last four bytes (bytes [28..=31]) — matches the test
+            // helper's writeUInt32BE(index, 28).
+            let ser = id.serialize();
+            let id_value = ser[31] as u16 | ((ser[30] as u16) << 8);
+            packages_map.insert(id_value, hex::encode(serde_json::to_string(&package).unwrap()));
+        }
+
+        // Wrap outer JSON in hex::encode — see Ed25519 note above.
+        Ok(hex::encode(serde_json::to_string(&packages_map).unwrap()))
+    }
+
+    pub fn add_round2_package(&mut self, sender_index: u16, package_hex: &str) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round2::Package = serde_json::from_slice(&package_json)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        let identifier = Secp256k1TrCurve::identifier_from_u16(sender_index)?;
+        self.round2_packages.insert(identifier, package);
+        Ok(())
+    }
+
+    pub fn can_finalize(&self) -> bool {
+        self.round2_packages.len() >= (self.threshold - 1) as usize && self.round2_secret.is_some()
+    }
+
+    pub fn finalize_dkg(&mut self) -> Result<String, WasmError> {
+        let round2_secret = self.round2_secret.as_ref()
+            .ok_or_else(|| WasmError::new("Round 2 secret not available"))?;
+        
+        let (key_package, public_key_package) = Secp256k1TrCurve::dkg_part3(
+            round2_secret,
+            &self.round1_packages,
+            &self.round2_packages,
+        )?;
+        
+        self.key_package = Some(key_package.clone());
+        self.public_key_package = Some(public_key_package.clone());
+        
+        let keystore_data = Keystore::export_keystore::<Secp256k1TrCurve>(
+            &key_package,
+            &public_key_package,
+            self.threshold,
+            self.total,
+            self.participant_index,
+            self.participant_indices.clone(),
+            "secp256k1-tr",
+        )?;
+        
+        Ok(serde_json::to_string(&keystore_data).unwrap())
+    }
+
+    pub fn get_group_public_key(&self) -> Result<String, WasmError> {
+        let public_key_package = self.public_key_package.as_ref()
+            .ok_or_else(|| WasmError::new("DKG not complete"))?;
+        
+        let verifying_key = Secp256k1TrCurve::verifying_key(public_key_package);
+        let key_bytes = Secp256k1TrCurve::serialize_verifying_key(&verifying_key)?;
+        Ok(hex::encode(key_bytes))
+    }
+
+    pub fn get_address(&self) -> Result<String, WasmError> {
+        let public_key_package = self.public_key_package.as_ref()
+            .ok_or_else(|| WasmError::new("DKG not complete"))?;
+        
+        let verifying_key = Secp256k1TrCurve::verifying_key(public_key_package);
+        Ok(Secp256k1TrCurve::get_address(&verifying_key))
+    }
+
+
+    /// BIP-340 x-only Taproot output key (32 bytes hex): the SEC1 key minus
+    /// its parity prefix. This is what P2TR addresses / verifiers consume.
+    pub fn get_taproot_xonly_key(&self) -> Result<String, WasmError> {
+        let pp = self.public_key_package.as_ref()
+            .ok_or_else(|| WasmError::new("DKG not complete"))?;
+        let sec1 = pp.verifying_key().serialize()
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        if sec1.len() != 33 {
+            return Err(WasmError::new("unexpected verifying key length"));
+        }
+        Ok(hex::encode(&sec1[1..]))
+    }
+
+    pub fn is_dkg_complete(&self) -> bool {
+        self.key_package.is_some() && self.public_key_package.is_some()
+    }
+
+    pub fn signing_commit(&mut self) -> Result<String, WasmError> {
+        let key_package = self.key_package.as_ref()
+            .ok_or_else(|| WasmError::new("Key package not available"))?;
+
+        let (nonces, commitments) = Secp256k1TrCurve::generate_signing_commitment(key_package)?;
+        self.signing_nonces = Some(nonces);
+
+        // See Ed25519 signing_commit for context: frost-core requires
+        // the signer's own commitment to be in the signing_package.
+        let own_identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
+        self.signing_commitments.insert(own_identifier, commitments);
+
+        let commitment_hex = hex::encode(serde_json::to_string(&commitments).unwrap());
+        Ok(commitment_hex)
+    }
+
+    pub fn add_signing_commitment(&mut self, participant_index: u16, commitment_hex: &str) -> Result<(), WasmError> {
+        let commitment_json = hex::decode(commitment_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let commitment: Secp256k1TrSigningCommitments = serde_json::from_slice(&commitment_json)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
+        self.signing_commitments.insert(identifier, commitment);
+        Ok(())
+    }
+
+    pub fn sign(&mut self, message_hex: &str) -> Result<String, WasmError> {
+        let message = hex::decode(message_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let signing_package = Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
+
+        let nonces = self.signing_nonces.as_ref()
+            .ok_or_else(|| WasmError::new("Signing nonces not available"))?;
+        let key_package = self.key_package.as_ref()
+            .ok_or_else(|| WasmError::new("Key package not available"))?;
+
+        let signature_share = Secp256k1TrCurve::generate_signature_share(&signing_package, nonces, key_package)?;
+
+        // See Ed25519 sign() for context — register own share so
+        // aggregate_signature() covers all identifiers.
+        let own_identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
+        self.signature_shares.insert(own_identifier, signature_share);
+
+        Ok(hex::encode(serde_json::to_string(&signature_share).unwrap()))
+    }
+
+    pub fn add_signature_share(&mut self, participant_index: u16, share_hex: &str) -> Result<(), WasmError> {
+        let share_json = hex::decode(share_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let share: Secp256k1TrSignatureShare = serde_json::from_slice(&share_json)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
+        self.signature_shares.insert(identifier, share);
+        Ok(())
+    }
+
+    pub fn aggregate_signature(&self, message_hex: &str) -> Result<String, WasmError> {
+        let message = hex::decode(message_hex)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        let signing_package = Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
+        let public_key_package = self.public_key_package.as_ref()
+            .ok_or_else(|| WasmError::new("Public key package not available"))?;
+        
+        let signature = Secp256k1TrCurve::aggregate_signature(&signing_package, &self.signature_shares, public_key_package)?;
+        let sig_bytes = Secp256k1TrCurve::serialize_signature(&signature)?;
+        
+        Ok(hex::encode(sig_bytes))
+    }
+
+    pub fn clear_signing_state(&mut self) {
+        self.signing_nonces = None;
+        self.signing_commitments.clear();
+        self.signature_shares.clear();
+    }
+
+    pub fn has_signing_nonces(&self) -> bool {
+        self.signing_nonces.is_some()
+    }
+
+    pub fn import_keystore(&mut self, keystore_json: &str) -> Result<(), WasmError> {
+        let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
+            .map_err(|e| WasmError::new(&e.to_string()))?;
+        
+        let (key_package, public_key_package) = Keystore::import_keystore::<Secp256k1TrCurve>(&keystore_data)?;
+        
+        self.key_package = Some(key_package);
+        self.public_key_package = Some(public_key_package);
+        self.threshold = keystore_data.min_signers;
+        self.total = keystore_data.max_signers;
+        self.participant_index = keystore_data.participant_index;
+        self.participant_indices = keystore_data.participant_indices;
+        
+        Ok(())
+    }
+
+    pub fn export_keystore(&self) -> Result<String, WasmError> {
+        let key_package = self.key_package.as_ref()
+            .ok_or_else(|| WasmError::new("Key package not available"))?;
+        let public_key_package = self.public_key_package.as_ref()
+            .ok_or_else(|| WasmError::new("Public key package not available"))?;
+        
+        let keystore_data = Keystore::export_keystore::<Secp256k1TrCurve>(
+            key_package,
+            public_key_package,
+            self.threshold,
+            self.total,
+            self.participant_index,
+            self.participant_indices.clone(),
+            "secp256k1-tr",
+        )?;
+        
+        Ok(serde_json::to_string(&keystore_data).unwrap())
+    }
+}
+
+
+// ============================================================================
