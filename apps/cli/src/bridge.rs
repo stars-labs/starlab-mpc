@@ -43,14 +43,25 @@ impl Bridge {
         }
 
         // --- wallet-list delta (by id set) ---
+        //
+        // `prev_wallet_ids == None` means "keystore scan hasn't reported yet":
+        // the model's empty wallet list at startup is NOT a real state, so no
+        // delta fires for it. Emitting on that pre-scan emptiness was a race —
+        // `wallet list` matched the spurious empty Wallets event and exited
+        // before WalletsLoaded round-tripped (the keystore actually had the
+        // wallet all along). The authoritative emit is the WalletsLoaded tap
+        // below; this delta only reports LATER changes (e.g. a DKG finalizing
+        // mid-serve).
         let ids: Vec<String> = model
             .wallet_state
             .wallets
             .iter()
             .map(|w| w.session_id.clone())
             .collect();
-        if self.prev_wallet_ids.as_ref() != Some(&ids) {
-            self.prev_wallet_ids = Some(ids);
+        let mut wallets_emitted = false;
+        if self.prev_wallet_ids.is_some() && self.prev_wallet_ids.as_ref() != Some(&ids) {
+            self.prev_wallet_ids = Some(ids.clone());
+            wallets_emitted = true;
             events.push(CliEvent::Wallets {
                 wallets: wallet_entries(&model.wallet_state.wallets),
             });
@@ -59,6 +70,17 @@ impl Bridge {
         // --- message-tap: one-shot outcomes ---
         if let Some(msg) = msg {
             match msg {
+                // Authoritative wallet list: the keystore scan completed.
+                // Always emit (even an empty list — "no wallets" is a real
+                // answer), unless the delta above already fired this sync.
+                Message::WalletsLoaded { .. } => {
+                    self.prev_wallet_ids = Some(ids.clone());
+                    if !wallets_emitted {
+                        events.push(CliEvent::Wallets {
+                            wallets: wallet_entries(&model.wallet_state.wallets),
+                        });
+                    }
+                }
                 Message::DKGFinalized {
                     wallet_id,
                     group_pubkey_hex,
@@ -289,20 +311,43 @@ mod tests {
     }
 
     #[test]
-    fn initial_sync_emits_connection_and_wallets() {
+    fn initial_sync_emits_connection_but_no_premature_wallets() {
         let mut b = Bridge::new();
         let model = Model::new("d".to_string());
         let evts = b.on_sync(&model, None);
-        // Disconnected + empty wallet list on first sync.
+        // Disconnected on first sync.
         assert!(matches!(
             evts.iter().find(|e| matches!(e, CliEvent::Connection { .. })),
             Some(CliEvent::Connection { connected: false })
         ));
-        assert!(evts
-            .iter()
-            .any(|e| matches!(e, CliEvent::Wallets { wallets } if wallets.is_empty())));
+        // CRITICAL (wallet-list race): the pre-scan empty model must NOT
+        // produce a Wallets event — `wallet list` would match it and exit
+        // before the keystore scan's WalletsLoaded arrives.
+        assert!(!evts.iter().any(|e| matches!(e, CliEvent::Wallets { .. })));
         // No change on a second identical sync → no events.
         assert!(b.on_sync(&model, None).is_empty());
+    }
+
+    #[test]
+    fn wallets_loaded_tap_is_authoritative_even_when_empty() {
+        let mut b = Bridge::new();
+        let model = Model::new("d".to_string());
+        let _ = b.on_sync(&model, None); // prime (no Wallets yet)
+        // Keystore scan reports: genuinely zero wallets. The tap must still
+        // emit, so `wallet list` answers instead of hanging to timeout.
+        let evts = b.on_sync(&model, Some(&Message::WalletsLoaded { wallets: vec![] }));
+        let count = evts
+            .iter()
+            .filter(|e| matches!(e, CliEvent::Wallets { wallets } if wallets.is_empty()))
+            .count();
+        assert_eq!(count, 1, "exactly one authoritative empty Wallets event");
+        // Re-loading the same (empty) list emits again — list is a query,
+        // every WalletsLoaded answers it — but never duplicates per sync.
+        let evts2 = b.on_sync(&model, Some(&Message::WalletsLoaded { wallets: vec![] }));
+        assert_eq!(
+            evts2.iter().filter(|e| matches!(e, CliEvent::Wallets { .. })).count(),
+            1
+        );
     }
 
     #[test]
