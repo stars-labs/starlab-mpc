@@ -43,14 +43,25 @@ impl Bridge {
         }
 
         // --- wallet-list delta (by id set) ---
+        //
+        // `prev_wallet_ids == None` means "keystore scan hasn't reported yet":
+        // the model's empty wallet list at startup is NOT a real state, so no
+        // delta fires for it. Emitting on that pre-scan emptiness was a race —
+        // `wallet list` matched the spurious empty Wallets event and exited
+        // before WalletsLoaded round-tripped (the keystore actually had the
+        // wallet all along). The authoritative emit is the WalletsLoaded tap
+        // below; this delta only reports LATER changes (e.g. a DKG finalizing
+        // mid-serve).
         let ids: Vec<String> = model
             .wallet_state
             .wallets
             .iter()
             .map(|w| w.session_id.clone())
             .collect();
-        if self.prev_wallet_ids.as_ref() != Some(&ids) {
-            self.prev_wallet_ids = Some(ids);
+        let mut wallets_emitted = false;
+        if self.prev_wallet_ids.is_some() && self.prev_wallet_ids.as_ref() != Some(&ids) {
+            self.prev_wallet_ids = Some(ids.clone());
+            wallets_emitted = true;
             events.push(CliEvent::Wallets {
                 wallets: wallet_entries(&model.wallet_state.wallets),
             });
@@ -59,6 +70,17 @@ impl Bridge {
         // --- message-tap: one-shot outcomes ---
         if let Some(msg) = msg {
             match msg {
+                // Authoritative wallet list: the keystore scan completed.
+                // Always emit (even an empty list — "no wallets" is a real
+                // answer), unless the delta above already fired this sync.
+                Message::WalletsLoaded { .. } => {
+                    self.prev_wallet_ids = Some(ids.clone());
+                    if !wallets_emitted {
+                        events.push(CliEvent::Wallets {
+                            wallets: wallet_entries(&model.wallet_state.wallets),
+                        });
+                    }
+                }
                 Message::DKGFinalized {
                     wallet_id,
                     group_pubkey_hex,
