@@ -73,6 +73,8 @@ fn all_events() -> Vec<CliEvent> {
 
 fn sample_wallet() -> WalletEntry {
     WalletEntry {
+        curves: vec!["secp256k1".into()],
+        addresses: vec![],
         id: "w1".into(),
         name: "Wallet One".into(),
         address: "0xabc".into(),

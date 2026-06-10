@@ -183,7 +183,21 @@ pub enum CliEvent {
     },
 }
 
+/// One chain's address for a wallet.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct ChainAddress {
+    pub chain: String,
+    pub address: String,
+}
+
 /// UI-facing wallet summary (never leaks internal crypto types).
+///
+/// Wallet-centric: ONE entry per wallet. A wallet's key material may span
+/// multiple curves (the unified DKG yields ed25519 + secp256k1 from one
+/// ceremony), and each curve controls several chains — `curves` lists the
+/// key shares held, `addresses` the derived per-chain addresses
+/// (secp256k1 → Ethereum + Bitcoin; ed25519 → Solana + Sui).
+/// `chain`/`address` remain as the PRIMARY pair for driver compatibility.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct WalletEntry {
     pub id: String,
@@ -191,6 +205,10 @@ pub struct WalletEntry {
     pub address: String,
     pub chain: String,
     pub threshold: String,
+    #[serde(default)]
+    pub curves: Vec<String>,
+    #[serde(default)]
+    pub addresses: Vec<ChainAddress>,
 }
 
 /// UI-facing session summary.

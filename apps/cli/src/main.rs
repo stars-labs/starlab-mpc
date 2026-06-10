@@ -69,6 +69,9 @@ enum Command {
 struct OneShot {
     #[arg(long, default_value = "cli")]
     device_id: String,
+    /// Emit machine-readable JSON instead of the human-readable table/summary.
+    #[arg(long)]
+    json: bool,
     #[arg(long, default_value = "~/.frost_keystore")]
     keystore: String,
     #[arg(long, default_value = "wss://panda.qzz.io")]
@@ -188,6 +191,7 @@ impl OneShot {
             signal_url: with_room(&self.signal_server, self.room.as_deref()),
             timeout_secs: self.timeout,
             curve: self.curve.clone(),
+            json: self.json,
         }
     }
 }

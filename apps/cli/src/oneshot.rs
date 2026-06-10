@@ -30,6 +30,8 @@ pub struct OneShotOpts {
     /// standard RFC-8032 signature that any off-the-shelf verifier (and Solana)
     /// can check — the runner ciphersuite is fixed at spawn.
     pub curve: String,
+    /// `--json`: emit machine-readable JSON. Default is the human table/summary.
+    pub json: bool,
 }
 
 /// Latest participant roster the runner has observed (from the live session),
@@ -197,11 +199,203 @@ where
     }
 }
 
-fn print(ev: &CliEvent) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(ev).unwrap_or_else(|_| ev.to_line())
-    );
+fn print(ev: &CliEvent, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(ev).unwrap_or_else(|_| ev.to_line())
+        );
+    } else {
+        println!("{}", render_human(ev));
+    }
+}
+
+/// kubectl-style column table: header + rows, two-space gutters, widths from
+/// the longest cell per column.
+fn render_table(headers: &[&str], rows: &[Vec<String>]) -> String {
+    let cols = headers.len();
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    for row in rows {
+        for c in 0..cols {
+            if let Some(cell) = row.get(c) {
+                widths[c] = widths[c].max(cell.len());
+            }
+        }
+    }
+    let fmt_row = |cells: Vec<&str>| -> String {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if i + 1 == cols {
+                    c.to_string() // last column: no trailing padding
+                } else {
+                    format!("{:width$}", c, width = widths[i] + 2)
+                }
+            })
+            .collect::<String>()
+    };
+    let mut out = fmt_row(headers.to_vec());
+    for row in rows {
+        out.push('\n');
+        out.push_str(&fmt_row(row.iter().map(|s| s.as_str()).collect()));
+    }
+    out
+}
+
+/// Human rendering for one-shot outcomes (`--json` bypasses this).
+fn render_human(ev: &CliEvent) -> String {
+    match ev {
+        CliEvent::Wallets { wallets } => {
+            if wallets.is_empty() {
+                return "No wallets. Create one with `starlab-cli wallet create`.".to_string();
+            }
+            // One WALLET per group: first row carries id/name/quorum, the
+            // wallet's remaining chain addresses continue on blank-prefixed
+            // rows (one key, many chains — a unified wallet shows all four).
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for w in wallets {
+                let name = if w.name == w.id { "-".to_string() } else { w.name.clone() };
+                if w.addresses.is_empty() {
+                    rows.push(vec![
+                        w.id.clone(),
+                        name,
+                        w.threshold.clone(),
+                        w.chain.clone(),
+                        w.address.clone(),
+                    ]);
+                    continue;
+                }
+                for (i, a) in w.addresses.iter().enumerate() {
+                    if i == 0 {
+                        rows.push(vec![
+                            w.id.clone(),
+                            name.clone(),
+                            w.threshold.clone(),
+                            a.chain.clone(),
+                            a.address.clone(),
+                        ]);
+                    } else {
+                        rows.push(vec![
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            a.chain.clone(),
+                            a.address.clone(),
+                        ]);
+                    }
+                }
+            }
+            render_table(&["ID", "NAME", "QUORUM", "CHAIN", "ADDRESS"], &rows)
+        }
+        CliEvent::Sessions { sessions } => {
+            if sessions.is_empty() {
+                return "No active sessions.".to_string();
+            }
+            let rows: Vec<Vec<String>> = sessions
+                .iter()
+                .map(|s| {
+                    vec![
+                        s.session_id.clone(),
+                        s.session_type.clone(),
+                        format!("{}-of-{}", s.threshold, s.total),
+                        s.proposer.clone(),
+                        s.participants.join(","),
+                    ]
+                })
+                .collect();
+            render_table(
+                &["SESSION", "TYPE", "QUORUM", "PROPOSER", "PARTICIPANTS"],
+                &rows,
+            )
+        }
+        CliEvent::DkgComplete {
+            wallet_id,
+            address,
+            group_public_key,
+            ..
+        } => format!(
+            "✔ Wallet created\n  Wallet ID:  {wallet_id}\n  Address:    {address}\n  Group key:  {group_public_key}"
+        ),
+        CliEvent::SignatureComplete {
+            signature,
+            message_hash,
+            ..
+        } => format!(
+            "✔ Signature complete\n  Message hash:  {message_hash}\n  Signature:     {signature}"
+        ),
+        CliEvent::ReshareComplete {
+            wallet_id,
+            group_public_key,
+            ..
+        } => format!(
+            "✔ Reshare complete — group key (and address) unchanged\n  Wallet ID:  {wallet_id}\n  Group key:  {group_public_key}"
+        ),
+        CliEvent::Error { code, message, .. } => format!("✖ {code}: {message}"),
+        CliEvent::Ready {
+            protocol,
+            device_id,
+            curve,
+        } => format!("ready (protocol v{protocol}, device {device_id}, curve {curve})"),
+        CliEvent::Ack { correlates } => format!("ack #{correlates}"),
+        CliEvent::Connection { connected } => if *connected {
+            "✔ connected to the signal server".to_string()
+        } else {
+            "✖ disconnected from the signal server".to_string()
+        },
+        CliEvent::Status {
+            connected,
+            device_id,
+            wallets,
+        } => {
+            let mut out = format!(
+                "Device:     {device_id}\nConnection: {}",
+                if *connected { "connected" } else { "disconnected" }
+            );
+            out.push_str("\n\n");
+            out.push_str(&render_human(&CliEvent::Wallets {
+                wallets: wallets.clone(),
+            }));
+            out
+        }
+        CliEvent::SessionAnnounced { session_id, .. } => {
+            format!("✔ Session announced\n  Session ID:  {session_id}")
+        }
+        CliEvent::SessionAvailable { session } => render_table(
+            &["SESSION", "TYPE", "QUORUM", "PROPOSER", "PARTICIPANTS"],
+            &[vec![
+                session.session_id.clone(),
+                session.session_type.clone(),
+                format!("{}-of-{}", session.threshold, session.total),
+                session.proposer.clone(),
+                session.participants.join(","),
+            ]],
+        ),
+        CliEvent::DkgProgress {
+            session_id,
+            round,
+            received,
+            need,
+        } => format!("… DKG round {round}: {received}/{need} packages (session {session_id})"),
+        CliEvent::SigningRequest {
+            session_id,
+            wallet,
+            threshold,
+            total,
+            proposer,
+        } => format!(
+            "⧖ Signing request from {proposer}\n  Wallet:    {wallet}\n  Quorum:    {threshold}-of-{total}\n  Session:   {session_id}\n  → approve with: starlab-cli session join --session-id {session_id} …"
+        ),
+        CliEvent::ReshareRequest {
+            session_id,
+            wallet,
+            threshold,
+            total,
+            proposer,
+        } => format!(
+            "⧖ Reshare request from {proposer}\n  Wallet:    {wallet}\n  Quorum:    {threshold}-of-{total}\n  Session:   {session_id}\n  → approve with: starlab-cli session join --session-id {session_id} …"
+        ),
+    }
 }
 
 /// `wallet list` — read the keystore (no network).
@@ -217,7 +411,7 @@ pub async fn wallet_list(opts: OneShotOpts) -> anyhow::Result<bool> {
         |e| matches!(e, CliEvent::Wallets { .. }),
     )
     .await?;
-    print(&ev);
+    print(&ev, opts.json);
     Ok(true)
 }
 
@@ -299,7 +493,7 @@ pub async fn wallet_create(
         |e| matches!(e, CliEvent::DkgComplete { .. }),
     )
     .await?;
-    print(&ev);
+    print(&ev, opts.json);
     Ok(true)
 }
 
@@ -355,7 +549,7 @@ pub async fn session_join(
         },
     )
     .await?;
-    print(&ev);
+    print(&ev, opts.json);
     Ok(true)
 }
 
@@ -387,7 +581,7 @@ pub async fn reshare(
         |e| matches!(e, CliEvent::ReshareComplete { .. }),
     )
     .await?;
-    print(&ev);
+    print(&ev, opts.json);
     Ok(true)
 }
 
@@ -419,6 +613,103 @@ pub async fn sign(
         |e| matches!(e, CliEvent::SignatureComplete { .. }),
     )
     .await?;
-    print(&ev);
+    print(&ev, opts.json);
     Ok(true)
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use crate::protocol::WalletEntry;
+
+    #[test]
+    fn table_aligns_columns_kubectl_style() {
+        let t = render_table(
+            &["ID", "CHAIN"],
+            &[
+                vec!["short".into(), "Ethereum".into()],
+                vec!["a-much-longer-id".into(), "Solana".into()],
+            ],
+        );
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines.len(), 3);
+        // CHAIN starts at the same byte offset on every line.
+        let off = lines[0].find("CHAIN").unwrap();
+        assert_eq!(&lines[1][off..off + 8], "Ethereum");
+        assert_eq!(&lines[2][off..off + 6], "Solana");
+        // last column has no trailing padding
+        assert!(!lines[1].ends_with(' '));
+    }
+
+    #[test]
+    fn wallets_render_as_table_and_empty_has_a_hint() {
+        let ev = CliEvent::Wallets {
+            wallets: vec![WalletEntry {
+                id: "abc".into(),
+                name: "W".into(),
+                address: "0x1".into(),
+                chain: "Ethereum".into(),
+                threshold: "2/3".into(),
+                curves: vec![],
+                addresses: vec![],
+            }],
+        };
+        let out = render_human(&ev);
+        assert!(out.starts_with("ID  "));
+        assert!(out.contains("Ethereum"));
+
+        let empty = render_human(&CliEvent::Wallets { wallets: vec![] });
+        assert!(empty.contains("wallet create"));
+    }
+
+    #[test]
+    fn outcome_summaries_are_human() {
+        let dkg = render_human(&CliEvent::DkgComplete {
+            correlates: None,
+            wallet_id: "w1".into(),
+            address: "0xabc".into(),
+            group_public_key: "02ff".into(),
+        });
+        assert!(dkg.contains("✔ Wallet created") && dkg.contains("0xabc"));
+
+        let err = render_human(&CliEvent::Error {
+            correlates: None,
+            code: "timeout".into(),
+            message: "no quorum".into(),
+        });
+        assert_eq!(err, "✖ timeout: no quorum");
+    }
+
+    #[test]
+    fn status_renders_device_connection_and_wallet_table() {
+        let out = render_human(&CliEvent::Status {
+            connected: true,
+            device_id: "mpc-1".into(),
+            wallets: vec![WalletEntry {
+                id: "abc".into(),
+                name: "W".into(),
+                address: "0x1".into(),
+                chain: "Ethereum".into(),
+                threshold: "2/3".into(),
+                curves: vec![],
+                addresses: vec![],
+            }],
+        });
+        assert!(out.contains("Device:     mpc-1"));
+        assert!(out.contains("Connection: connected"));
+        assert!(out.contains("ID  ")); // embedded wallet table
+    }
+
+    #[test]
+    fn requests_point_at_the_join_command() {
+        let out = render_human(&CliEvent::SigningRequest {
+            session_id: "s-1".into(),
+            wallet: "w".into(),
+            threshold: 2,
+            total: 3,
+            proposer: "mpc-2".into(),
+        });
+        assert!(out.contains("session join --session-id s-1"));
+        assert!(out.contains("2-of-3"));
+    }
 }

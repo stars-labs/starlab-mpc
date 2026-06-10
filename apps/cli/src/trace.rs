@@ -139,6 +139,8 @@ mod tests {
                 address: "0xabc".into(),
                 chain: "Ethereum".into(),
                 threshold: "2/3".into(),
+                curves: vec![],
+                addresses: vec![],
             }],
         };
         let v = normalize_event(&ev);
