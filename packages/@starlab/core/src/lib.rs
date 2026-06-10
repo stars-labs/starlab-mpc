@@ -23,4 +23,5 @@ pub use secp256k1::Secp256k1Curve;
 // Re-export unified DKG types
 pub use root_secret::RootSecret;
 pub use unified_dkg::UnifiedDkg;
+pub use resharing::ReshareSession;
 pub use hd_derivation::{ChainCode, DerivationPath, DerivedKeys, derive_child_key, derive_child_key_path};

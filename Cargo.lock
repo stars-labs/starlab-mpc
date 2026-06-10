@@ -5163,6 +5163,7 @@ name = "starlab-core-wasm"
 version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
+ "frost-core",
  "frost-ed25519",
  "frost-secp256k1",
  "getrandom 0.2.17",

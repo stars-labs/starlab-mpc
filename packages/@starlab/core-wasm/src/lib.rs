@@ -858,3 +858,262 @@ impl FrostDkgUnified {
             .map_err(|e| WasmError::new(&e.to_string()))
     }
 }
+// ===========================================================================
+// Reshare (#23 downstream): distributed share refresh in the browser.
+//
+// Symmetric with the keystore flow the extension already uses:
+//   keystore JSON (export_keystore format) → init_reshare → round1/round2
+//   over the existing WebRTC mesh → finalize_reshare → NEW keystore JSON.
+// The group public key is preserved (address stable); old shares go dead.
+// Wire format matches the DKG classes: hex(serde_json(Package)).
+//
+// Same constraint as the core engine: every participant in the new set must
+// already hold a share — refresh rotates or REMOVES devices, it cannot mint
+// a share for a brand-new device.
+// ===========================================================================
+
+macro_rules! frost_reshare_impl {
+    ($name:ident, $curve:ty, $suite:ty, $curve_str:literal) => {
+        #[wasm_bindgen]
+        pub struct $name {
+            session: Option<starlab_core::ReshareSession<$suite>>,
+            new_ids: Vec<u16>,
+            threshold: u16,
+            my_id: u16,
+            result: Option<(
+                frost_core::keys::KeyPackage<$suite>,
+                frost_core::keys::PublicKeyPackage<$suite>,
+            )>,
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        #[wasm_bindgen]
+        impl $name {
+            #[wasm_bindgen(constructor)]
+            pub fn new() -> Self {
+                Self {
+                    session: None,
+                    new_ids: Vec::new(),
+                    threshold: 0,
+                    my_id: 0,
+                    result: None,
+                }
+            }
+
+            /// Start a reshare from this device's existing keystore JSON (the
+            /// exact format export_keystore produces). `new_ids` is the
+            /// comma-separated new participant set (must include this device;
+            /// every id must already hold a share).
+            pub fn init_reshare(
+                &mut self,
+                keystore_json: &str,
+                new_ids_csv: &str,
+                new_threshold: u16,
+            ) -> Result<(), WasmError> {
+                let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
+                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let (kp, pp) = Keystore::import_keystore::<$curve>(&keystore_data)?;
+                let new_ids: Vec<u16> = new_ids_csv
+                    .split(',')
+                    .map(|s| s.trim().parse::<u16>())
+                    .collect::<std::result::Result<_, _>>()
+                    .map_err(|e| WasmError::new(&format!("bad new_ids: {e}")))?;
+                let my_id = keystore_data.participant_index;
+                self.session = Some(
+                    starlab_core::ReshareSession::new(
+                        my_id,
+                        new_threshold,
+                        new_ids.clone(),
+                        kp,
+                        pp,
+                    )
+                    .map_err(WasmError::from)?,
+                );
+                self.new_ids = new_ids;
+                self.threshold = new_threshold;
+                self.my_id = my_id;
+                self.result = None;
+                Ok(())
+            }
+
+            /// Generate this device's round-1 package (broadcast to all peers).
+            pub fn reshare_round1(&mut self) -> Result<String, WasmError> {
+                let session = self
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| WasmError::new("init_reshare not called"))?;
+                let pkg = session.round1(&mut OsRng).map_err(WasmError::from)?;
+                let json = serde_json::to_string(&pkg)
+                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                Ok(hex::encode(json))
+            }
+
+            pub fn add_reshare_round1(
+                &mut self,
+                from: u16,
+                package_hex: &str,
+            ) -> Result<(), WasmError> {
+                let session = self
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| WasmError::new("init_reshare not called"))?;
+                let bytes = hex::decode(package_hex)
+                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let pkg: frost_core::keys::dkg::round1::Package<$suite> =
+                    serde_json::from_slice(&bytes)
+                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                session.add_round1(from, pkg).map_err(WasmError::from)
+            }
+
+            pub fn can_reshare_round2(&self) -> bool {
+                self.session.as_ref().map(|s| s.can_round2()).unwrap_or(false)
+            }
+
+            /// Generate the per-recipient round-2 packages as a JSON object
+            /// mapping recipient id → hex package. Send each value ONLY to its
+            /// recipient.
+            pub fn reshare_round2(&mut self) -> Result<String, WasmError> {
+                let session = self
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| WasmError::new("init_reshare not called"))?;
+                let sent = session.round2().map_err(WasmError::from)?;
+                let mut out: BTreeMap<String, String> = BTreeMap::new();
+                for (rcpt, pkg) in sent {
+                    let json = serde_json::to_string(&pkg)
+                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                    out.insert(rcpt.to_string(), hex::encode(json));
+                }
+                serde_json::to_string(&out).map_err(|e| WasmError::new(&e.to_string()))
+            }
+
+            pub fn add_reshare_round2(
+                &mut self,
+                from: u16,
+                package_hex: &str,
+            ) -> Result<(), WasmError> {
+                let session = self
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| WasmError::new("init_reshare not called"))?;
+                let bytes = hex::decode(package_hex)
+                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let pkg: frost_core::keys::dkg::round2::Package<$suite> =
+                    serde_json::from_slice(&bytes)
+                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                session.add_round2(from, pkg).map_err(WasmError::from)
+            }
+
+            pub fn can_finalize_reshare(&self) -> bool {
+                self.session.as_ref().map(|s| s.can_finalize()).unwrap_or(false)
+            }
+
+            /// Finalize and return the NEW keystore JSON (same format as
+            /// export_keystore — drop-in replacement for the stored share).
+            pub fn finalize_reshare(&mut self) -> Result<String, WasmError> {
+                let session = self
+                    .session
+                    .as_mut()
+                    .ok_or_else(|| WasmError::new("init_reshare not called"))?;
+                let (kp, pp) = session.finalize().map_err(WasmError::from)?;
+                let keystore_data = Keystore::export_keystore::<$curve>(
+                    &kp,
+                    &pp,
+                    self.threshold,
+                    self.new_ids.len() as u16,
+                    self.my_id,
+                    self.new_ids.clone(),
+                    $curve_str,
+                )?;
+                self.result = Some((kp, pp));
+                serde_json::to_string(&keystore_data)
+                    .map_err(|e| WasmError::new(&e.to_string()))
+            }
+
+            /// Group public key hex after finalize — callers verify it equals
+            /// the pre-reshare key (address unchanged).
+            pub fn get_group_public_key(&self) -> Result<String, WasmError> {
+                let (_, pp) = self
+                    .result
+                    .as_ref()
+                    .ok_or_else(|| WasmError::new("reshare not finalized"))?;
+                pp.verifying_key()
+                    .serialize()
+                    .map(hex::encode)
+                    .map_err(|e| WasmError::new(&e.to_string()))
+            }
+        }
+    };
+}
+
+frost_reshare_impl!(FrostReshareEd25519, Ed25519Curve, frost_ed25519::Ed25519Sha512, "ed25519");
+frost_reshare_impl!(
+    FrostReshareSecp256k1,
+    Secp256k1Curve,
+    frost_secp256k1::Secp256K1Sha256,
+    "secp256k1"
+);
+
+// ===========================================================================
+// HD derivation (BIP-44-style child keys from the group key).
+//
+// Deterministic: every participant derives the same child from the same
+// path, because the chain code comes from the group verifying key. The
+// output is a full keystore JSON for the CHILD key — import it into a
+// FrostDkg* instance and sign with the derived account like any other.
+// ===========================================================================
+
+macro_rules! derive_keystore_impl {
+    ($fn_name:ident, $curve:ty, $suite:ty, $curve_str:literal) => {
+        /// Derive a child keystore at a BIP-44 path (e.g. "m/44'/60'/0'/0/1").
+        /// Deterministic across participants (chain code comes from the group
+        /// key), so every device derives the SAME child account. The output is
+        /// a full keystore JSON — import it into a FrostDkg instance and sign
+        /// with the derived account like any other.
+        #[wasm_bindgen]
+        pub fn $fn_name(keystore_json: &str, path: &str) -> Result<String, WasmError> {
+            let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
+                .map_err(|e| WasmError::new(&e.to_string()))?;
+            let (kp, pp) = Keystore::import_keystore::<$curve>(&keystore_data)?;
+
+            let parsed = starlab_core::DerivationPath::parse(path).map_err(WasmError::from)?;
+            let group_key = pp
+                .verifying_key()
+                .serialize()
+                .map_err(|e| WasmError::new(&e.to_string()))?;
+            let chain_code = starlab_core::ChainCode::from_group_key(group_key.as_ref());
+            let derived =
+                starlab_core::derive_child_key_path::<$suite>(&kp, &pp, &chain_code, &parsed)
+                    .map_err(WasmError::from)?;
+
+            let out = Keystore::export_keystore::<$curve>(
+                &derived.key_package,
+                &derived.public_key_package,
+                keystore_data.min_signers,
+                keystore_data.max_signers,
+                keystore_data.participant_index,
+                keystore_data.participant_indices.clone(),
+                $curve_str,
+            )?;
+            serde_json::to_string(&out).map_err(|e| WasmError::new(&e.to_string()))
+        }
+    };
+}
+
+derive_keystore_impl!(
+    derive_child_keystore_ed25519,
+    Ed25519Curve,
+    frost_ed25519::Ed25519Sha512,
+    "ed25519"
+);
+derive_keystore_impl!(
+    derive_child_keystore_secp256k1,
+    Secp256k1Curve,
+    frost_secp256k1::Secp256K1Sha256,
+    "secp256k1"
+);

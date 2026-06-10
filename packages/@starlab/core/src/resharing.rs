@@ -232,6 +232,171 @@ impl<C: Ciphersuite, P: Clone> Round2Routing<C, P> for BTreeMap<u16, BTreeMap<Id
     }
 }
 
+// --- distributed per-participant reshare session ---------------------------
+
+/// Per-participant, transport-agnostic reshare state machine.
+///
+/// `refresh()` above runs every participant in one process — fine for tests
+/// and demos, useless for real deployments where each device holds only its
+/// own share. `ReshareSession` is the distributed counterpart: every device
+/// constructs one with **its own** old `KeyPackage`, exchanges the round
+/// packages over whatever transport it has (WebRTC mesh, WebSocket relay,
+/// SD card), and finalizes into its **new** `KeyPackage` with the group
+/// public key preserved.
+///
+/// Round flow (mirrors the DKG session shape consumers already know):
+/// `round1()` → broadcast pkg → `add_round1(from, pkg)` ×(n−1) →
+/// `round2()` → send each entry to its recipient → `add_round2(from, pkg)`
+/// ×(n−1) → `finalize()`.
+///
+/// Same constraint as `refresh`: every id in `new_ids` must already hold a
+/// share (refresh can rotate or REMOVE devices, never mint a share for a
+/// brand-new one).
+pub struct ReshareSession<C: Ciphersuite> {
+    my_id: u16,
+    threshold: u16,
+    new_ids: Vec<u16>,
+    old_kp: KeyPackage<C>,
+    old_pub: PublicKeyPackage<C>,
+    r1_secret: Option<frost_core::keys::dkg::round1::SecretPackage<C>>,
+    r1_received: BTreeMap<Identifier<C>, frost_core::keys::dkg::round1::Package<C>>,
+    r2_secret: Option<frost_core::keys::dkg::round2::SecretPackage<C>>,
+    r2_received: BTreeMap<Identifier<C>, frost_core::keys::dkg::round2::Package<C>>,
+}
+
+impl<C: Ciphersuite> ReshareSession<C> {
+    pub fn new(
+        my_id: u16,
+        threshold: u16,
+        new_ids: Vec<u16>,
+        old_kp: KeyPackage<C>,
+        old_pub: PublicKeyPackage<C>,
+    ) -> Result<Self> {
+        if !new_ids.contains(&my_id) {
+            return Err(FrostError::InvalidState(format!(
+                "my id {my_id} is not in the new participant set"
+            )));
+        }
+        if (new_ids.len() as u16) < threshold {
+            return Err(FrostError::InvalidState(format!(
+                "{} participants cannot meet threshold {threshold}",
+                new_ids.len()
+            )));
+        }
+        Ok(Self {
+            my_id,
+            threshold,
+            new_ids,
+            old_kp,
+            old_pub,
+            r1_secret: None,
+            r1_received: BTreeMap::new(),
+            r2_secret: None,
+            r2_received: BTreeMap::new(),
+        })
+    }
+
+    /// Generate this participant's round-1 package (broadcast it to all peers).
+    pub fn round1<R: rand_core::RngCore + rand_core::CryptoRng>(
+        &mut self,
+        rng: &mut R,
+    ) -> Result<frost_core::keys::dkg::round1::Package<C>> {
+        let (secret, pkg) = refresh_dkg_part_1::<C, _>(
+            ident::<C>(self.my_id)?,
+            self.new_ids.len() as u16,
+            self.threshold,
+            rng,
+        )
+        .map_err(|e| FrostError::DkgError(e.to_string()))?;
+        self.r1_secret = Some(secret);
+        Ok(pkg)
+    }
+
+    /// Record a peer's round-1 package.
+    pub fn add_round1(
+        &mut self,
+        from: u16,
+        pkg: frost_core::keys::dkg::round1::Package<C>,
+    ) -> Result<()> {
+        if from == self.my_id || !self.new_ids.contains(&from) {
+            return Err(FrostError::InvalidState(format!(
+                "unexpected round1 sender {from}"
+            )));
+        }
+        self.r1_received.insert(ident::<C>(from)?, pkg);
+        Ok(())
+    }
+
+    /// True once round-1 packages from all n−1 peers have arrived.
+    pub fn can_round2(&self) -> bool {
+        self.r1_secret.is_some() && self.r1_received.len() == self.new_ids.len() - 1
+    }
+
+    /// Generate the per-recipient round-2 packages (send each to its peer).
+    pub fn round2(&mut self) -> Result<BTreeMap<u16, frost_core::keys::dkg::round2::Package<C>>> {
+        if !self.can_round2() {
+            return Err(FrostError::InvalidState("round1 not complete".into()));
+        }
+        let secret = self
+            .r1_secret
+            .take()
+            .ok_or_else(|| FrostError::InvalidState("round2 already generated".into()))?;
+        let (r2_secret, sent) = refresh_dkg_part2::<C>(secret, &self.r1_received)
+            .map_err(|e| FrostError::DkgError(e.to_string()))?;
+        self.r2_secret = Some(r2_secret);
+        // Map recipient Identifier back to u16 for the transport layer.
+        let mut out = BTreeMap::new();
+        for (rcpt, pkg) in sent {
+            for &cand in &self.new_ids {
+                if ident::<C>(cand)? == rcpt {
+                    out.insert(cand, pkg.clone());
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Record the round-2 package a peer sent specifically to us.
+    pub fn add_round2(
+        &mut self,
+        from: u16,
+        pkg: frost_core::keys::dkg::round2::Package<C>,
+    ) -> Result<()> {
+        if from == self.my_id || !self.new_ids.contains(&from) {
+            return Err(FrostError::InvalidState(format!(
+                "unexpected round2 sender {from}"
+            )));
+        }
+        self.r2_received.insert(ident::<C>(from)?, pkg);
+        Ok(())
+    }
+
+    /// True once round-2 packages from all n−1 peers have arrived.
+    pub fn can_finalize(&self) -> bool {
+        self.r2_secret.is_some() && self.r2_received.len() == self.new_ids.len() - 1
+    }
+
+    /// Produce this participant's refreshed key package. The group public key
+    /// in the returned `PublicKeyPackage` equals the old one (address stable).
+    pub fn finalize(&mut self) -> Result<(KeyPackage<C>, PublicKeyPackage<C>)> {
+        if !self.can_finalize() {
+            return Err(FrostError::InvalidState("round2 not complete".into()));
+        }
+        let r2_secret = self
+            .r2_secret
+            .take()
+            .ok_or_else(|| FrostError::InvalidState("already finalized".into()))?;
+        refresh_dkg_shares::<C>(
+            &r2_secret,
+            &self.r1_received,
+            &self.r2_received,
+            self.old_pub.clone(),
+            self.old_kp.clone(),
+        )
+        .map_err(|e| FrostError::DkgError(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,5 +503,106 @@ mod tests {
         assert_eq!(group_key_hex(&new_pp).unwrap(), before);
         assert_eq!(new_kps.keys().copied().collect::<Vec<_>>(), vec![2, 4, 5]);
         threshold_sign_verify::<Secp>(&new_kps, &[2, 4, 5], &new_pp, b"scattered").unwrap();
+    }
+
+    /// Drive N independent ReshareSession instances exactly the way real
+    /// devices would over a transport: round1 broadcast → round2 directed →
+    /// finalize. Returns each participant's new key package + the public pkg.
+    fn drive_sessions<C: Ciphersuite>(
+        kps: &BTreeMap<u16, KeyPackage<C>>,
+        pp: &PublicKeyPackage<C>,
+        new_ids: &[u16],
+        threshold: u16,
+        seed: u8,
+    ) -> Result<(BTreeMap<u16, KeyPackage<C>>, PublicKeyPackage<C>)> {
+        let mut sessions: BTreeMap<u16, ReshareSession<C>> = BTreeMap::new();
+        for &i in new_ids {
+            sessions.insert(
+                i,
+                ReshareSession::new(i, threshold, new_ids.to_vec(), kps[&i].clone(), pp.clone())?,
+            );
+        }
+        // round 1: everyone broadcasts
+        let mut r1 = BTreeMap::new();
+        for &i in new_ids {
+            let mut rng = ChaCha20Rng::from_seed([seed.wrapping_add(i as u8); 32]);
+            r1.insert(i, sessions.get_mut(&i).unwrap().round1(&mut rng)?);
+        }
+        for &i in new_ids {
+            for &j in new_ids {
+                if i != j {
+                    sessions.get_mut(&i).unwrap().add_round1(j, r1[&j].clone())?;
+                }
+            }
+        }
+        // round 2: directed sends
+        let mut r2: BTreeMap<u16, BTreeMap<u16, _>> = BTreeMap::new();
+        for &i in new_ids {
+            assert!(sessions[&i].can_round2());
+            r2.insert(i, sessions.get_mut(&i).unwrap().round2()?);
+        }
+        for &sender in new_ids {
+            for (&rcpt, pkg) in &r2[&sender] {
+                sessions.get_mut(&rcpt).unwrap().add_round2(sender, pkg.clone())?;
+            }
+        }
+        // finalize
+        let mut new_kps = BTreeMap::new();
+        let mut new_pp = None;
+        for &i in new_ids {
+            assert!(sessions[&i].can_finalize());
+            let (kp, p) = sessions.get_mut(&i).unwrap().finalize()?;
+            new_kps.insert(i, kp);
+            new_pp = Some(p);
+        }
+        Ok((new_kps, new_pp.unwrap()))
+    }
+
+    #[test]
+    fn distributed_session_rotates_and_preserves_group_key() {
+        let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 21).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        let (new_kps, new_pp) = drive_sessions::<Secp>(&kps, &pp, &[1, 2, 3], 2, 61).unwrap();
+        assert_eq!(group_key_hex(&new_pp).unwrap(), before);
+        threshold_sign_verify::<Secp>(&new_kps, &[1, 3], &new_pp, b"session-rotate").unwrap();
+        // Old shares must NOT combine with new ones: mix old kp 1 + new kp 2.
+        let mut mixed = BTreeMap::new();
+        mixed.insert(1u16, kps[&1].clone());
+        mixed.insert(2u16, new_kps[&2].clone());
+        assert!(threshold_sign_verify::<Secp>(&mixed, &[1, 2], &new_pp, b"mixed").is_err());
+    }
+
+    #[test]
+    fn distributed_session_removes_a_device() {
+        // 2-of-3 → reshare among {1,2}: device 3's old share goes dead.
+        let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 22).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        let (new_kps, new_pp) = drive_sessions::<Secp>(&kps, &pp, &[1, 2], 2, 62).unwrap();
+        assert_eq!(group_key_hex(&new_pp).unwrap(), before);
+        threshold_sign_verify::<Secp>(&new_kps, &[1, 2], &new_pp, b"session-remove").unwrap();
+    }
+
+    #[test]
+    fn distributed_session_works_on_ed25519_too() {
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        let (kps, pp) = dkg_keypackages::<Ed>(3, 2, 23).unwrap();
+        let before = group_key_hex(&pp).unwrap();
+        let (new_kps, new_pp) = drive_sessions::<Ed>(&kps, &pp, &[1, 2, 3], 2, 63).unwrap();
+        assert_eq!(group_key_hex(&new_pp).unwrap(), before);
+        threshold_sign_verify::<Ed>(&new_kps, &[2, 3], &new_pp, b"session-ed").unwrap();
+    }
+
+    #[test]
+    fn session_rejects_outsider_and_bad_config() {
+        let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 24).unwrap();
+        // my_id not in the new set
+        assert!(ReshareSession::<Secp>::new(3, 2, vec![1, 2], kps[&3].clone(), pp.clone()).is_err());
+        // too few participants for the threshold
+        assert!(ReshareSession::<Secp>::new(1, 3, vec![1, 2], kps[&1].clone(), pp.clone()).is_err());
+        // unexpected sender
+        let mut s = ReshareSession::<Secp>::new(1, 2, vec![1, 2], kps[&1].clone(), pp).unwrap();
+        let mut rng = ChaCha20Rng::from_seed([7u8; 32]);
+        let pkg = s.round1(&mut rng).unwrap();
+        assert!(s.add_round1(9, pkg).is_err());
     }
 }

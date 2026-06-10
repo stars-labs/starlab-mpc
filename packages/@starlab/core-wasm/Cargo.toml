@@ -48,6 +48,7 @@ starlab-core = { path = "../core", version = "0.1.0" }
 
 # Still need these for specific types
 frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
+frost-core = { version = "2.2.0", features = ["serde"] }
 frost-ed25519 = { version = "2.2.0", features = ["serde"] }
 
 # OsRng is the only RNG the code uses — pinned to the 0.6 line because
