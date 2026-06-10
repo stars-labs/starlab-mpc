@@ -7,6 +7,7 @@ pub mod offline_manager;
 pub mod wallet_manager;
 pub mod connection_manager;
 pub mod signing_manager;
+pub mod signing_backend;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
