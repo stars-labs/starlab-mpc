@@ -1,10 +1,10 @@
 {"curve":"secp256k1","device_id":"<device_id>","event":"ready","protocol":1}
 {"correlates":1,"event":"ack"}
 {"connected":true,"event":"connection"}
-{"connected":true,"device_id":"<device_id>","event":"status","wallets":[{"address":"<address>","chain":"Ethereum","id":"<id>","name":"Wallet One","threshold":"2/3"}]}
+{"connected":true,"device_id":"<device_id>","event":"status","wallets":[{"address":"<address>","addresses":[],"chain":"Ethereum","curves":["secp256k1"],"id":"<id>","name":"Wallet One","threshold":"2/3"}]}
 {"event":"session_available","session":{"participants":["<device>"],"proposer":"<proposer>","session_id":"<session_id>","threshold":2,"total":3,"type":"dkg"}}
 {"correlates":7,"event":"session_announced","session_id":"<session_id>"}
-{"event":"wallets","wallets":[{"address":"<address>","chain":"Ethereum","id":"<id>","name":"Wallet One","threshold":"2/3"}]}
+{"event":"wallets","wallets":[{"address":"<address>","addresses":[],"chain":"Ethereum","curves":["secp256k1"],"id":"<id>","name":"Wallet One","threshold":"2/3"}]}
 {"event":"sessions","sessions":[{"participants":["<device>"],"proposer":"<proposer>","session_id":"<session_id>","threshold":2,"total":3,"type":"dkg"}]}
 {"event":"dkg_progress","need":2,"received":1,"round":1,"session_id":"<session_id>"}
 {"address":"<address>","correlates":2,"event":"dkg_complete","group_public_key":"<group_public_key>","wallet_id":"<wallet_id>"}

@@ -95,7 +95,9 @@ impl Bridge {
                     // 0x-hex address for an ed25519 wallet (#43). Fall back to
                     // the first entry only if canonical derivation fails.
                     let address = {
-                        let primary = derive_address(group_pubkey_hex, curve_type);
+                        let primary_chain =
+                            if curve_type == "ed25519" { "solana" } else { "ethereum" };
+                        let primary = derive_address(group_pubkey_hex, curve_type, primary_chain);
                         if primary.is_empty() {
                             addresses
                                 .first()
@@ -241,39 +243,90 @@ pub struct Snapshot {
     pub sessions: Vec<SessionEntry>,
 }
 
-fn chain_for_curve(curve: &str) -> String {
+/// The canonical display chains per curve. EVM L2s (BSC/Polygon/…) share the
+/// Ethereum address, so listing them would be noise; Aptos is omitted until
+/// it's a first-class target.
+fn chains_for_curve(curve: &str) -> &'static [(&'static str, &'static str)] {
+    // (config key, display name)
     if curve == "ed25519" {
-        "Solana".to_string()
+        &[("solana", "Solana"), ("sui", "Sui")]
     } else {
-        "Ethereum".to_string()
+        &[("ethereum", "Ethereum"), ("bitcoin", "Bitcoin")]
     }
 }
 
-fn wallet_entries(wallets: &[WalletMetadata]) -> Vec<WalletEntry> {
-    wallets
-        .iter()
-        .map(|w| WalletEntry {
-            id: w.session_id.clone(),
-            name: w.display_name().to_string(),
-            address: derive_address(&w.group_public_key, &w.curve_type),
-            chain: chain_for_curve(&w.curve_type),
-            threshold: format!("{}/{}", w.threshold, w.total_participants),
-        })
-        .collect()
-}
-
-/// Derive the primary chain address from a hex-encoded FROST group key
-/// (#18). secp256k1 → Ethereum (keccak), ed25519 → Solana (base58).
-/// Returns "" if the key can't be decoded/derived.
-fn derive_address(group_public_key_hex: &str, curve: &str) -> String {
-    let chain = if curve == "ed25519" { "solana" } else { "ethereum" };
+/// Derive one chain address from a hex-encoded FROST group key. Returns ""
+/// if the key can't be decoded/derived (never fails the listing).
+fn derive_address(group_public_key_hex: &str, curve: &str, chain_key: &str) -> String {
     match hex::decode(group_public_key_hex) {
         Ok(bytes) => {
-            starlab_client::blockchain_config::generate_address_for_chain(&bytes, curve, chain)
+            starlab_client::blockchain_config::generate_address_for_chain(&bytes, curve, chain_key)
                 .unwrap_or_default()
         }
         Err(_) => String::new(),
     }
+}
+
+/// Wallet-centric grouping: the keystore stores ONE FILE PER CURVE, but a
+/// wallet (one DKG ceremony, one id) may span both curves — the unified DKG
+/// writes the same id under ed25519/ and secp256k1/. The UI must never leak
+/// that storage layout: group by wallet id, merge curves, and derive every
+/// chain address each curve controls.
+fn wallet_entries(wallets: &[WalletMetadata]) -> Vec<WalletEntry> {
+    use std::collections::BTreeMap;
+    // id → (first-seen order index, entry under construction)
+    let mut grouped: BTreeMap<String, (usize, WalletEntry)> = BTreeMap::new();
+    for (i, w) in wallets.iter().enumerate() {
+        let entry = grouped.entry(w.session_id.clone()).or_insert_with(|| {
+            (
+                i,
+                WalletEntry {
+                    id: w.session_id.clone(),
+                    name: w.display_name().to_string(),
+                    address: String::new(),
+                    chain: String::new(),
+                    threshold: format!("{}/{}", w.threshold, w.total_participants),
+                    curves: Vec::new(),
+                    addresses: Vec::new(),
+                },
+            )
+        });
+        let e = &mut entry.1;
+        // Prefer a human label over the id-fallback display name.
+        if e.name == e.id && w.display_name() != w.session_id {
+            e.name = w.display_name().to_string();
+        }
+        if !e.curves.contains(&w.curve_type) {
+            e.curves.push(w.curve_type.clone());
+            for (key, display) in chains_for_curve(&w.curve_type) {
+                let address = derive_address(&w.group_public_key, &w.curve_type, key);
+                if !address.is_empty() {
+                    e.addresses.push(crate::protocol::ChainAddress {
+                        chain: (*display).to_string(),
+                        address,
+                    });
+                }
+            }
+        }
+    }
+    let mut out: Vec<(usize, WalletEntry)> = grouped.into_values().collect();
+    out.sort_by_key(|(i, _)| *i); // preserve keystore order
+    out.into_iter()
+        .map(|(_, mut e)| {
+            e.curves.sort();
+            // Primary pair (driver compat): Ethereum if present, else first.
+            if let Some(primary) = e
+                .addresses
+                .iter()
+                .find(|a| a.chain == "Ethereum")
+                .or_else(|| e.addresses.first())
+            {
+                e.chain = primary.chain.clone();
+                e.address = primary.address.clone();
+            }
+            e
+        })
+        .collect()
 }
 
 fn session_entry(s: &SessionInfo) -> SessionEntry {
@@ -430,14 +483,54 @@ mod tests {
     fn derives_ethereum_address_from_secp256k1_group_key() {
         // A real compressed secp256k1 group key from a DKG run.
         let key = "0207eb4473c42b74a8a3c72762af295c26fdd40dcaf14e2c65df89aeb6f89073cf";
-        let addr = derive_address(key, "secp256k1");
+        let addr = derive_address(key, "secp256k1", "ethereum");
         assert!(addr.starts_with("0x"), "expected 0x-prefixed eth address, got {addr}");
         assert_eq!(addr.len(), 42, "eth address should be 20 bytes hex: {addr}");
     }
 
     #[test]
+    fn unified_wallet_groups_into_one_entry_with_all_chains() {
+        // The unified DKG writes the SAME wallet id under ed25519/ and
+        // secp256k1/ — storage detail that must never leak as "two wallets".
+        // Generator points are valid keys for both curves.
+        let secp_g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
+        let ed_g = "5866666666666666666666666666666666666666666666666666666666666666";
+        let mk = |curve: &str, gk: &str| WalletMetadata {
+            session_id: "uni1".into(),
+            device_id: "d".into(),
+            curve_type: curve.into(),
+            threshold: 2,
+            total_participants: 2,
+            participant_index: 1,
+            group_public_key: gk.into(),
+            participants: vec![],
+            created_at: "t".into(),
+            last_modified: "t".into(),
+            label: Some("My Unified".into()),
+            device_name: None,
+            blockchains: vec![],
+            blockchain: None,
+            public_address: None,
+            identifier: None,
+            tags: None,
+            description: None,
+        };
+        let entries = wallet_entries(&[mk("ed25519", ed_g), mk("secp256k1", secp_g)]);
+        assert_eq!(entries.len(), 1, "one wallet, not one row per curve file");
+        let e = &entries[0];
+        assert_eq!(e.curves, vec!["ed25519", "secp256k1"]);
+        let chains: Vec<&str> = e.addresses.iter().map(|a| a.chain.as_str()).collect();
+        assert!(chains.contains(&"Ethereum") && chains.contains(&"Bitcoin"));
+        assert!(chains.contains(&"Solana") && chains.contains(&"Sui"));
+        // Primary pair = Ethereum (driver compat).
+        assert_eq!(e.chain, "Ethereum");
+        assert!(e.address.starts_with("0x"));
+        assert_eq!(e.name, "My Unified");
+    }
+
+    #[test]
     fn derive_address_handles_bad_hex() {
-        assert_eq!(derive_address("not-hex", "secp256k1"), "");
+        assert_eq!(derive_address("not-hex", "secp256k1", "ethereum"), "");
     }
 
     // Address-derivation golden (L4 §5.4): pin derivation against the same
@@ -450,7 +543,7 @@ mod tests {
         // Compressed secp256k1 G → the well-known address for privkey=1.
         let g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
         assert_eq!(
-            derive_address(g, "secp256k1").to_lowercase(),
+            derive_address(g, "secp256k1", "ethereum").to_lowercase(),
             "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
         );
     }
@@ -474,7 +567,7 @@ mod tests {
         // base58 of 32 zero bytes is the Solana System Program id.
         let zeros = "0".repeat(64);
         assert_eq!(
-            derive_address(&zeros, "ed25519"),
+            derive_address(&zeros, "ed25519", "solana"),
             "11111111111111111111111111111111"
         );
     }

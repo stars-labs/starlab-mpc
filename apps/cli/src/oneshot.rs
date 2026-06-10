@@ -250,19 +250,43 @@ fn render_human(ev: &CliEvent) -> String {
             if wallets.is_empty() {
                 return "No wallets. Create one with `starlab-cli wallet create`.".to_string();
             }
-            let rows: Vec<Vec<String>> = wallets
-                .iter()
-                .map(|w| {
-                    vec![
+            // One WALLET per group: first row carries id/name/quorum, the
+            // wallet's remaining chain addresses continue on blank-prefixed
+            // rows (one key, many chains — a unified wallet shows all four).
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for w in wallets {
+                let name = if w.name == w.id { "-".to_string() } else { w.name.clone() };
+                if w.addresses.is_empty() {
+                    rows.push(vec![
                         w.id.clone(),
-                        w.name.clone(),
-                        w.chain.clone(),
+                        name,
                         w.threshold.clone(),
+                        w.chain.clone(),
                         w.address.clone(),
-                    ]
-                })
-                .collect();
-            render_table(&["ID", "NAME", "CHAIN", "QUORUM", "ADDRESS"], &rows)
+                    ]);
+                    continue;
+                }
+                for (i, a) in w.addresses.iter().enumerate() {
+                    if i == 0 {
+                        rows.push(vec![
+                            w.id.clone(),
+                            name.clone(),
+                            w.threshold.clone(),
+                            a.chain.clone(),
+                            a.address.clone(),
+                        ]);
+                    } else {
+                        rows.push(vec![
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            a.chain.clone(),
+                            a.address.clone(),
+                        ]);
+                    }
+                }
+            }
+            render_table(&["ID", "NAME", "QUORUM", "CHAIN", "ADDRESS"], &rows)
         }
         CliEvent::Sessions { sessions } => {
             if sessions.is_empty() {
@@ -626,6 +650,8 @@ mod output_tests {
                 address: "0x1".into(),
                 chain: "Ethereum".into(),
                 threshold: "2/3".into(),
+                curves: vec![],
+                addresses: vec![],
             }],
         };
         let out = render_human(&ev);
@@ -665,6 +691,8 @@ mod output_tests {
                 address: "0x1".into(),
                 chain: "Ethereum".into(),
                 threshold: "2/3".into(),
+                curves: vec![],
+                addresses: vec![],
             }],
         });
         assert!(out.contains("Device:     mpc-1"));
