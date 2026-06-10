@@ -26,4 +26,4 @@ pub use secp256k1_tr::Secp256k1TrCurve;
 pub use root_secret::RootSecret;
 pub use unified_dkg::UnifiedDkg;
 pub use resharing::ReshareSession;
-pub use hd_derivation::{ChainCode, DerivationPath, DerivedKeys, derive_child_key, derive_child_key_path};
+pub use hd_derivation::{ChainCode, DerivationPath, DerivedKeys, derive_child_key, derive_child_key_path, derive_child_verifying_key_path};

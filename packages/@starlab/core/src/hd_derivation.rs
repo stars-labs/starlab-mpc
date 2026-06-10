@@ -380,6 +380,48 @@ pub fn derive_child_key_path<C: Ciphersuite>(
     })
 }
 
+/// PUBLIC-ONLY path derivation: compute a child GROUP VERIFYING KEY from just
+/// the parent group key — no shares, no secrets, no password.
+///
+/// Sound because the per-level offset comes from public material only:
+/// `offset = scalar(HMAC(chain_code, parent_group_key ‖ index))` with the
+/// root chain code itself derived from the group key. This is what lets a
+/// wallet list receive addresses for account 0..N without unlocking
+/// anything; signing for those accounts still requires the (private) share
+/// derivation via [`derive_child_key_path`]. The two are consistent by
+/// construction — pinned by `public_derivation_matches_full_derivation`.
+pub fn derive_child_verifying_key_path<C: Ciphersuite>(
+    group_verifying_key_bytes: &[u8],
+    path: &DerivationPath,
+) -> Result<Vec<u8>> {
+    use frost_core::Group;
+
+    let deserialize = |bytes: &[u8]| -> Result<<C::Group as Group>::Element> {
+        let ser = <C::Group as Group>::Serialization::try_from(bytes.to_vec())
+            .map_err(|_| FrostError::DerivationError("bad group element length".into()))?;
+        <C::Group as Group>::deserialize(&ser)
+            .map_err(|e| FrostError::DerivationError(format!("bad group element: {e}")))
+    };
+    let serialize = |elem: &<C::Group as Group>::Element| -> Result<Vec<u8>> {
+        <C::Group as Group>::serialize(elem)
+            .map(|s| s.as_ref().to_vec())
+            .map_err(|e| FrostError::DerivationError(format!("serialize element: {e}")))
+    };
+
+    let mut current = deserialize(group_verifying_key_bytes)?;
+    let mut chain_code = ChainCode::from_group_key(group_verifying_key_bytes);
+
+    for &index in path.segments() {
+        let parent_bytes = serialize(&current)?;
+        let (scalar_seed, child_cc) = hmac_derive(chain_code.as_bytes(), &parent_bytes, index);
+        let offset = scalar_from_seed::<C>(&scalar_seed)?;
+        let generator = <C::Group as Group>::generator();
+        current = current + generator * offset;
+        chain_code = ChainCode(child_cc);
+    }
+    serialize(&current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,4 +715,37 @@ mod tests {
         // Verify it produces a valid key by checking we can serialize
         let _vk_bytes = derived.public_key_package.verifying_key().serialize().unwrap();
     }
+    #[test]
+    fn public_derivation_matches_full_derivation() {
+        use crate::resharing::dkg_keypackages;
+        use frost_secp256k1::Secp256K1Sha256 as Secp;
+        let (kps, pp) = dkg_keypackages::<Secp>(2, 2, 51).unwrap();
+        let group = pp.verifying_key().serialize().unwrap();
+        let path = DerivationPath::parse("m/44'/60'/0'/0/7").unwrap();
+
+        // Full (share-bearing) derivation
+        let cc = ChainCode::from_group_key(&group);
+        let full = derive_child_key_path::<Secp>(&kps[&1], &pp, &cc, &path).unwrap();
+        let full_group = full.public_key_package.verifying_key().serialize().unwrap();
+
+        // Public-only derivation from just the group key bytes
+        let public_only = derive_child_verifying_key_path::<Secp>(&group, &path).unwrap();
+
+        assert_eq!(public_only, full_group);
+    }
+
+    #[test]
+    fn public_derivation_works_on_ed25519_too() {
+        use crate::resharing::dkg_keypackages;
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        let (kps, pp) = dkg_keypackages::<Ed>(2, 2, 52).unwrap();
+        let group = pp.verifying_key().serialize().unwrap();
+        let path = DerivationPath::parse("m/44'/501'/3'/0'").unwrap();
+        let cc = ChainCode::from_group_key(&group);
+        let full = derive_child_key_path::<Ed>(&kps[&1], &pp, &cc, &path).unwrap();
+        let full_group = full.public_key_package.verifying_key().serialize().unwrap();
+        let public_only = derive_child_verifying_key_path::<Ed>(&group, &path).unwrap();
+        assert_eq!(public_only, full_group);
+    }
+
 }

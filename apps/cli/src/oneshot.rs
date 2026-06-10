@@ -331,6 +331,22 @@ fn render_human(ev: &CliEvent) -> String {
         } => format!(
             "✔ Reshare complete — group key (and address) unchanged\n  Wallet ID:  {wallet_id}\n  Group key:  {group_public_key}"
         ),
+        CliEvent::Accounts { wallet_id, accounts } => {
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for a in accounts {
+                for (i, addr) in a.addresses.iter().enumerate() {
+                    rows.push(vec![
+                        if i == 0 { a.account.to_string() } else { String::new() },
+                        addr.chain.clone(),
+                        addr.address.clone(),
+                    ]);
+                }
+            }
+            format!(
+                "Accounts for {wallet_id} (standard paths; derive --account <i> --save to sign)\n\n{}",
+                render_table(&["ACCOUNT", "CHAIN", "ADDRESS"], &rows)
+            )
+        }
         CliEvent::DerivedAddresses {
             wallet_id,
             path,
@@ -635,6 +651,96 @@ pub async fn sign(
     Ok(true)
 }
 
+/// The PINNED standard derivation path per chain (BIP-44/84 coin types).
+/// These are fixed so users only ever think in account indexes — exactly the
+/// BIP-44 contract. Returns None for unknown chains.
+pub fn standard_path(chain: &str, account: u32) -> Option<String> {
+    match chain.to_ascii_lowercase().as_str() {
+        "ethereum" | "eth" => Some(format!("m/44'/60'/0'/0/{account}")),
+        "bitcoin" | "btc" => Some(format!("m/84'/0'/0'/0/{account}")),
+        "solana" | "sol" => Some(format!("m/44'/501'/{account}'/0'")),
+        "sui" => Some(format!("m/44'/784'/{account}'/0'/0'")),
+        _ => None,
+    }
+}
+
+/// `wallet accounts` — list account 0..count with per-chain addresses from
+/// the pinned standard paths. PUBLIC derivation only (the chain code comes
+/// from the group key): no password, no network, safe to run anywhere.
+pub async fn wallet_accounts(
+    opts: OneShotOpts,
+    wallet_id: String,
+    count: u32,
+) -> anyhow::Result<bool> {
+    use starlab_client::keystore::Keystore;
+
+    let ks = Keystore::new(&opts.keystore_path, &opts.device_id)
+        .map_err(|e| anyhow::anyhow!("open keystore {}: {e}", opts.keystore_path))?;
+    let metas: Vec<_> = ks
+        .list_wallets()
+        .into_iter()
+        .filter(|w| w.session_id == wallet_id)
+        .cloned()
+        .collect();
+    if metas.is_empty() {
+        anyhow::bail!(
+            "wallet '{wallet_id}' not found in {} (device {}).",
+            opts.keystore_path,
+            opts.device_id
+        );
+    }
+
+    // (chain display, chain key, curve, group key bytes) for each chain the
+    // wallet's curves control.
+    let mut chains: Vec<(String, String, String, Vec<u8>)> = Vec::new();
+    for meta in &metas {
+        let group = hex::decode(&meta.group_public_key)
+            .map_err(|e| anyhow::anyhow!("bad group key hex: {e}"))?;
+        for (key, display) in crate::bridge::chains_for_curve(&meta.curve_type) {
+            chains.push((
+                (*display).to_string(),
+                (*key).to_string(),
+                meta.curve_type.clone(),
+                group.clone(),
+            ));
+        }
+    }
+
+    let mut accounts: Vec<crate::protocol::AccountEntry> = Vec::new();
+    for i in 0..count {
+        let mut addresses = Vec::new();
+        for (display, key, curve, group) in &chains {
+            let path_s = standard_path(key, i)
+                .ok_or_else(|| anyhow::anyhow!("no standard path for {key}"))?;
+            let path = starlab_core::DerivationPath::parse(&path_s)
+                .map_err(|e| anyhow::anyhow!("parse {path_s}: {e}"))?;
+            let child_pub = match curve.as_str() {
+                "ed25519" => starlab_core::derive_child_verifying_key_path::<
+                    frost_ed25519::Ed25519Sha512,
+                >(group, &path),
+                _ => starlab_core::derive_child_verifying_key_path::<
+                    frost_secp256k1::Secp256K1Sha256,
+                >(group, &path),
+            }
+            .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
+            let address = crate::bridge::derive_address(&hex::encode(&child_pub), curve, key);
+            if !address.is_empty() {
+                addresses.push(crate::protocol::ChainAddress {
+                    chain: display.clone(),
+                    address,
+                });
+            }
+        }
+        accounts.push(crate::protocol::AccountEntry { account: i, addresses });
+    }
+
+    print(
+        &CliEvent::Accounts { wallet_id, accounts },
+        opts.json,
+    );
+    Ok(true)
+}
+
 /// Deterministic child wallet id: every participant deriving the same
 /// (parent, path) must land on the same id so co-signing "just works".
 fn child_wallet_id(parent: &str, path: &str) -> String {
@@ -680,6 +786,9 @@ pub async fn wallet_derive(
     opts: OneShotOpts,
     wallet_id: String,
     path: String,
+    // `Some("ethereum-1")` when the path came from --account/--chain — gives
+    // friendlier child ids than the sanitized raw path.
+    child_suffix: Option<String>,
     password: String,
     save: bool,
 ) -> anyhow::Result<bool> {
@@ -705,7 +814,10 @@ pub async fn wallet_derive(
         );
     }
 
-    let child_id = child_wallet_id(&wallet_id, &path);
+    let child_id = match &child_suffix {
+        Some(sfx) => format!("{wallet_id}-{sfx}"),
+        None => child_wallet_id(&wallet_id, &path),
+    };
     let mut addresses: Vec<crate::protocol::ChainAddress> = Vec::new();
     // (curve, child_group_hex, child_blob) per curve, for the optional save.
     let mut children: Vec<(String, String, Vec<u8>)> = Vec::new();

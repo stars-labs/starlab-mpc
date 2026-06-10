@@ -174,6 +174,12 @@ pub enum CliEvent {
         signature: String,
         message_hash: String,
     },
+    /// HD account listing (reply to `wallet accounts`) — addresses for the
+    /// pinned standard paths, derived from PUBLIC key material only.
+    Accounts {
+        wallet_id: String,
+        accounts: Vec<AccountEntry>,
+    },
     /// HD child addresses derived from a wallet (reply to `wallet derive`).
     DerivedAddresses {
         wallet_id: String,
@@ -191,6 +197,14 @@ pub enum CliEvent {
         code: String,
         message: String,
     },
+}
+
+/// One HD account: a fixed index whose per-chain addresses come from the
+/// pinned standard derivation paths.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub struct AccountEntry {
+    pub account: u32,
+    pub addresses: Vec<ChainAddress>,
 }
 
 /// One chain's address for a wallet.

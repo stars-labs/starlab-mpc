@@ -123,15 +123,35 @@ enum WalletCmd {
         #[command(flatten)]
         common: OneShot,
     },
+    /// List HD accounts (account 0..N) with their per-chain addresses, using
+    /// the PINNED standard paths (ETH m/44'/60'/0'/0/i, BTC m/84'/0'/0'/0/i,
+    /// SOL m/44'/501'/i'/0', Sui m/44'/784'/i'/0'/0'). Public-key derivation —
+    /// NO password, NO network.
+    Accounts {
+        #[arg(long)]
+        wallet_id: String,
+        /// How many accounts to list (0..count).
+        #[arg(long, default_value_t = 5)]
+        count: u32,
+        #[command(flatten)]
+        common: OneShot,
+    },
     /// Derive a BIP-44-style child wallet (HD) from an existing wallet —
     /// offline, no network. Every participant deriving the SAME path gets the
     /// SAME child key, so a threshold of them can sign for the child address.
     Derive {
         #[arg(long)]
         wallet_id: String,
-        /// Derivation path, e.g. "m/44'/60'/0'/0/1".
+        /// Account index — uses the chain's PINNED standard path. Pair with
+        /// --chain. (The everyday form; --path is the power-user override.)
+        #[arg(long, conflicts_with = "path")]
+        account: Option<u32>,
+        /// Chain for --account: ethereum | bitcoin | solana | sui.
+        #[arg(long, requires = "account")]
+        chain: Option<String>,
+        /// Raw derivation path override, e.g. "m/44'/60'/0'/0/1".
         #[arg(long)]
-        path: String,
+        path: Option<String>,
         /// Persist the child share to the keystore (it then shows up in
         /// `wallet list` and can sign like any wallet).
         #[arg(long)]
@@ -329,11 +349,37 @@ async fn run() -> anyhow::Result<()> {
             WalletCmd::List { common } => {
                 finish(oneshot::wallet_list(common.init_and_opts()).await)
             }
-            WalletCmd::Derive { wallet_id, path, save, pw, common } => {
+            WalletCmd::Accounts { wallet_id, count, common } => {
+                finish(oneshot::wallet_accounts(common.init_and_opts(), wallet_id, count).await)
+            }
+            WalletCmd::Derive { wallet_id, account, chain, path, save, pw, common } => {
                 let password = pw.resolve()?;
+                let (resolved_path, child_suffix) = match (path, account) {
+                    (Some(p), _) => (p, None),
+                    (None, Some(i)) => {
+                        let chain = chain.as_deref().unwrap_or("ethereum");
+                        let p = oneshot::standard_path(chain, i).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "unknown --chain {chain:?}; expected ethereum|bitcoin|solana|sui"
+                            )
+                        })?;
+                        (p, Some(format!("{chain}-{i}")))
+                    }
+                    (None, None) => anyhow::bail!(
+                        "specify --account <i> [--chain ethereum] for the standard path, \
+                         or --path for a raw override"
+                    ),
+                };
                 finish(
-                    oneshot::wallet_derive(common.init_and_opts(), wallet_id, path, password, save)
-                        .await,
+                    oneshot::wallet_derive(
+                        common.init_and_opts(),
+                        wallet_id,
+                        resolved_path,
+                        child_suffix,
+                        password,
+                        save,
+                    )
+                    .await,
                 )
             }
             WalletCmd::Create {
