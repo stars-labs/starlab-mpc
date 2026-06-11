@@ -212,6 +212,10 @@ pub struct AccountEntry {
 pub struct ChainAddress {
     pub chain: String,
     pub address: String,
+    /// BIP-44 derivation path the address came from (pinned standard paths;
+    /// `None` only for legacy emitters that predate the account model).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// UI-facing wallet summary (never leaks internal crypto types).

@@ -263,10 +263,12 @@ fn render_human(ev: &CliEvent) -> String {
                         w.threshold.clone(),
                         w.chain.clone(),
                         w.address.clone(),
+                        "-".to_string(),
                     ]);
                     continue;
                 }
                 for (i, a) in w.addresses.iter().enumerate() {
+                    let path = a.path.clone().unwrap_or_else(|| "-".to_string());
                     if i == 0 {
                         rows.push(vec![
                             w.id.clone(),
@@ -274,6 +276,7 @@ fn render_human(ev: &CliEvent) -> String {
                             w.threshold.clone(),
                             a.chain.clone(),
                             a.address.clone(),
+                            path,
                         ]);
                     } else {
                         rows.push(vec![
@@ -282,11 +285,12 @@ fn render_human(ev: &CliEvent) -> String {
                             String::new(),
                             a.chain.clone(),
                             a.address.clone(),
+                            path,
                         ]);
                     }
                 }
             }
-            render_table(&["ID", "NAME", "QUORUM", "CHAIN", "ADDRESS"], &rows)
+            render_table(&["ID", "NAME", "QUORUM", "CHAIN", "ADDRESS", "PATH"], &rows)
         }
         CliEvent::Sessions { sessions } => {
             if sessions.is_empty() {
@@ -339,12 +343,13 @@ fn render_human(ev: &CliEvent) -> String {
                         if i == 0 { a.account.to_string() } else { String::new() },
                         addr.chain.clone(),
                         addr.address.clone(),
+                        addr.path.clone().unwrap_or_else(|| "-".to_string()),
                     ]);
                 }
             }
             format!(
                 "Accounts for {wallet_id} (standard paths; derive --account <i> --save to sign)\n\n{}",
-                render_table(&["ACCOUNT", "CHAIN", "ADDRESS"], &rows)
+                render_table(&["ACCOUNT", "CHAIN", "ADDRESS", "PATH"], &rows)
             )
         }
         CliEvent::DerivedAddresses {
@@ -812,6 +817,7 @@ pub async fn wallet_accounts(
                 addresses.push(crate::protocol::ChainAddress {
                     chain: display.clone(),
                     address,
+                    path: Some(path_s.clone()),
                 });
             }
         }
@@ -923,6 +929,7 @@ pub async fn wallet_derive(
                 addresses.push(crate::protocol::ChainAddress {
                     chain: (*display).to_string(),
                     address,
+                    path: Some(path.clone()),
                 });
             }
         }

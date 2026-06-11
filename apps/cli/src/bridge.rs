@@ -326,10 +326,11 @@ fn wallet_entries(wallets: &[WalletMetadata]) -> Vec<WalletEntry> {
                 if let Ok(entries) =
                     starlab_core::accounts::account_addresses(&w.curve_type, &group, 0)
                 {
-                    for (display, _path, address) in entries {
+                    for (display, path, address) in entries {
                         e.addresses.push(crate::protocol::ChainAddress {
                             chain: display,
                             address,
+                            path: Some(path),
                         });
                     }
                 }
