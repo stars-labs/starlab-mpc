@@ -304,6 +304,21 @@ pub fn derive_child_for_curve<C: frost_core::Ciphersuite>(
     Ok((child_blob, hex::encode(child_group)))
 }
 
+/// [`derive_child_for_curve`] with the ciphersuite picked by curve NAME —
+/// the single string→turbofish dispatch for keystore-blob child derivation,
+/// shared by the elm co-signer path and the CLI one-shot `wallet derive`.
+pub fn derive_child_for_curve_named(
+    curve: &str,
+    blob: &[u8],
+    path: &starlab_core::DerivationPath,
+) -> Result<(Vec<u8>, String), String> {
+    match curve {
+        "ed25519" => derive_child_for_curve::<frost_ed25519::Ed25519Sha512>(blob, path),
+        "secp256k1" => derive_child_for_curve::<frost_secp256k1::Secp256K1Sha256>(blob, path),
+        other => Err(format!("unsupported curve: {other}")),
+    }
+}
+
 /// Materialize (derive + persist) the HD account child wallet
 /// `{parent}-{chain}-{account}` if it isn't in the keystore yet — "BIP-44
 /// all the way": signing always happens with an ACCOUNT key, never the
@@ -360,10 +375,7 @@ pub fn ensure_account_wallet(
     let blob = ks
         .load_wallet_file_for_curve(parent_id, curve, password)
         .map_err(|e| format!("unlock '{parent_id}' ({curve}): {e}"))?;
-    let (child_blob, child_group_hex) = match curve {
-        "ed25519" => derive_child_for_curve::<frost_ed25519::Ed25519Sha512>(&blob, &parsed)?,
-        _ => derive_child_for_curve::<frost_secp256k1::Secp256K1Sha256>(&blob, &parsed)?,
-    };
+    let (child_blob, child_group_hex) = derive_child_for_curve_named(curve, &blob, &parsed)?;
     ks.create_wallet_multi_chain(
         &child_id,
         curve,

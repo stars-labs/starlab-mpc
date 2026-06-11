@@ -103,17 +103,10 @@ impl Bridge {
                             .and_then(|g| {
                                 let path = starlab_core::accounts::standard_path(primary_chain, 0)?;
                                 let parsed = starlab_core::DerivationPath::parse(&path).ok()?;
-                                let child = if curve_type == "ed25519" {
-                                    starlab_core::derive_child_verifying_key_path::<
-                                        frost_ed25519::Ed25519Sha512,
-                                    >(&g, &parsed)
-                                    .ok()?
-                                } else {
-                                    starlab_core::derive_child_verifying_key_path::<
-                                        frost_secp256k1::Secp256K1Sha256,
-                                    >(&g, &parsed)
-                                    .ok()?
-                                };
+                                let child = starlab_core::accounts::derive_child_pubkey(
+                                    curve_type, &g, &parsed,
+                                )
+                                .ok()?;
                                 starlab_core::accounts::address_for_chain(
                                     primary_chain,
                                     curve_type,

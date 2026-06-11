@@ -115,6 +115,30 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
     }
 }
 
+/// PUBLIC-only child derivation with the curve picked by NAME — the ONE
+/// place that maps a curve string onto the FROST ciphersuite turbofish for
+/// [`derive_child_verifying_key_path`]. Every client listing/deriving
+/// addresses goes through here instead of re-matching `"ed25519"`/
+/// `"secp256k1"` locally.
+pub fn derive_child_pubkey(
+    curve: &str,
+    group_key_bytes: &[u8],
+    path: &DerivationPath,
+) -> Result<Vec<u8>> {
+    match curve {
+        "ed25519" => {
+            derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(group_key_bytes, path)
+        }
+        "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
+            group_key_bytes,
+            path,
+        ),
+        other => Err(FrostError::DerivationError(format!(
+            "unsupported curve {other}"
+        ))),
+    }
+}
+
 /// All of account `i`'s addresses for one curve's group key:
 /// `(chain display name, path, address)` per chain. PUBLIC derivation only.
 pub fn account_addresses(
@@ -127,21 +151,7 @@ pub fn account_addresses(
         let path_s = standard_path(key, account)
             .ok_or_else(|| FrostError::DerivationError(format!("no path for {key}")))?;
         let path = DerivationPath::parse(&path_s)?;
-        let child = match curve {
-            "ed25519" => derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
-                group_key_bytes,
-                &path,
-            )?,
-            "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
-                group_key_bytes,
-                &path,
-            )?,
-            other => {
-                return Err(FrostError::DerivationError(format!(
-                    "unsupported curve {other}"
-                )))
-            }
-        };
+        let child = derive_child_pubkey(curve, group_key_bytes, &path)?;
         out.push((
             (*display).to_string(),
             path_s,

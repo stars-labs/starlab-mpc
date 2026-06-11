@@ -713,45 +713,27 @@ pub async fn wallet_accounts(
         );
     }
 
-    // (chain display, chain key, curve, group key bytes) for each chain the
-    // wallet's curves control.
-    let mut chains: Vec<(String, String, String, Vec<u8>)> = Vec::new();
+    // (curve, group key bytes) per curve file of the wallet; the per-chain
+    // fan-out + derivation lives in `starlab_core::accounts` (single source
+    // of truth shared with WASM/desktop).
+    let mut curves: Vec<(String, Vec<u8>)> = Vec::new();
     for meta in &metas {
         let group = hex::decode(&meta.group_public_key)
             .map_err(|e| anyhow::anyhow!("bad group key hex: {e}"))?;
-        for (key, display) in crate::bridge::chains_for_curve(&meta.curve_type) {
-            chains.push((
-                (*display).to_string(),
-                (*key).to_string(),
-                meta.curve_type.clone(),
-                group.clone(),
-            ));
-        }
+        curves.push((meta.curve_type.clone(), group));
     }
 
     let mut accounts: Vec<crate::protocol::AccountEntry> = Vec::new();
     for i in 0..count {
         let mut addresses = Vec::new();
-        for (display, key, curve, group) in &chains {
-            let path_s = standard_path(key, i)
-                .ok_or_else(|| anyhow::anyhow!("no standard path for {key}"))?;
-            let path = starlab_core::DerivationPath::parse(&path_s)
-                .map_err(|e| anyhow::anyhow!("parse {path_s}: {e}"))?;
-            let child_pub = match curve.as_str() {
-                "ed25519" => starlab_core::derive_child_verifying_key_path::<
-                    frost_ed25519::Ed25519Sha512,
-                >(group, &path),
-                _ => starlab_core::derive_child_verifying_key_path::<
-                    frost_secp256k1::Secp256K1Sha256,
-                >(group, &path),
-            }
-            .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
-            let address = crate::bridge::derive_address(&hex::encode(&child_pub), curve, key);
-            if !address.is_empty() {
+        for (curve, group) in &curves {
+            let entries = starlab_core::accounts::account_addresses(curve, group, i)
+                .map_err(|e| anyhow::anyhow!("derive account {i} ({curve}): {e}"))?;
+            for (display, path_s, address) in entries {
                 addresses.push(crate::protocol::ChainAddress {
-                    chain: display.clone(),
+                    chain: display,
                     address,
-                    path: Some(path_s.clone()),
+                    path: Some(path_s),
                 });
             }
         }
@@ -779,6 +761,9 @@ fn child_wallet_id(parent: &str, path: &str) -> String {
 /// keystore blob. Returns (child blob, child group public key hex).
 /// Anyhow-flavored shim over the SHARED implementation in
 /// `starlab_client::elm::command` (one derivation for every client).
+/// Production code goes through `derive_child_for_curve_named`; the
+/// turbofish form remains for tests that pin a concrete ciphersuite.
+#[cfg(test)]
 fn derive_child_for_curve<C: frost_core::Ciphersuite>(
     blob: &[u8],
     path: &starlab_core::DerivationPath,
@@ -836,13 +821,12 @@ pub async fn wallet_derive(
         let blob = ks
             .load_wallet_file_for_curve(&wallet_id, &meta.curve_type, &password)
             .map_err(|e| anyhow::anyhow!("unlock '{wallet_id}' ({}): {e}", meta.curve_type))?;
-        let (child_blob, child_group_hex) = match meta.curve_type.as_str() {
-            "ed25519" => derive_child_for_curve::<frost_ed25519::Ed25519Sha512>(&blob, &parsed)?,
-            "secp256k1" => {
-                derive_child_for_curve::<frost_secp256k1::Secp256K1Sha256>(&blob, &parsed)?
-            }
-            other => anyhow::bail!("unsupported curve in keystore: {other}"),
-        };
+        let (child_blob, child_group_hex) = starlab_client::elm::command::derive_child_for_curve_named(
+            &meta.curve_type,
+            &blob,
+            &parsed,
+        )
+        .map_err(|e| anyhow::anyhow!(e))?;
         for (key, display) in chains_for_curve(&meta.curve_type) {
             let address = derive_address(&child_group_hex, &meta.curve_type, key);
             if !address.is_empty() {
