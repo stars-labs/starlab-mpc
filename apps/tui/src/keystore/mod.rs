@@ -8,7 +8,6 @@ mod encryption;
 mod models;
 mod storage;
 mod extension_compat;
-pub mod frost_keystore;
 
 pub use storage::Keystore;
 pub use models::{DeviceInfo, BlockchainInfo, WalletMetadata};
@@ -17,7 +16,6 @@ pub use extension_compat::{
     ExtensionKeystoreBackup, ExtensionBackupWallet,
     encrypt_for_extension, decrypt_from_extension, WalletData
 };
-pub use frost_keystore::{FrostKeystoreManager, FrostKeystore, FrostMetadata};
 
 /// Error types that can occur during keystore operations
 #[derive(Debug, thiserror::Error)]
