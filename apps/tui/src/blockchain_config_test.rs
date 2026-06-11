@@ -55,6 +55,31 @@ mod tests {
     }
 
     #[test]
+    fn evm_chains_share_the_canonical_ethereum_address() {
+        // Compressed secp256k1 G → the well-known address for privkey=1. The
+        // EVM-compatible chains must produce EXACTLY the Ethereum encoding.
+        let g = hex::decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+            .unwrap();
+        for chain in ["ethereum", "bsc", "polygon", "avalanche"] {
+            assert_eq!(
+                generate_address_for_chain(&g, "secp256k1", chain).unwrap(),
+                "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf",
+                "{chain}"
+            );
+        }
+    }
+
+    #[test]
+    fn aptos_flag_byte_is_last_unlike_sui() {
+        // Aptos = sha3-256(pubkey ‖ 0x00); Sui = sha3-256(0x00 ‖ pubkey).
+        // They MUST differ — guards against an over-eager fold.
+        let key = [7u8; 32];
+        let aptos = generate_address_for_chain(&key, "ed25519", "aptos").unwrap();
+        let sui = generate_address_for_chain(&key, "ed25519", "sui").unwrap();
+        assert_ne!(aptos, sui);
+    }
+
+    #[test]
     fn test_curve_type_parsing() {
         assert_eq!(CurveType::from_string("secp256k1"), Some(CurveType::Secp256k1));
         assert_eq!(CurveType::from_string("ed25519"), Some(CurveType::Ed25519));

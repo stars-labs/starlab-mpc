@@ -183,29 +183,17 @@ pub fn generate_address_for_chain(
     // this match (they early-return above), so only the non-canonical
     // encodings live here.
     match (chain, &curve) {
-        // Ethereum-compatible chains with secp256k1
+        // Ethereum-compatible chains share the Ethereum address: same curve,
+        // same keccak-of-decompressed-key encoding, so delegate to the ONE
+        // shared implementation instead of duplicating it byte-for-byte here.
         ("bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
-            // EVM addresses are keccak256(uncompressed pubkey X‖Y)[12..].
-            // FROST serializes the group verifying key COMPRESSED (33 bytes,
-            // 0x02/0x03 ‖ X), so we MUST decompress first: hashing the
-            // compressed bytes yields an address that does NOT correspond to
-            // the signing key. `from_sec1_bytes` accepts both compressed (33)
-            // and uncompressed (65) encodings, so this is robust to either
-            // input. Must stay byte-for-byte identical to
-            // `starlab_core::accounts::address_for_chain("ethereum", …)`.
-            use k256::elliptic_curve::sec1::ToEncodedPoint;
-            use sha3::{Digest, Keccak256};
-            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
-                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
-            let point = pk.to_encoded_point(false); // 0x04 ‖ X ‖ Y
-            let xy = &point.as_bytes()[1..]; // X ‖ Y, 64 bytes
-            let mut hasher = Keccak256::new();
-            hasher.update(xy);
-            let hash = hasher.finalize();
-            Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
+            starlab_core::accounts::address_for_chain("ethereum", "secp256k1", group_public_key)
+                .map_err(|e| e.to_string())
         }
 
-        // Aptos with ed25519
+        // Aptos with ed25519. NOT foldable into core's Sui encoder: Aptos
+        // hashes `pubkey ‖ 0x00` (scheme flag LAST), Sui hashes
+        // `0x00 ‖ pubkey` (flag FIRST) — different digests.
         ("aptos", CurveType::Ed25519) => {
             // Aptos addresses are derived from auth key
             use sha3::{Digest, Sha3_256};
