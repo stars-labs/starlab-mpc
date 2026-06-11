@@ -54,25 +54,24 @@ pub(crate) fn canonical_identifier<C: Ciphersuite>(
 
 /// Derive the persisted wallet id from a DKG session id.
 ///
-/// The session id is `dkg_<uuid>` — random, and **identical across all
+/// The session id is a bare uuid — random, and **identical across all
 /// participants** (the creator mints it and joiners adopt it), so this mapping
 /// is deterministic cluster-wide: every device computes the same wallet id. We
-/// strip the `dkg_` prefix and keep 12 hex chars — enough entropy that two
-/// wallets in one room don't collide (e.g. session `dkg_d9f249e9-66b3-4ee8-…` →
-/// `d9f249e966b3`). The id is the bare token: no `wallet-`/`dkg_` noise (the
-/// prefix carried no information). Non-standard session ids fall back to a
-/// sanitized slice so we always produce a non-empty, filesystem-safe id.
+/// keep 12 hex chars — enough entropy that two wallets in one room don't
+/// collide (e.g. session `d9f249e9-66b3-4ee8-…` → `d9f249e966b3`). The id is
+/// the bare token: no `wallet-`/`dkg_` noise. Non-standard session ids fall
+/// back to a sanitized slice so we always produce a non-empty,
+/// filesystem-safe id.
 ///
 /// MUST be the single source of truth for this mapping — both the in-memory
 /// `current_wallet_id` (here, post-part3) and the persisted wallet id
 /// (`FinalizeWalletFromDkg`) call this, and they have to agree.
 pub fn wallet_id_from_session(session_id: &str) -> String {
-    let core = session_id.strip_prefix("dkg_").unwrap_or(session_id);
-    let hex: String = core.chars().filter(|c| c.is_ascii_hexdigit()).take(12).collect();
+    let hex: String = session_id.chars().filter(|c| c.is_ascii_hexdigit()).take(12).collect();
     if hex.len() >= 8 {
         return hex;
     }
-    let s: String = core.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
+    let s: String = session_id.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect();
     if s.is_empty() { "wallet".to_string() } else { s }
 }
 
@@ -901,35 +900,35 @@ mod wallet_id_tests {
     use super::wallet_id_from_session;
 
     #[test]
-    fn strips_dkg_prefix_keeps_12_hex_no_prefix() {
+    fn keeps_12_hex_no_prefix() {
         assert_eq!(
-            wallet_id_from_session("dkg_d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d"),
+            wallet_id_from_session("d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d"),
             "d9f249e966b3"
         );
     }
 
     #[test]
     fn distinct_sessions_distinct_ids() {
-        let a = wallet_id_from_session("dkg_d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d");
-        let b = wallet_id_from_session("dkg_3a17c0de-1111-2222-3333-444455556666");
+        let a = wallet_id_from_session("d9f249e9-66b3-4ee8-8a2d-16db1e6cbb1d");
+        let b = wallet_id_from_session("3a17c0de-1111-2222-3333-444455556666");
         assert_ne!(a, b);
     }
 
     #[test]
     fn deterministic() {
-        let s = "dkg_abcdef0123456789-aaaa";
+        let s = "abcdef0123456789-aaaa";
         assert_eq!(wallet_id_from_session(s), wallet_id_from_session(s));
     }
 
     #[test]
     fn no_dkg_or_wallet_noise_in_id() {
-        let id = wallet_id_from_session("dkg_d9f249e9-66b3");
+        let id = wallet_id_from_session("d9f249e9-66b3");
         assert!(!id.contains("dkg_") && !id.contains("wallet-"));
     }
 
     #[test]
     fn short_or_weird_session_is_nonempty_and_safe() {
-        for s in ["x", "", "dkg_"] {
+        for s in ["x", "", "-_-"] {
             let id = wallet_id_from_session(s);
             assert!(!id.is_empty());
             assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));

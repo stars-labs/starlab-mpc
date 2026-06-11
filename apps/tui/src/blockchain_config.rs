@@ -179,19 +179,20 @@ pub fn generate_address_for_chain(
         .map_err(|e| e.to_string());
     }
 
-    // Generate address based on chain type
+    // Generate address based on chain type. The canonical chains never reach
+    // this match (they early-return above), so only the non-canonical
+    // encodings live here.
     match (chain, &curve) {
         // Ethereum-compatible chains with secp256k1
-        ("ethereum" | "bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
-            // Ethereum addresses are keccak256(uncompressed pubkey X‖Y)[12..].
+        ("bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
+            // EVM addresses are keccak256(uncompressed pubkey X‖Y)[12..].
             // FROST serializes the group verifying key COMPRESSED (33 bytes,
             // 0x02/0x03 ‖ X), so we MUST decompress first: hashing the
-            // compressed bytes — or, as a previous version did, the 32-byte X
-            // coordinate after stripping the prefix — yields an address that
-            // does NOT correspond to the signing key (e.g. generator G gave the
-            // bogus 0x51cbf46… instead of the canonical 0x7e5f4552…).
-            // `from_sec1_bytes` accepts both compressed (33) and uncompressed
-            // (65) encodings, so this is robust to either input.
+            // compressed bytes yields an address that does NOT correspond to
+            // the signing key. `from_sec1_bytes` accepts both compressed (33)
+            // and uncompressed (65) encodings, so this is robust to either
+            // input. Must stay byte-for-byte identical to
+            // `starlab_core::accounts::address_for_chain("ethereum", …)`.
             use k256::elliptic_curve::sec1::ToEncodedPoint;
             use sha3::{Digest, Keccak256};
             let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
@@ -203,44 +204,7 @@ pub fn generate_address_for_chain(
             let hash = hasher.finalize();
             Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
         }
-        
-        // Bitcoin native SegWit (P2WPKH) with secp256k1
-        ("bitcoin", CurveType::Secp256k1) => {
-            // P2WPKH = bech32 segwit-v0 of hash160(compressed pubkey), where
-            // hash160 = ripemd160(sha256(pubkey)). P2WPKH mandates the
-            // COMPRESSED pubkey — which is exactly how FROST serializes the
-            // group key — so we hash it as-is (re-compressing via k256 to
-            // normalize in case an uncompressed key is ever passed).
-            use k256::elliptic_curve::sec1::ToEncodedPoint;
-            use ripemd::Ripemd160;
-            use sha2::{Digest as _, Sha256};
-            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
-                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
-            let compressed = pk.to_encoded_point(true); // 0x02/0x03 ‖ X
-            let sha = Sha256::digest(compressed.as_bytes());
-            let h160 = Ripemd160::digest(sha);
-            bech32::segwit::encode_v0(bech32::hrp::BC, &h160)
-                .map_err(|e| format!("bech32 encode failed: {e}"))
-        }
 
-        // Solana with ed25519
-        ("solana", CurveType::Ed25519) => {
-            // Solana addresses are base58 encoded public keys
-            use bs58;
-            Ok(bs58::encode(group_public_key).into_string())
-        }
-        
-        // Sui with ed25519
-        ("sui", CurveType::Ed25519) => {
-            // Sui addresses are derived from the public key
-            use sha3::{Digest, Sha3_256};
-            let mut hasher = Sha3_256::new();
-            hasher.update([0x00]); // Sui signature scheme flag for ed25519
-            hasher.update(group_public_key);
-            let hash = hasher.finalize();
-            Ok(format!("0x{}", hex::encode(&hash[..32])))
-        }
-        
         // Aptos with ed25519
         ("aptos", CurveType::Ed25519) => {
             // Aptos addresses are derived from auth key

@@ -624,33 +624,6 @@ pub async fn reshare(
     Ok(true)
 }
 
-/// Materialize (derive + persist) the HD account child wallet if it isn't in
-/// the keystore yet. Thin keystore-opening wrapper over the SHARED
-/// implementation in `starlab_client::elm::command::ensure_account_wallet`
-/// (the same one the elm co-signer unlock path uses), so the CLI and every
-/// elm-driven client agree on the child id + label byte-for-byte. Returns
-/// the child wallet id to sign with.
-fn ensure_account_wallet(
-    opts: &OneShotOpts,
-    parent_id: &str,
-    account: u32,
-    chain: Option<&str>,
-    password: &str,
-) -> anyhow::Result<String> {
-    use starlab_client::keystore::Keystore;
-
-    let mut ks = Keystore::new(&opts.keystore_path, &opts.device_id)
-        .map_err(|e| anyhow::anyhow!("open keystore {}: {e}", opts.keystore_path))?;
-    let (child_id, materialized) = starlab_client::elm::command::ensure_account_wallet(
-        &mut ks, parent_id, account, chain, password,
-    )
-    .map_err(|e| anyhow::anyhow!("{e} (device {})", opts.device_id))?;
-    if materialized {
-        eprintln!("note: materialized account wallet '{child_id}' (deterministic — co-signers do the same on first use)");
-    }
-    Ok(child_id)
-}
-
 pub async fn sign(
     opts: OneShotOpts,
     wallet_id: String,
@@ -663,12 +636,25 @@ pub async fn sign(
     // BIP-44 all the way: signing happens with the ACCOUNT key, never the
     // root. If the caller passed an already-materialized child id
     // (`{parent}-{chain}-{n}`), use it as-is; otherwise materialize
-    // account `account` of the given parent on demand.
+    // account `account` of the given parent on demand via the SHARED
+    // implementation in `starlab_client::elm::command::ensure_account_wallet`
+    // (the same one the elm co-signer unlock path uses), so the CLI and every
+    // elm-driven client agree on the child id + label byte-for-byte.
     let signing_wallet_id =
         if starlab_core::accounts::parse_child_wallet_id(&wallet_id).is_some() {
             wallet_id.clone()
         } else {
-            ensure_account_wallet(&opts, &wallet_id, account, chain.as_deref(), &password)?
+            use starlab_client::keystore::Keystore;
+            let mut ks = Keystore::new(&opts.keystore_path, &opts.device_id)
+                .map_err(|e| anyhow::anyhow!("open keystore {}: {e}", opts.keystore_path))?;
+            let (child_id, materialized) = starlab_client::elm::command::ensure_account_wallet(
+                &mut ks, &wallet_id, account, chain.as_deref(), &password,
+            )
+            .map_err(|e| anyhow::anyhow!("{e} (device {})", opts.device_id))?;
+            if materialized {
+                eprintln!("note: materialized account wallet '{child_id}' (deterministic — co-signers do the same on first use)");
+            }
+            child_id
         };
     let (tx, mut rx, roster) = start(&opts);
     tx.send(Message::TriggerReconnect)?;

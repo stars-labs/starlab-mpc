@@ -364,27 +364,5 @@ impl FrostKeystoreManager {
         
         Ok((key_package, pubkey_package))
     }
-    
-    /// Derives Ethereum address from FROST public key
-    pub fn derive_ethereum_address(&self, public_key_bytes: &[u8]) -> String {
-        use sha3::{Digest, Keccak256};
-        use k256::{PublicKey, elliptic_curve::sec1::ToEncodedPoint};
-        
-        // Parse the public key
-        let pubkey = PublicKey::from_sec1_bytes(public_key_bytes)
-            .expect("Invalid public key");
-        
-        // Get uncompressed public key
-        let uncompressed = pubkey.to_encoded_point(false);
-        let uncompressed_bytes = uncompressed.as_bytes();
-        
-        // Hash with Keccak256 (skip 0x04 prefix)
-        let mut hasher = Keccak256::new();
-        hasher.update(&uncompressed_bytes[1..]);
-        let hash = hasher.finalize();
-        
-        // Take last 20 bytes as address
-        format!("0x{}", hex::encode(&hash[12..]))
-    }
 }
 

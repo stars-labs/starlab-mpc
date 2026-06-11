@@ -54,7 +54,6 @@ crossterm = { version = "0.29.0" }
 tuirealm = "4.0.0"
 anyhow = "1.0.99"
 webrtc = "0.17.1"
-bs58 = "0.5.1"
 # System clipboard for the "Copy Session ID" button on the DKG Progress screen.
 arboard = "3.6.1"
 # sha2/sha3 pinned to 0.10 because `pbkdf2 = "0.12"` (latest at time of
@@ -72,10 +71,6 @@ ethers-core = "2.0.14"
 k256 = "0.13.4"
 elliptic-curve = "0.13.8"
 rlp = "0.6.1"
-
-# Bitcoin P2WPKH (bech32 segwit-v0 of hash160(compressed pubkey)).
-ripemd = "0.1.3"
-bech32 = "0.11.0"
 
 clap = { version = "4.5.21", features = ["derive"] }
 chrono = { version = "0.4.39", features = ["serde"] }

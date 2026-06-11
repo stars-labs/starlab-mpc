@@ -1931,11 +1931,11 @@ fn dkg_key_generated_derives_wallet_name_idempotently_per_session() {
         model.wallet_state.pending_password = Some("pw12345678".to_string());
         model.wallet_state.keystore_path = "/tmp/k".to_string();
         model.current_screen = Screen::DKGProgress {
-            session_id: "dkg_abcd1234rest".to_string(),
+            session_id: "abcd1234rest".to_string(),
         };
         model.device_id = self_id.to_string();
         model.active_session = Some(SessionInfo {
-            session_id: "dkg_abcd1234rest".to_string(),
+            session_id: "abcd1234rest".to_string(),
             proposer_id: "mpc-1".to_string(),
             total: 3,
             threshold: 2,
@@ -1961,7 +1961,7 @@ fn dkg_key_generated_derives_wallet_name_idempotently_per_session() {
     let name_2 = run_with_participants(vec!["mpc-1", "mpc-3", "mpc-2"], "mpc-2");
     let name_3 = run_with_participants(vec!["mpc-1", "mpc-2", "mpc-3"], "mpc-3");
 
-    // "dkg_abcd1234rest" → strip dkg_ → first 12 hex digits → "abcd1234e".
+    // "abcd1234rest" → first 12 hex digits → "abcd1234e".
     assert_eq!(name_1, "abcd1234e", "mpc-1 name");
     assert_eq!(name_2, "abcd1234e", "mpc-2 name");
     assert_eq!(name_3, "abcd1234e", "mpc-3 name");
