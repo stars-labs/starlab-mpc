@@ -50,7 +50,7 @@
           # Linux-specific dependencies. The desktop GUI moved out to
           # stars-labs/starlab-desktop, so the graphics/windowing libs that
           # used to live here are gone. Nothing Linux-only remains for the
-          # headless engine + browser-extension/wasm build.
+          # headless engine + wasm build.
           linuxBuildInputs = [ ];
 
           # macOS-specific dependencies

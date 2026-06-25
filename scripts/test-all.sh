@@ -5,12 +5,6 @@ set -e
 
 echo "🧪 Testing MPC Wallet Monorepo..."
 
-# Test browser extension
-echo "🌐 Testing browser extension..."
-cd apps/browser-extension
-bun test
-cd ../..
-
 # Test the Rust workspace — cli + starlab-client + frost-core + signal-server.
 #
 # `--lib --tests` covers both the per-crate unit tests (67 in

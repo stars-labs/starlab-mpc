@@ -9,15 +9,14 @@ The MPC Wallet has been restructured as a monorepo to support multiple platforms
 ```
 starlab-mpc/
 ├── apps/                        # All applications
-│   ├── browser-extension/       # Chrome/Firefox extension (WXT + Svelte 5)
-│   ├── starlab-client/                # Terminal UI (Ratatui) + shared starlab-client::core library
-│   ├── native-node/             # Desktop GUI (Slint 1.x), reuses starlab-client::core
+│   ├── tui/                     # Terminal UI (Ratatui) + shared starlab-client::core library
+│   ├── cli/                     # Headless CLI (starlab-cli) — conformance oracle + automation
 │   └── signal-server/           # WebRTC signaling servers
 │       ├── server/              # Standard WebSocket server
 │       └── cloudflare-worker/   # Edge deployment
 │
 ├── packages/@starlab/        # Shared packages
-│   ├── frost-core/              # Core FROST cryptography (Rust)
+│   ├── core/                   # Core FROST cryptography (Rust, crate starlab-core)
 │   ├── core-wasm/               # WebAssembly bindings (Rust → JS)
 │   ├── blockchain/              # Chain integrations (solana-sdk only; Ethereum/Bitcoin hand-rolled over sha2/sha3/bs58)
 │   └── types/                   # TypeScript type definitions
@@ -30,24 +29,31 @@ starlab-mpc/
 
 ## Applications
 
-### Browser Extension (`apps/browser-extension/`)
-- **Technology**: TypeScript, Svelte 5 (legacy reactivity, not runes), WXT framework
-- **Features**: Web3 wallet, FROST MPC, multi-chain support, EIP-1193 provider injection
-- **Build**: `bun run build` (from apps/browser-extension)
-- **Dev**: `bun run dev` (from apps/browser-extension)
+### Browser Extension
+Moved to its own repo:
+[`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet)
+(at `apps/extension/` there). It still consumes this repo's
+`@stars-labs/core-wasm` and `@stars-labs/types` packages.
 
 ### Terminal UI Node (`apps/tui/`)
 - **Technology**: Rust, Ratatui (terminal UI), tui-realm (Elm architecture), WebRTC
 - **Features**: Terminal UI, offline/SD-card mode, keystore management
 - **Build**: `cargo build -p starlab-client`
 - **Run**: `cargo run --bin starlab-tui -p starlab-client -- --device-id mpc-1`
-- **Library**: Exposes `starlab-client::core::{WalletManager, SessionManager, DkgManager, OfflineManager, ConnectionManager, SigningManager}` for reuse by native-node.
+- **Library**: Exposes `starlab-client::core::{WalletManager, SessionManager, DkgManager, OfflineManager, ConnectionManager, SigningManager}` for reuse by the desktop app.
 
-### Native Node (`apps/native-node/`)
-- **Technology**: Rust, Slint 1.x UI framework, `rfd` for native file dialogs
-- **Features**: Desktop GUI reusing starlab-client::core business logic; session management, DKG, encrypted keystore import/export, signing modal, SD-card export/import
-- **Build**: `cargo build -p starlab-mpc-native`
-- **Run**: `cargo run --bin starlab-mpc-native`
+### Headless CLI (`apps/cli/`)
+- **Technology**: Rust, headless (no UI)
+- **Features**: Conformance oracle + automation — drives real DKG / threshold signing over the wire; the L1–L3 conformance test suite (see `docs/cli-conformance-testing.md`)
+- **Build**: `cargo build -p starlab-cli`
+- **Run**: `cargo run --bin starlab-cli -p starlab-cli -- --help`
+
+### Desktop App
+Moved to its own repo:
+[`stars-labs/starlab-desktop`](https://github.com/stars-labs/starlab-desktop)
+(Iced GUI, MIT). It consumes this repo's `starlab-client` crate
+(`core::*Manager` + `CoreState` + `HeadlessRunner`) as a cross-repo
+Cargo dependency, so that surface must stay `pub`.
 
 ### Signal Servers (`apps/signal-server/`)
 - **Standard Server**: Rust WebSocket server for development
@@ -56,7 +62,7 @@ starlab-mpc/
 ## Shared Packages
 
 ### `@stars-labs/core`
-Core FROST implementation in Rust, shared between TUI, native, and the WASM bindings:
+Core FROST implementation in Rust, shared between the TUI, the desktop app, and the WASM bindings:
 - DKG (Distributed Key Generation)
 - Threshold signing
 - Keystore management
@@ -128,7 +134,8 @@ cargo test                    # Rust tests
 - Business logic (WalletManager / SessionManager / DkgManager /
   OfflineManager / ConnectionManager / SigningManager) lives in
   `apps/tui/src/core/` and is re-exported via `starlab-client::lib.rs`.
-  native-node consumes this as a Cargo dependency on `starlab-client`.
+  The desktop app (starlab-desktop) consumes this as a cross-repo Cargo
+  dependency on `starlab-client`.
 - UI-specific code in respective apps
 
 ### 2. Type Safety
@@ -153,7 +160,8 @@ crates move together on `main`.
 ## Communication Flow
 
 ```
-Browser Extension          TUI Node              Native Node
+Browser Extension          TUI Node              Desktop App
+  (starlab-wallet)                            (starlab-desktop)
        |                      |                      |
        |------WebSocket-------|------WebSocket------|
                               |

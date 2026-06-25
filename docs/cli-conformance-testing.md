@@ -1,9 +1,14 @@
 # CLI-Driven Conformance & Cross-Client Parity Testing
 
-**Status:** Design proposal (no implementation yet)
+**Status:** Implemented — the L1–L3 suites run in CI (`e2e_dkg`,
+`conformance_matrix`, `l3_serve_process`, `wire_trace`; see
+`.github/workflows/ci.yml`). The cross-client sections below describe
+the broader design; the Rust-side oracle is live.
 **Owner:** MPC wallet team
 **Scope:** `apps/cli` as the test oracle and automated peer for the whole MPC stack
-**Related:** `apps/tui`, `apps/native-node`, `apps/browser-extension`, `apps/signal-server`
+**Related:** `apps/tui`, `apps/signal-server` (in-repo); the desktop app
+(`stars-labs/starlab-desktop`) and browser extension
+(`stars-labs/starlab-wallet`) consume this repo cross-repo.
 
 ---
 
@@ -15,11 +20,11 @@ protocol:
 | Client | Language | Core | UI |
 |---|---|---|---|
 | TUI node (`apps/tui`) | Rust | `starlab_client::elm` + `starlab_client::core` | Ratatui |
-| Native node (`apps/native-node`) | Rust | reuses `starlab_client::core` + `HeadlessRunner` | Slint |
+| Desktop app (`stars-labs/starlab-desktop`) | Rust | reuses `starlab_client::core` + `HeadlessRunner` | Iced |
 | CLI node (`apps/cli`) | Rust | reuses `starlab_client::elm::HeadlessRunner` | JSONL stdin/stdout |
-| Browser extension (`apps/browser-extension`) | TypeScript + WASM | independent reimpl of FROST glue over `@stars-labs/core-wasm` | Svelte 5 |
+| Browser extension (`stars-labs/starlab-wallet`) | TypeScript + WASM | independent reimpl of FROST glue over `@stars-labs/core-wasm` | Svelte 5 |
 
-Three of the four (TUI, native, CLI) share the **same Rust Elm core**. The extension is a
+Three of the four (TUI, desktop, CLI) share the **same Rust Elm core**. The extension is a
 **separate implementation** of the same ceremony, sharing only the FROST primitives (via
 WASM) and the wire protocol. That asymmetry is the central testing problem:
 
@@ -29,7 +34,7 @@ WASM) and the wire protocol. That asymmetry is the central testing problem:
   required) only shows up at the boundary between *different* implementations — i.e.
   Rust-core ↔ extension. Nothing in the Rust-only test suite exercises that boundary.
 - A bug in a **client's UI/orchestration layer** (the extension's `webSocketManager`
-  trigger logic, the native node's Slint bridge, the TUI's Elm wiring) is invisible to a
+  trigger logic, the desktop app's Iced bridge, the TUI's Elm wiring) is invisible to a
   unit test of the core; it only appears when the client is driven end-to-end.
 
 The CLI node was built to be terminal-free, scriptable, and deterministic. It already runs
@@ -233,8 +238,8 @@ and, where a GUI exposes it, a cross-client case (§5.3).
                          └───────▲──────────────▲──────────────▲────────┘
                                  │              │              │
                     ┌────────────┴──┐   ┌───────┴──────┐  ┌────┴─────────┐
-                    │   CLI node    │   │   TUI node   │  │  native node │
-                    │ (JSONL/stdio) │   │  (Ratatui)   │  │   (Slint)    │
+                    │   CLI node    │   │   TUI node   │  │ desktop app  │
+                    │ (JSONL/stdio) │   │  (Ratatui)   │  │    (Iced)    │
                     └───────▲───────┘   └──────▲───────┘  └──────▲───────┘
                             │                  │ PTY             │ in-proc
        oracle + automated   │                  │                 │ HeadlessRunner
@@ -354,14 +359,15 @@ cross-checks the creator's `session_announced` id against the peer's
 `session_available` id. The `ServeProc` JSONL driver it introduces (spawn,
 send, `wait_for(event)`) is the reusable harness the cross-client layers extend.
 
-#### L3a — CLI ↔ native (in-process)
-Native node already embeds `HeadlessRunner` via `core_adapter.rs`. Spin up the native core
-adapter + (n−1) CLI runners in one test binary on a loopback signal server. Assert the
-native node reaches `DkgComplete` with the same group key the CLI cluster agrees on, and
-that addresses derived by the native path equal the CLI's.
+#### L3a — CLI ↔ desktop app (in-process)
+The desktop app (`stars-labs/starlab-desktop`) embeds `HeadlessRunner` via its core
+adapter. This test lives in that repo (it depends on the Iced app): spin up the desktop
+core adapter + (n−1) CLI runners in one test binary on a loopback signal server. Assert the
+desktop app reaches `DkgComplete` with the same group key the CLI cluster agrees on, and
+that addresses derived by the desktop path equal the CLI's.
 
-> **Reverse-check:** if L1 DKG-2 passes but L3a DKG-2 fails, the bug is in native's
-> CoreAdapter / Slint bridge / `model_wallets` address derivation — *not* the core.
+> **Reverse-check:** if L1 DKG-2 passes but L3a DKG-2 fails, the bug is in the desktop app's
+> CoreAdapter / Iced bridge / address derivation — *not* the core.
 
 #### L3b — CLI ↔ TUI (via PTY)
 Drive the real TUI binary under a pseudo-terminal (e.g. `portable-pty`/`expect`-style),
@@ -468,7 +474,7 @@ exactly FROST's serialization), pinned against the BIP-173 worked example
 | Persistence / reload / sign-after-reload | shared Rust core | L1 (LIFE-*) |
 | Auto-approve policy | CLI + core | L1 (SEC-*) |
 | Protocol serde drift (rename/optional/order) | Rust wire layer | L2 golden |
-| Native CoreAdapter / Slint bridge / address derivation | native only | L3a (vs L1) |
+| Desktop CoreAdapter / Iced bridge / address derivation | desktop only | L3a (vs L1) |
 | TUI Elm View/Update wiring | TUI only | L3b (vs L1) |
 | Extension session-parse / field casing | extension only | L3c, L4 trace diff |
 | Extension n−1 round accounting | extension only | L3c |
@@ -527,12 +533,12 @@ apps/cli/
       dkg_2of3.trace.jsonl
       sign_2of2_secp256k1.trace.jsonl
       ...
-    interop_native.rs             # NEW — L3a (in-process CLI↔native)
 docs/
   cli-conformance-testing.md      # this document
 
-apps/browser-extension/
-  tests/interop/                  # NEW — L3c Playwright harness (CLI peers + real server)
+# Cross-repo (consume apps/cli as a peer):
+#   stars-labs/starlab-desktop — L3a in-process CLI↔desktop interop test
+#   stars-labs/starlab-wallet  — L3c Playwright harness (CLI peers + real server)
 
 scripts/
   conformance/                    # NEW — orchestration: start server, spawn CLI peers,

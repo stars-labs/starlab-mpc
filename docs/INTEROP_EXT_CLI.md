@@ -14,6 +14,14 @@ This document does two things:
 > relying on a live ext↔CLI ceremony. Live ext↔CLI has **never been run in an
 > automated test** (only mock-based comparisons exist), so rehearse first.
 
+> **Repo note:** the browser extension now lives in its own repo,
+> `stars-labs/starlab-wallet` (at `apps/extension/`). All
+> `apps/browser-extension/...` paths cited below are cross-repo references
+> into that tree (read them as `stars-labs/starlab-wallet` at
+> `apps/extension/...`); they no longer exist in this repo. The CLI/core
+> paths (`apps/cli/...`, `apps/tui/...`, `apps/signal-server/...`) are
+> in-repo as written.
+
 ---
 
 ## 1. What the three clients share
@@ -63,7 +71,7 @@ This is the one that will break a live ext↔CLI ceremony.
   sorted.sort();
   let idx = sorted.iter().position(|p| *p == device_id)?;   // 1-based id
   ```
-- **Extension** (`apps/browser-extension/src/entrypoints/offscreen/webrtc.ts:619,
+- **Extension** (starlab-wallet `apps/extension/src/entrypoints/offscreen/webrtc.ts:619,
   752, 1299`): uses `participants.indexOf(peerId) + 1` on the array **as
   received** — and nothing sorts `participants` anywhere in the extension
   (`session-parse.ts` only filters to strings).
@@ -106,7 +114,7 @@ the curve where it might display a chain. Align when convenient (see
 
 ### 2.6 Test coverage — ⚠ ext↔CLI is unverified live
 CLI↔CLI (incl. cross-process) is covered by the conformance suite. The only
-ext↔CLI tests today are **mock-WASM** (`apps/browser-extension/tests/
+ext↔CLI tests today are **mock-WASM** (starlab-wallet `apps/extension/tests/
 cli-chrome-comparison.test.ts`) — they do not run a real joint ceremony. So a
 live 1-ext + 2-CLI run is **first-time integration**: rehearse it before a demo.
 

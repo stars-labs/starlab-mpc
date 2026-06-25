@@ -53,7 +53,7 @@ workspace member.
   Worker signal server (canonical production path), self-hosted
   Rust signal server behind a TLS terminator, browser extension
   builds for web-store distribution, and single-binary cargo
-  builds for TUI / native-node end-user distribution.
+  builds for TUI end-user distribution.
   Worker-specific details in
   [`CLOUDFLARE_DEPLOYMENT.md`](deployment/CLOUDFLARE_DEPLOYMENT.md).
 
@@ -83,9 +83,10 @@ Each app and package has its own docs subtree:
   with a per-doc index explaining what each artefact documents
   (mostly retrospectives of fixes that have long since
   landed).
-- [`apps/browser-extension/docs/`](../apps/browser-extension/docs/)
-- [`apps/native-node/docs/`](../apps/native-node/docs/) — defers
-  most content to the parent [`apps/native-node/README.md`](../apps/native-node/README.md).
+- Browser-extension docs moved with the extension to
+  [`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet).
+- Desktop-app docs live with the Iced GUI in
+  [`stars-labs/starlab-desktop`](https://github.com/stars-labs/starlab-desktop).
 - [`apps/signal-server/docs/`](../apps/signal-server/docs/)
 - (Rust library crates don't have docs subtrees; their public API
   is documented via `///` rustdoc.)

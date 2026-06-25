@@ -10,5 +10,6 @@ Reference material for the MPC Wallet test suite.
 - `E2E_TEST_IMPLEMENTATION_PLAN.md` — plan for real-signal-server E2E
 
 Per-crate test docs live with the code:
-- `apps/browser-extension/tests/README.md` — browser-extension test tree
+- Browser-extension tests moved with the extension to
+  [`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet)
 - Rust tests run with `cargo test --workspace` (see repo CLAUDE.md)

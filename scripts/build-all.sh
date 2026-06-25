@@ -21,12 +21,6 @@ cd ../../..
 # was never created in the monorepo transform; the previous script
 # would error out at `cd packages/@starlab/utils`.
 
-# Build browser extension
-echo "🌐 Building browser extension..."
-cd apps/browser-extension
-bun run build
-cd ../..
-
 # Build the Rust workspace (engine + cli + tui + signal-server; the GUI
 # products live in their own repos).
 echo "🦀 Building Rust workspace (cli + starlab-client + frost-core + signal-server)..."

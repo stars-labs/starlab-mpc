@@ -131,12 +131,11 @@ Before contributing, ensure you have:
 
 4. **Test Your Changes**
    ```bash
-   # Run all workspace tests (Rust + Bun) from repo root
+   # Run all workspace tests from repo root
    ./scripts/test-all.sh
 
-   # Or narrow to a specific crate / extension
+   # Or narrow to a specific crate
    cargo test -p starlab-client
-   cd apps/browser-extension && bun test
    ```
 
 5. **Commit Your Changes**
@@ -232,16 +231,14 @@ There is currently no CI/CD pipeline configured in this repo
 suite locally before merging:
 
 ```bash
-./scripts/test-all.sh       # full workspace (Rust + Bun)
+./scripts/test-all.sh       # full workspace
 cargo clippy --workspace    # lint
-bun run check               # svelte-check (from apps/browser-extension/)
 ```
 
 #### What reviewers check
 
 1. **Test pass locally**
    - `cargo test --workspace` clean
-   - `bun test` clean under `apps/browser-extension/`
    - No new `cargo clippy` warnings
 
 2. **Manual Review**
@@ -422,43 +419,25 @@ confuse them.
 
 #### Integration Tests (TypeScript / Bun)
 
-Tests live under `apps/browser-extension/tests/` and import from
-`bun:test` — NOT vitest / jest (consistent with
-`docs/testing/TESTING.md`). Example shape:
-
-```typescript
-import { describe, expect, test } from "bun:test";
-
-describe("DKG Process", () => {
-  test("completes DKG with 3 participants", async () => {
-    const participants = await createParticipants(3);
-    const result = await executeDKG(participants, 2);
-    expect(result.success).toBe(true);
-  });
-});
-```
+The browser extension (and its bun:test suites) moved to
+[`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet);
+contribute extension tests there.
 
 ### Running Tests
 
 ```bash
-# All tests (Rust + TypeScript). Excludes starlab-mpc-native which
-# pulls graphics deps unsuitable for headless runs.
+# All tests (Rust + TypeScript).
 ./scripts/test-all.sh
 
-# Rust tests only. Same --exclude starlab-mpc-native guard.
-cargo test --workspace --lib --tests --exclude starlab-mpc-native
-
-# TypeScript tests only (run from apps/browser-extension).
-cd apps/browser-extension && bun test
+# Rust tests only.
+cargo test --workspace --lib --tests
 
 # With coverage — not wired into the workspace. No
 # tarpaulin/grcov/llvm-cov config file ships, and no CI step
 # produces a coverage report. If you want coverage locally:
 cargo install cargo-tarpaulin
-cargo tarpaulin --workspace --exclude starlab-mpc-native --out Html
-#   — runs standalone (no .tarpaulin.toml required). The `--exclude
-#   starlab-mpc-native` guard matches test-all.sh's headless-run
-#   exclusion.
+cargo tarpaulin --workspace --out Html
+#   — runs standalone (no .tarpaulin.toml required).
 ```
 
 ## Documentation

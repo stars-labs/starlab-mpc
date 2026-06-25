@@ -44,8 +44,11 @@ The MPC (Multi-Party Computation) Wallet is a distributed cryptographic wallet s
 │                    MPC Wallet Ecosystem                      │
 ├───────────────┬──────────────┬──────────────┬──────────────┤
 │Browser Ext.   │Desktop App   │Terminal UI   │Signal Server │
-│(TypeScript)   │(Rust/Slint)  │(Rust/TUI)    │(Rust/WS)     │
+│(TypeScript)*  │(Rust/Iced)*  │(Rust/TUI)    │(Rust/WS)     │
 └───────────────┴──────────────┴──────────────┴──────────────┘
+  * Browser Ext. and Desktop App live in their own repos
+    (stars-labs/starlab-wallet, stars-labs/starlab-desktop);
+    they consume this repo's crypto packages / starlab-client crate.
                            │
                  ┌─────────┴─────────┐
                  │  FROST Protocol    │
@@ -72,8 +75,10 @@ The MPC Wallet follows a **distributed, peer-to-peer architecture**:
    derivation, encoding, and chain-integration path is written
    per-curve. ("Protocol agnostic" has been removed from the earlier
    draft because each new chain needs meaningful integration work.)
-4. **Modular repo layout**: shared `frost-core` crate + three UI
-   frontends (TUI, native, extension) that reuse it.
+4. **Modular repo layout**: shared `frost-core` crate consumed by the
+   in-repo TUI and by two cross-repo UI frontends — the desktop app
+   (`stars-labs/starlab-desktop`, Iced) and the browser extension
+   (`stars-labs/starlab-wallet`, Svelte + WASM).
 
 ### High-Level Architecture
 
@@ -82,8 +87,9 @@ The MPC Wallet follows a **distributed, peer-to-peer architecture**:
 │                         User Interface Layer                      │
 ├────────────────┬───────────────┬─────────────────────────────────┤
 │ Browser Popup  │ Desktop GUI   │ Terminal UI                     │
-│ (Svelte)       │ (Slint)       │ (Ratatui)                       │
+│ (Svelte)*      │ (Iced)*       │ (Ratatui)                       │
 └────────────────┴───────────────┴─────────────────────────────────┘
+  * cross-repo (starlab-wallet, starlab-desktop)
                            │
 ┌──────────────────────────┴───────────────────────────────────────┐
 │                    Application Logic Layer                        │
@@ -116,19 +122,12 @@ The project is organized as a monorepo with shared dependencies:
 
 ```
 starlab-mpc/
+│  # NOTE: the browser extension and native desktop app are NOT in this
+│  # repo. They live in stars-labs/starlab-wallet (WXT + Svelte 5, MV3,
+│  # at apps/extension/) and stars-labs/starlab-desktop (Iced) and consume
+│  # this repo's crypto packages / starlab-client crate cross-repo.
 ├── apps/
-│   ├── browser-extension/          # WXT + Svelte 5, MV3
-│   │   ├── src/entrypoints/        # background / popup / offscreen / content
-│   │   ├── src/components/         # Svelte components
-│   │   ├── src/services/           # AccountService, KeystoreService, etc.
-│   │   ├── tests/                  # Bun test suite
-│   │   └── wxt.config.ts
-│   │
-│   ├── native-node/                # Slint 1.x desktop GUI
-│   │   ├── src/main.rs             # entry (tokio + Slint event loop)
-│   │   ├── src/core_adapter.rs     # bridges CoreState ↔ Slint AppState globals
-│   │   ├── src/ui_callback.rs      # NativeUICallback (Send-bridge onto Slint loop)
-│   │   └── ui/main_enhanced.slint  # Slint UI, compiled by build.rs
+│   ├── cli/                        # Headless CLI (crate starlab-cli)
 │   │
 │   ├── starlab-client/                   # Ratatui Elm-architecture TUI
 │   │   ├── src/bin/                # starlab-tui binary entry
@@ -136,7 +135,7 @@ starlab-mpc/
 │   │   │                           # per-screen components, and the
 │   │   │                           # real runtime WebRTC driver at
 │   │   │                           # src/elm/webrtc_signaling.rs
-│   │   ├── src/core/               # *Manager types (reused by native-node)
+│   │   ├── src/core/               # *Manager types (reused by the desktop app, starlab-desktop)
 │   │   ├── src/protocal/           # Wire types (signal.rs / dkg.rs / signing.rs)
 │   │   ├── src/keystore/           # Encrypted share persistence
 │   │   ├── src/webrtc/             # Mesh TEST HARNESS — not wired
@@ -227,9 +226,17 @@ Rounds don't traverse the signal server — they ride the peer-to-peer
 WebRTC data channels established during setup (see the § Network
 Architecture section).
 
-### 2. Browser Extension (`apps/browser-extension`)
+### 2. Browser Extension (cross-repo: `stars-labs/starlab-wallet`)
 
 A Manifest V3 Chrome/Firefox extension providing Web3 wallet functionality.
+
+> **Moved out of this repo.** The extension now lives in
+> `stars-labs/starlab-wallet` (at `apps/extension/`, Svelte 5 + WASM). It
+> consumes this repo's `@stars-labs/core-wasm` and `@stars-labs/types`
+> packages as a cross-repo contract. The paths below
+> (`apps/browser-extension/...`) are relative to that repo's
+> `apps/extension/...` tree — they no longer exist here. This section is
+> retained as an architecture reference for the cross-repo consumer.
 
 #### Architecture
 
@@ -266,7 +273,7 @@ A Manifest V3 Chrome/Firefox extension providing Web3 wallet functionality.
 
 #### Key Services
 
-Real service layer (`apps/browser-extension/src/services/`):
+Real service layer (in `stars-labs/starlab-wallet` at `apps/extension/src/services/`):
 
 1. **AccountService** (`accountService.ts`): Wallet account list,
    address derivation per curve, active-account selection.
@@ -281,7 +288,7 @@ Real service layer (`apps/browser-extension/src/services/`):
 
 Separately, in the offscreen context:
 
-6. **WebRTCManager** (`src/entrypoints/offscreen/webrtc.ts`): Full-mesh
+6. **WebRTCManager** (starlab-wallet `apps/extension/src/entrypoints/offscreen/webrtc.ts`): Full-mesh
    peer connection state + FROST state (`frostDkg`, `signingInfo`,
    `signingCommitments`, `signingShares`). See CLAUDE.md for the
    signing pipeline.
@@ -342,47 +349,30 @@ pub struct ElmApp<C: frost_core::Ciphersuite> {
 Longer-lived business logic lives in `starlab-client::core::*Manager`
 types (`WalletManager`, `SessionManager`, `DkgManager`, `SigningManager`,
 `OfflineManager`, `ConnectionManager`) — these are shared with the
-native-node app via the `UICallback` trait. See CLAUDE.md for that
-layering.
+desktop app (`stars-labs/starlab-desktop`, cross-repo) via the
+`UICallback` trait. See CLAUDE.md for that layering.
 
-### 4. Native Desktop Application (`apps/native-node`)
+### 4. Native Desktop Application (cross-repo: `stars-labs/starlab-desktop`)
 
-Cross-platform desktop application with modern GUI.
+Cross-platform desktop application with a modern GUI.
 
-#### UI Framework (Slint)
+> **Moved out of this repo.** The desktop app now lives in
+> `stars-labs/starlab-desktop` and is built with **Iced** (MIT) — it was
+> previously a Slint prototype in this repo's `apps/native-node/`, which no
+> longer exists (the `starlab-mpc-native` crate is gone). The desktop app
+> consumes this repo's `starlab-client` crate
+> (`core::*Manager` + `CoreState` + `HeadlessRunner`) and implements the
+> `UICallback` trait directly to push `UiEvent`s into its Iced
+> `Subscription`. See CLAUDE.md for that cross-repo layering.
 
-Real UI entry point: `apps/native-node/ui/main_enhanced.slint`. Uses
-std-widgets (TabWidget, VerticalBox, HorizontalBox, GroupBox, LineEdit,
-TextEdit, ListView, Button, ComboBox, ScrollView) — no custom
-`HeaderBar` / `StatusBar` components. Sketch of the actual structure:
+#### UI Framework (Iced)
 
-```slint
-import { TabWidget, VerticalBox, HorizontalBox, GroupBox, /*...*/ }
-    from "std-widgets.slint";
-
-export component MainWindow inherits Window {
-    // AppState globals (populated from Rust via UICallback)
-    VerticalBox {
-        // Header region (plain Text + HorizontalBox, not a widget)
-        ...
-
-        TabWidget {
-            // Tab 1: Wallets
-            VerticalBox { ... WalletSelector + forms }
-            // Tab 2: Sessions / DKG
-            VerticalBox { ... }
-            // Tab 3: Signing
-            VerticalBox { ... }
-            // Tab 4: Network / Settings
-            VerticalBox { ... }
-        }
-    }
-}
-```
-
-Callbacks on MainWindow are wired to Rust closures via
-`slint::invoke_from_event_loop` — see CLAUDE.md's Slint integration
-section for the `Weak<MainWindow>` + Send-bridge pattern.
+The desktop app uses Iced's Elm-style architecture (Message / update /
+view). Rather than the TUI's tui-realm loop, it drives the shared
+`starlab-client::core::*Manager` types and turns the `UiEvent`s they emit
+(via its `UICallback` implementation) into Iced messages over an mpsc
+channel surfaced as a `Subscription`. The concrete widget tree lives in
+the `starlab-desktop` repo.
 
 ---
 
@@ -516,6 +506,10 @@ the broader keystore-layout retraction.
 
 ### Browser Extension
 
+> Cross-repo: the extension lives in `stars-labs/starlab-wallet` (at
+> `apps/extension/`). The `src/entrypoints/...` paths below are relative
+> to that repo's `apps/extension/` tree, not this one.
+
 Four runtime contexts (MV3), each rooted under `src/entrypoints/`.
 Full flow diagram + entry-points table lives in CLAUDE.md; this
 section summarizes the layering.
@@ -568,7 +562,8 @@ avoids `window.ethereum` to not clobber other wallets.
 
 `apps/tui/` is structured around the Elm architecture in
 `src/elm/` (Model/Update/View via tui-realm) plus the longer-lived
-`src/core/` managers that are shared with native-node. Key modules:
+`src/core/` managers that are shared with the desktop app
+(`stars-labs/starlab-desktop`). Key modules:
 
 | Path | What it holds |
 |---|---|
@@ -578,7 +573,7 @@ avoids `window.ethereum` to not clobber other wallets.
 | `src/elm/command.rs` | `Command` enum — side effects to execute (non-generic; the concrete ciphersuite is threaded through `AppState<C>` which `Command::execute` takes by reference) |
 | `src/elm/components/` | Per-screen tui-realm `Component` impls |
 | `src/elm/provider.rs` | `UIProvider` trait (abstract UI backend) |
-| `src/core/*` | `*Manager` types — business logic reused by native-node |
+| `src/core/*` | `*Manager` types — business logic reused by the desktop app (starlab-desktop) |
 | `src/protocal/` | Wire types (`signal.rs`, `dkg.rs`, `signing.rs`, `session_types.rs`) |
 | `src/keystore/` | Encrypted share persistence |
 | `src/offline/` | SD-card air-gap mode |
@@ -598,33 +593,27 @@ Two distinct trait surfaces — not the same thing:
     `NoOpUIProvider` also implements it for headless test runs.
   - **`UICallback`** (`apps/tui/src/core/mod.rs:244`): the
     event-push surface used by the non-Elm managers in
-    `starlab-client::core`. Native-node implements THIS trait via
-    `NativeUICallback` (`apps/native-node/src/ui_callback.rs:25`)
-    to bridge onto the Slint event loop. Browser-extension and
-    TUI don't need a separate UICallback impl because the Elm
-    loop consumes manager output directly.
+    `starlab-client::core`. The desktop app
+    (`stars-labs/starlab-desktop`, cross-repo) implements THIS trait
+    to bridge manager output onto its Iced `Subscription`.
+    Browser-extension and TUI don't need a separate UICallback impl
+    because the Elm loop consumes manager output directly.
 
-Earlier drafts of this paragraph conflated the two, implying
-native-node implemented `UIProvider`. It implements `UICallback`.
+Earlier drafts of this paragraph conflated the two, implying the
+desktop app implemented `UIProvider`. It implements `UICallback`.
 See CLAUDE.md § Key Patterns for the distinction in one
 sentence.
 
 ### Native Desktop
 
-`apps/native-node/` re-uses `starlab_client::core::*Manager` types as the
-business-logic backend and presents them through a Slint UI. Entry
-points:
-
-| Path | Role |
-|---|---|
-| `src/main.rs` | Tokio runtime + Slint event loop startup |
-| `src/core_adapter.rs` | Bridges `CoreState` ↔ Slint AppState globals |
-| `src/ui_callback.rs` | `NativeUICallback` — posts UI updates onto the Slint loop via `Weak<MainWindow>` + `slint::invoke_from_event_loop` |
-| `ui/main_enhanced.slint` | Actual Slint UI compiled via `build.rs` |
-
-The Send-bridge pattern for Slint's `!Send` `MainWindow` is described
-in CLAUDE.md's "Native desktop node" section — future Slint bumps
-should consult that for the gotcha list.
+The desktop app lives in `stars-labs/starlab-desktop` (cross-repo, Iced).
+It re-uses `starlab_client::core::*Manager` types + `CoreState` +
+`HeadlessRunner` as the business-logic backend and presents them through
+an Iced UI, implementing `UICallback` to push `UiEvent`s into an mpsc
+channel that its Iced `Subscription` turns into messages. The widget
+tree and entry points live in that repo (this repo no longer contains an
+`apps/native-node/` or a `starlab-mpc-native` crate). See CLAUDE.md for
+the cross-repo contract that `starlab-client` must keep `pub`.
 
 ---
 
@@ -807,9 +796,10 @@ The MPC Wallet is designed to protect against:
   native Windows builds work via MSVC toolchain)
 - **Rust**: 1.85+ (edition 2024 requirement from the workspace `Cargo.toml`)
 - **Bun**: latest stable
-- **System libs**: Slint's native UI needs the platform's graphics
-  stack. On NixOS you can run `nix develop` for a pre-provisioned
-  shell (see `flake.nix` at the repo root).
+- **System libs**: the TUI is terminal-only and needs no graphics
+  stack. (The native desktop app moved to `stars-labs/starlab-desktop`,
+  Iced — build it from that repo.) On NixOS you can run `nix develop`
+  for a pre-provisioned shell (see `flake.nix` at the repo root).
 
 #### Tooling install
 
@@ -858,31 +848,36 @@ wasm-pack build --target web --out-dir pkg
 #### 4. Build Applications
 
 ```bash
-# Browser Extension
-cd apps/browser-extension
-bun run build
-
 # Terminal UI
 cd apps/tui
 cargo build --release
 
-# Native Desktop
-cd apps/native-node
-cargo build --release
+# CLI
+cargo build --release -p starlab-cli
+
+# Browser Extension — cross-repo (stars-labs/starlab-wallet):
+#   git clone https://github.com/stars-labs/starlab-wallet
+#   cd starlab-wallet/apps/extension && bun run build
+# Native Desktop — cross-repo (stars-labs/starlab-desktop, Iced):
+#   git clone https://github.com/stars-labs/starlab-desktop
+#   cd starlab-desktop && cargo build --release
 ```
 
 ### Development Workflow
 
 #### 1. Browser Extension Development
 
+The extension moved to `stars-labs/starlab-wallet` (at `apps/extension/`).
+Clone that repo and run its dev server there:
+
 ```bash
-# Start development server with hot reload
-cd apps/browser-extension
+# In a checkout of stars-labs/starlab-wallet
+cd apps/extension
 bun run dev
 
 # The extension will be available at:
 # Chrome: chrome://extensions/
-# Load unpacked from: apps/browser-extension/.output/chrome-mv3
+# Load unpacked from: apps/extension/.output/chrome-mv3
 ```
 
 #### 2. Terminal UI Development
@@ -902,14 +897,14 @@ cargo run -- --device-id Dev-001 --offline
 
 #### 3. Native Desktop Development
 
-```bash
-# Run in development mode
-cd apps/native-node
-cargo run
+The desktop app moved to `stars-labs/starlab-desktop` (Iced). Clone that
+repo and run/build it there (it depends on this repo's `starlab-client`
+crate cross-repo):
 
-# Build for distribution
+```bash
+# In a checkout of stars-labs/starlab-desktop
+cargo run            # development mode
 cargo build --release
-# Binary at: target/release/starlab-mpc-native
 ```
 
 ### Testing
@@ -931,8 +926,9 @@ cargo test -p starlab-client
 #### Integration Tests
 
 ```bash
-# Browser extension tests (Bun, not npm/Vitest — see docs/testing/TESTING.md)
-cd apps/browser-extension
+# Browser extension tests moved to stars-labs/starlab-wallet (Bun, not
+# npm/Vitest — see docs/testing/TESTING.md). Run them in that repo:
+cd apps/extension           # inside a starlab-wallet checkout
 bun test                    # full suite
 bun run test:integration    # just tests/integration
 bun run test:webrtc         # just tests/entrypoints/offscreen/webrtc.*
@@ -977,9 +973,12 @@ Full deployment guide lives in [`docs/deployment/README.md`](deployment/README.m
   → systemd service behind an HTTPS terminator. Binds `0.0.0.0:9000`;
   reads zero env vars; stateless. No Dockerfile or docker-compose
   ships in-tree today.
-- **Browser extension**: `bun run build` (defaults to Chrome MV3) or
-  `bun run build:firefox` → web-store distribution.
-- **TUI / native apps**: `cargo build --release` → single static
+- **Browser extension** (cross-repo, `stars-labs/starlab-wallet`):
+  `bun run build` (defaults to Chrome MV3) or `bun run build:firefox`
+  → web-store distribution.
+- **Native desktop app** (cross-repo, `stars-labs/starlab-desktop`, Iced):
+  `cargo build --release` from that repo.
+- **TUI / CLI**: `cargo build --release` → single static
   binary. No platform installers (`.msi` / `.dmg` / `.AppImage`)
   ship today — earlier drafts of this section referenced WiX /
   create-dmg / linuxdeploy scaffolding that does not exist in the
@@ -1012,7 +1011,8 @@ work.
 Two separate logging stacks — the Rust side and the TypeScript
 extension don't share infrastructure:
 
-- **Rust side** (TUI + signal-server + native-node): `tracing` /
+- **Rust side** (TUI + CLI + signal-server; and the cross-repo desktop
+  app, starlab-desktop): `tracing` /
   `tracing-subscriber` emit structured `info!`/`debug!`/`trace!`
   events. Filter via the `RUST_LOG` env var:
 
@@ -1028,10 +1028,11 @@ extension don't share infrastructure:
   facade. View output via the browser DevTools for each extension
   context (popup / background / offscreen). Earlier drafts of
   this section claimed the extension also emits
-  `tracing`-structured events; not true — `grep -rn 'tracing::'
-  apps/browser-extension/src` returns zero hits, whereas
-  `console.log` has 338+ call sites in the background scripts
-  alone. Porting the extension to a structured tracing facade
+  `tracing`-structured events; not true — a `grep -rn 'tracing::'`
+  over the extension source (now in starlab-wallet at
+  `apps/extension/src`) returns zero hits, whereas `console.log`
+  has 338+ call sites in the background scripts alone. Porting the
+  extension to a structured tracing facade
   (pino / winston / the `tracing` crate via WASM bindings) is
   open future work.
 
@@ -1059,9 +1060,10 @@ stateless WS upgrade handling, no HTTP response scaffolding).
 ### Browser Extension: internal message types
 
 Internal `chrome.runtime.sendMessage` types are consts in
-`MESSAGE_TYPES` (see the actual enum in the extension source — grep
-for `case MESSAGE_TYPES.` in `src/entrypoints/background/messageHandlers.ts`
-for the full dispatch table). Key ones:
+`MESSAGE_TYPES` (see the actual enum in the extension source, now in
+`stars-labs/starlab-wallet` — grep for `case MESSAGE_TYPES.` in
+`apps/extension/src/entrypoints/background/messageHandlers.ts` for the
+full dispatch table). Key ones:
 
 | Type | Purpose |
 |---|---|
@@ -1430,10 +1432,12 @@ operators who actually need it.
 
 ## Conclusion
 
-This repo implements a t-of-n FROST threshold wallet with three
-frontends (browser extension, Slint desktop, Ratatui TUI) that share
-a common `frost-core` backend and interoperate over a WebRTC mesh
-established by a small signal server. It's early-stage development
+This repo implements a t-of-n FROST threshold wallet engine plus its
+terminal frontends (Ratatui TUI + headless CLI). Two GUI frontends live
+in their own repos and reuse this `frost-core` backend cross-repo — the
+browser extension (`stars-labs/starlab-wallet`, Svelte + WASM) and the
+native desktop app (`stars-labs/starlab-desktop`, Iced). All of them
+interoperate over a WebRTC mesh established by a small signal server. It's early-stage development
 software — no tagged release, no third-party security audit, no
 hardware-wallet integration, no benchmarks. For the latest state see
 the repository at [github.com/hecoinfo/starlab-mpc](https://github.com/hecoinfo/starlab-mpc).

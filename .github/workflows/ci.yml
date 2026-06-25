@@ -27,9 +27,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config
 
       # This repo is the headless engine + terminal clients. The GUI products
-      # (browser extension, Iced desktop in stars-labs/starlab-desktop) live
-      # elsewhere. The headless stack (cli, starlab-client, signal-server) covers the
-      # real DKG/signing path.
+      # (browser extension in stars-labs/starlab-wallet, Iced desktop in
+      # stars-labs/starlab-desktop) live elsewhere. The headless stack
+      # (cli, starlab-client, signal-server) covers the real DKG/signing path.
       - name: Unit tests
         run: cargo test -p starlab-cli -p starlab-signal-server --locked
              && cargo test -p starlab-client --lib --locked
@@ -69,15 +69,15 @@ jobs:
         run: cargo test -p starlab-cli --test wire_trace --locked -- --ignored --test-threads=1
         timeout-minutes: 10
 
-  extension:
-    name: Browser extension tests
+  wasm:
+    name: core-wasm + types build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # The extension tests load the REAL core-wasm glue (not a mock) and import
-      # @stars-labs/types subpaths (e.g. .../dkg) that resolve to the types
-      # package's `dist/` — neither is committed, so both must be built here.
+      # The extension lives in stars-labs/starlab-wallet now; this job keeps
+      # the artifacts it consumes (@stars-labs/core-wasm pkg + @stars-labs/types
+      # dist) building on every change here.
       - name: Install Rust toolchain (wasm32 for wasm-pack)
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -93,20 +93,12 @@ jobs:
           version: 'v0.13.1'
       - uses: oven-sh/setup-bun@v2
 
-      # `--ignore-scripts`: the extension's postinstall (`wxt prepare`) imports
-      # @stars-labs/types/* and would fail before `dist/` exists. Skip lifecycle
-      # scripts at install, build the deps, then prepare explicitly.
       - run: bun install --frozen-lockfile --ignore-scripts
 
       # Invoke wasm-pack from PATH (the jetli-installed binary), NOT `bun run
       # build:wasm` — the npm shim's binary wasn't downloaded under --ignore-scripts.
-      - name: Build core-wasm (tests load the real WASM glue)
+      - name: Build core-wasm
         run: cd packages/@starlab/core-wasm && wasm-pack build --target web --out-dir pkg
 
-      - name: Build shared types (provides @stars-labs/types/* dist subpaths)
+      - name: Build shared types (@stars-labs/types/* dist subpaths)
         run: bun run --filter '@stars-labs/types' build
-
-      - name: Prepare WXT (now that types dist exists)
-        run: cd apps/browser-extension && bunx wxt prepare
-
-      - run: cd apps/browser-extension && bun test

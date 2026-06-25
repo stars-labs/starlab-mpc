@@ -6,11 +6,14 @@ chains.
 
 - **CLI** — `starlab-cli` (headless, scriptable; LLM/automation/servers)
 - **TUI** — `starlab-tui` (terminal UI; online + offline/air-gap)
-- **Native** — desktop GUI (Slint)
-- **Extension** — Chrome/Firefox browser wallet (dApp provider + popup)
+- **Native** — desktop GUI (Iced) — **separate repo `stars-labs/starlab-desktop`**
+- **Extension** — Chrome/Firefox browser wallet (dApp provider + popup) —
+  **separate repo `stars-labs/starlab-wallet`**
 
-All four share the same FROST cryptography and the same wire protocol, so **any
-mix of them can participate in one ceremony** (e.g. 1 extension + 2 CLI).
+The CLI and TUI ship from this repo; the Native desktop app and the browser
+Extension live in their own repos but reuse this repo's FROST crypto. All four
+share the same FROST cryptography and the same wire protocol, so **any mix of
+them can participate in one ceremony** (e.g. 1 extension + 2 CLI).
 
 ---
 
@@ -110,16 +113,22 @@ cargo run --release --bin starlab-tui -p starlab-client -- \
 ```
 
 ### Native (desktop)
+The desktop app lives in its own repo, **`stars-labs/starlab-desktop`** (Iced).
+Clone and run it there; it reads the same env vars:
 ```bash
+# in a checkout of stars-labs/starlab-desktop
 MPC_DEVICE_ID=alice MPC_ROOM="$ROOM" \
   MPC_SIGNAL_SERVER=wss://panda.qzz.io \
   MPC_CURVE=secp256k1 \                            # or ed25519 for Solana/Sui/Aptos/NEAR
-  cargo run --release -p starlab-mpc-native        # needs `nix develop` for graphics
+  cargo run --release                              # needs `nix develop` for graphics
 ```
 
 ### Extension
-1. Build: from repo root `bun run build:wasm`, then `cd apps/browser-extension && bun run build`.
-2. `chrome://extensions` → Developer mode → **Load unpacked** → `apps/browser-extension/.output/chrome-mv3`.
+The extension lives in its own repo, **`stars-labs/starlab-wallet`** (at
+`apps/extension/`, Svelte 5 + WASM). Clone it and build there:
+1. Build: from the starlab-wallet repo root build the WASM (it consumes this
+   repo's `@stars-labs/core-wasm`), then `cd apps/extension && bun run build`.
+2. `chrome://extensions` → Developer mode → **Load unpacked** → `apps/extension/.output/chrome-mv3`.
 3. Open the popup → **gear ⚙** → **"Signal server room"** → **Generate** (or paste the shared room) → **Save**.
 4. Close & reopen the popup → the badge should go **Connected** (it stays Offline / shows a `400` until a room is set).
 
@@ -298,8 +307,9 @@ scripts/demo/ceremony.sh --nodes 3 --threshold 2 --sign hi --reshare   # add --s
 # TUI
 starlab-tui --device-id <id> --signal-server wss://panda.qzz.io --room "$ROOM" [--offline]
 
-# Native (MPC_CURVE=secp256k1|ed25519, one curve per launch)
-MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CURVE=secp256k1 cargo run --release -p starlab-mpc-native
+# Native — cross-repo: stars-labs/starlab-desktop (Iced); run from that checkout
+#   (MPC_CURVE=secp256k1|ed25519, one curve per launch)
+MPC_DEVICE_ID=<id> MPC_ROOM="$ROOM" MPC_SIGNAL_SERVER=wss://panda.qzz.io MPC_CURVE=secp256k1 cargo run --release
 
 # Extension: ⚙ Settings → Signal server room → Generate/paste "$ROOM" → Save → reopen popup
 ```

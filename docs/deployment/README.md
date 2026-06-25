@@ -13,7 +13,7 @@ the production signaling path runs on a Cloudflare Worker.
 | Signal server (self-host) | Native Rust binary from `apps/signal-server/server/` | systemd service behind an HTTPS terminator (nginx/caddy/Cloudflare Tunnel). Binds `0.0.0.0:9000`. Stateless, no DB, no Redis. |
 | Browser extension | `bun run build` (Chrome MV3) / `bun run build:firefox` | Chrome Web Store / AMO distribution, or sideload via `.output/<browser>-mv3` |
 | TUI wallet | `cargo build --release --bin starlab-tui` | End-user distribution — not a server deployment; single static binary. |
-| Native desktop | `cargo build --release -p starlab-mpc-native` | End-user Slint desktop binary. |
+| Desktop app | built from [`stars-labs/starlab-desktop`](https://github.com/stars-labs/starlab-desktop) | Iced GUI; lives in its own repo, consumes `starlab-client` cross-repo. |
 
 ## Cloudflare Worker signal server
 
@@ -69,17 +69,10 @@ Tunnel, or equivalent. The extension and TUI default to
 
 ## Browser extension
 
-```bash
-cd apps/browser-extension
-bun run build             # -> .output/chrome-mv3/ (default target)
-bun run build:firefox     # -> .output/firefox-mv2/
-
-# Package for web-store upload
-cd .output/chrome-mv3 && zip -r ../../starlab-mpc-chrome.zip .
-```
-
-Install unpacked during development via `chrome://extensions` →
-Developer Mode → "Load unpacked" → `.output/chrome-mv3`.
+The extension moved to its own repo,
+[`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet)
+(at `apps/extension/` there) — see that repo for build and
+web-store packaging instructions.
 
 ## Operator notes
 
@@ -144,8 +137,8 @@ never shipped it):
   holds session state in process memory.
 - No Prometheus / Grafana scrape targets.
 - No TURN server setup. The browser extension hard-codes Google's
-  public STUN (`stun.l.google.com:19302` in
-  `apps/browser-extension/src/entrypoints/offscreen/webrtc.ts:32`);
+  public STUN (`stun.l.google.com:19302` in starlab-wallet's
+  `apps/extension/src/entrypoints/offscreen/webrtc.ts`);
   the TUI currently passes an empty ICE-server list
   (`src/network/webrtc.rs:285`), so TUI-only peers only connect
   across directly-routable networks. If operators need reliable

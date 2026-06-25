@@ -13,8 +13,8 @@ true` and workspace members consume it via
 ```
 
 in their own `package.json`, resolved by Bun's workspace
-linker (see `apps/browser-extension/package.json:42` for the
-reference pattern).
+linker. (The main consumer, the browser extension, now lives in
+[`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet).)
 
 Earlier drafts of this README showed `bun add @stars-labs/types`
 / `npm install @stars-labs/types` as install commands; both

@@ -22,7 +22,7 @@ Starlab MPC enables threshold signatures where the private key is split across m
 - **Peer-to-Peer**: Direct WebRTC connections between participants (signaling over WSS)
 - **Key resharing**: Recover or rotate the cohort without changing the group public key
 - **Offline Mode**: Air-gapped SD-card operation option
-- **Tested**: `cargo test --workspace` (~180 Rust tests incl. a real-DKG e2e) + 500+ Bun tests in the browser extension — **not** a substitute for a security audit
+- **Tested**: `cargo test --workspace` (~180 Rust tests incl. a real-DKG e2e); the browser extension's 500+ Bun tests live with it in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet) — **not** a substitute for a security audit
 
 ## Use it as a library
 
@@ -62,24 +62,13 @@ bun install
 
 # Build WASM modules
 bun run build:wasm
-
-# Start development
-bun run dev
 ```
 
 ### Basic Usage
 
 #### Browser Extension
 
-1. Build and load the extension:
-```bash
-cd apps/browser-extension
-bun run dev
-```
-
-2. Load unpacked extension in Chrome from `.output/chrome-mv3`
-
-3. Create a wallet through the extension popup
+The extension lives in its own repo: **[stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet)**. It consumes this repo's `@stars-labs/core-wasm` and `@stars-labs/types` packages.
 
 #### Terminal UI
 
@@ -111,8 +100,7 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ### 📖 Application Documentation
 
 #### Browser Extension
-- [Browser Extension Guide](apps/browser-extension/docs/README.md) - Complete browser extension documentation
-- [UI Components](apps/browser-extension/docs/ui/README.md) - UI implementation and components
+- Moved to its own repo: **[stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet)** (consumes this repo's `@stars-labs/core-wasm` + `@stars-labs/types`).
 
 #### Terminal UI (TUI)
 - [TUI Documentation](apps/tui/docs/README.md) - Terminal UI comprehensive guide
@@ -153,10 +141,10 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ```
 starlab-mpc/
 ├── apps/                         # Applications
-│   ├── browser-extension/        # Chrome/Firefox extension (also → stars-labs/starlab-wallet)
 │   ├── cli/                      # Headless CLI (starlab-cli) — also the conformance oracle
 │   ├── tui/                      # Terminal UI + engine lib (crate: starlab-client, bin: starlab-tui)
 │   └── signal-server/            # WebRTC signaling (server + Cloudflare Worker)
+│   # Browser extension moved to stars-labs/starlab-wallet
 │   # Desktop GUI moved to stars-labs/starlab-desktop (Iced)
 │
 ├── packages/@starlab/            # Shared packages
@@ -174,11 +162,10 @@ starlab-mpc/
 ### Core Technologies
 
 - **Rust**: Core cryptographic implementation
-- **TypeScript**: Browser extension and web components
+- **TypeScript**: Shared types (`@stars-labs/types`) for WASM consumers
 - **WebAssembly**: Bridge between Rust and JavaScript
 - **WebRTC**: Peer-to-peer communication
-- **Svelte**: Browser extension UI
-- **Iced**: Native desktop UI framework (MIT)
+- **Iced**: Native desktop UI framework (MIT, in starlab-desktop)
 - **Ratatui**: Terminal UI framework
 
 ### Cryptography
@@ -233,11 +220,8 @@ real FROST paths:
   WebRTC mesh simulator). Refresh count via
   `grep -c '#\[test\]\|#\[tokio::test\]' $(find . -name '*.rs'
   | grep -v target)`.
-- `bun test` — ~530 test cases in the browser extension (529
-  `test()` / `it()` call sites across 45 `*.test.ts` files;
-  covers RPC, session lifecycle, DKG auto-trigger, signing
-  auto-trigger, decline paths). Earlier drafts said "509
-  passing"; number drifts as suites land on main.
+- The browser extension's ~530 Bun test cases moved with it to
+  [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet).
 - FROST itself is parameter-generic over `t`/`n`; the bottleneck at
   larger cohorts is the WebRTC full-mesh degree (n·(n-1)/2 peer
   connections), not the cryptography. No hard participant cap is
@@ -270,7 +254,8 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 - [x] **Key resharing** — recover/rotate the cohort over the mesh while
   preserving the group public key (driven by `starlab-cli`)
 - [x] Browser extension (Chrome / Firefox) — FROST DKG + threshold
-  signing + EIP-1193 / EIP-6963 dApp integration
+  signing + EIP-1193 / EIP-6963 dApp integration; now in its own repo
+  **[stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet)**
 - [x] Terminal UI (`apps/tui/`) — keyboard-driven FROST
   frontend with online (WebRTC mesh) + offline (SD-card) modes
 - [x] Headless CLI (`starlab-cli`) — scriptable DKG / signing /

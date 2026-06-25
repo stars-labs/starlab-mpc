@@ -1,11 +1,18 @@
 # Test Coverage Configuration
 
+> **The extension test suite (and its coverage config) moved to
+> `stars-labs/starlab-wallet`.** Everything below about Bun coverage
+> applies to that repo, where the extension now lives at `apps/extension/`
+> — the `apps/browser-extension/...` paths no longer exist in this repo.
+> This repo's Rust test suite under `cargo test` has no coverage config
+> in-tree (as noted below).
+
 ## Configuration
 
-Coverage is enabled via `bunfig.toml` at **`apps/browser-extension/bunfig.toml`**
-(not the repo root — there is no top-level bunfig.toml). This only
-governs the extension's Bun test suite; the Rust test suite under
-`cargo test` has no coverage config in-tree.
+Coverage is enabled via `bunfig.toml` at **`apps/extension/bunfig.toml`**
+in `stars-labs/starlab-wallet` (not the repo root — there is no top-level
+bunfig.toml). This only governs the extension's Bun test suite; this
+repo's Rust test suite under `cargo test` has no coverage config in-tree.
 
 ```toml
 [test]
@@ -23,7 +30,7 @@ The only coverage exclusion option available is:
 ## Files Still Included in Coverage
 Despite configuration attempts, these files cannot be excluded with current Bun capabilities:
 - `packages/@starlab/core-wasm/pkg/starlab_core_wasm.js` — auto-generated `wasm-pack` bindings (linked into the extension at build time by WXT)
-- `apps/browser-extension/tests/entrypoints/offscreen/test-utils.ts` — Bun test helpers
+- `apps/extension/tests/entrypoints/offscreen/test-utils.ts` (in starlab-wallet) — Bun test helpers
 
 Earlier drafts of this section referenced these files at
 `pkg/starlab_mpc.js` and `src/entrypoints/offscreen/test-utils.ts`

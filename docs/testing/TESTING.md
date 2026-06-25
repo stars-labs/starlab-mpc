@@ -1,22 +1,36 @@
 # Testing Guide
 
-Covers the browser-extension test suite. For the Rust side, see
-`cargo test --workspace` plus
-[`docs/testing/RUN_TEST_INSTRUCTIONS.md`](./RUN_TEST_INSTRUCTIONS.md)
+> **The browser-extension test suite moved out of this repo.** It now
+> lives in `stars-labs/starlab-wallet` (at `apps/extension/`). Run and
+> contribute those `bun:test` suites **in that repo** — the
+> `apps/browser-extension/...` paths and the `bun run test:extension`
+> script below no longer exist here. The rest of this guide is retained
+> as a reference for the extension suite (it documents how the suite is
+> structured in starlab-wallet); the Rust-side guidance immediately below
+> stays valid for this repo.
+
+**This repo (Rust engine + terminal clients):** run `cargo test --workspace`,
+plus [`docs/testing/RUN_TEST_INSTRUCTIONS.md`](./RUN_TEST_INSTRUCTIONS.md)
 for the 3-node manual mesh smoke test. (Earlier drafts of this
 line pointed at `apps/tui/docs/RUN_TEST_INSTRUCTIONS.md` —
 that path doesn't exist; the file lives at the workspace `docs/`
 level, not under the TUI crate.)
 
+---
+
+The remainder of this guide describes the **extension test suite in
+`stars-labs/starlab-wallet`**. All paths below are relative to that repo's
+`apps/extension/` tree.
+
 ## Where tests live
 
 The extension test tree is rooted at
-`apps/browser-extension/tests/` and has colocated `.test.ts` files
+`apps/extension/tests/` and has colocated `.test.ts` files
 next to the modules they exercise (e.g.
 `src/services/walletClient.test.ts`).
 
 ```
-apps/browser-extension/
+apps/extension/            # in stars-labs/starlab-wallet
 ├── tests/
 │   ├── config/            # Configuration tests
 │   ├── entrypoints/
@@ -34,7 +48,7 @@ apps/browser-extension/
 
 ## Test runner
 
-This repo uses **Bun's built-in test runner**, not Vitest, not Jest.
+The extension uses **Bun's built-in test runner**, not Vitest, not Jest.
 Test files import from `bun:test`:
 
 ```ts
@@ -47,14 +61,13 @@ coverage-exclusion limitations.
 
 ## Running tests
 
-From the repo root:
+From the starlab-wallet repo root:
 
 ```bash
-bun run test              # -> ./scripts/test-all.sh (all workspace tests)
-bun run test:extension    # -> cd apps/browser-extension && bun test
+bun run test              # all extension tests
 ```
 
-From inside `apps/browser-extension/`:
+From inside `apps/extension/` (in starlab-wallet):
 
 ```bash
 bun test                                   # full suite
@@ -71,7 +84,7 @@ doc mentioned them.
 
 ## Writing tests
 
-1. Place test files under `apps/browser-extension/tests/` (or colocate
+1. Place test files under `apps/extension/tests/` (or colocate
    next to the module as `<name>.test.ts`).
 2. Import from `bun:test`, not `vitest` or `@jest/globals`.
 3. Use existing mock patterns from `tests/__mocks__/` and
@@ -89,13 +102,13 @@ doc mentioned them.
 Separate from tests. Run from inside the extension directory:
 
 ```bash
-cd apps/browser-extension && bun run check
+cd apps/extension && bun run check    # in starlab-wallet
 ```
 
 ## Live signal-server smoke tests
 
 No automated harness exercises the full FROST + WebRTC pairing against
 a real signal server — that needs three browser instances driving the
-extension. See `apps/browser-extension/tests/README.md` for the
-current status and `docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md` for
+extension. See `apps/extension/tests/README.md` (in starlab-wallet) for
+the current status and `docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md` for
 the open plan to harness it.

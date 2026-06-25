@@ -13,9 +13,10 @@ not as a reference for tests that already exist.
 Existing functional coverage that does real MPC flows (without
 a dedicated E2E harness): see the examples at
 `apps/tui/examples/hybrid_mode_e2e_test.rs` +
-`webrtc_mesh_e2e_test.rs` + the Bun test suite under
-`apps/browser-extension/tests/entrypoints/background/`. Those are
-the real de facto E2E baselines today.
+`webrtc_mesh_e2e_test.rs` (in this repo) + the Bun test suite under
+`apps/extension/tests/entrypoints/background/` (now in the
+`stars-labs/starlab-wallet` repo). Those are the real de facto E2E
+baselines today.
 
 ## Overview
 Comprehensive test suite for MPC Wallet using real WebSocket signal server (wss://xiongchenyu.dpdns.org)
