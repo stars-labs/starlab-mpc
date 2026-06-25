@@ -19,15 +19,15 @@ use std::collections::BTreeMap;
 /// Round 1 output containing packages for both curves.
 #[derive(Serialize, Deserialize)]
 pub struct UnifiedRound1Package {
-    pub ed25519: String,    // hex-encoded JSON of ed25519 round1 package
-    pub secp256k1: String,  // hex-encoded JSON of secp256k1 round1 package
+    pub ed25519: String,   // hex-encoded JSON of ed25519 round1 package
+    pub secp256k1: String, // hex-encoded JSON of secp256k1 round1 package
 }
 
 /// Round 2 output containing packages for both curves, keyed by recipient.
 #[derive(Serialize, Deserialize)]
 pub struct UnifiedRound2Packages {
-    pub ed25519: BTreeMap<u16, String>,    // participant_index -> hex-encoded package
-    pub secp256k1: BTreeMap<u16, String>,  // participant_index -> hex-encoded package
+    pub ed25519: BTreeMap<u16, String>, // participant_index -> hex-encoded package
+    pub secp256k1: BTreeMap<u16, String>, // participant_index -> hex-encoded package
 }
 
 /// Unified DKG state managing both curves from a single root secret.
@@ -39,16 +39,20 @@ pub struct UnifiedDkg {
     ed25519_round2_secret: Option<frost_ed25519::keys::dkg::round2::SecretPackage>,
     ed25519_key_package: Option<frost_ed25519::keys::KeyPackage>,
     ed25519_public_key_package: Option<frost_ed25519::keys::PublicKeyPackage>,
-    ed25519_round1_packages: BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round1::Package>,
-    ed25519_round2_packages: BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round2::Package>,
+    ed25519_round1_packages:
+        BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round1::Package>,
+    ed25519_round2_packages:
+        BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round2::Package>,
 
     // Secp256k1 DKG state
     secp256k1_round1_secret: Option<frost_secp256k1::keys::dkg::round1::SecretPackage>,
     secp256k1_round2_secret: Option<frost_secp256k1::keys::dkg::round2::SecretPackage>,
     secp256k1_key_package: Option<frost_secp256k1::keys::KeyPackage>,
     secp256k1_public_key_package: Option<frost_secp256k1::keys::PublicKeyPackage>,
-    secp256k1_round1_packages: BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round1::Package>,
-    secp256k1_round2_packages: BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round2::Package>,
+    secp256k1_round1_packages:
+        BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round1::Package>,
+    secp256k1_round2_packages:
+        BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round2::Package>,
 
     // HD derivation chain codes (set after finalization)
     ed25519_chain_code: Option<ChainCode>,
@@ -141,17 +145,18 @@ impl UnifiedDkg {
     /// Generate round 1 packages for both curves using RNGs derived from the root secret.
     pub fn generate_round1(&mut self) -> Result<UnifiedRound1Package> {
         // Derive deterministic, account-scoped RNGs from the root secret.
-        let mut ed_rng = self.root_secret.derive_ed25519_rng_for_account(self.account)?;
-        let mut secp_rng = self.root_secret.derive_secp256k1_rng_for_account(self.account)?;
+        let mut ed_rng = self
+            .root_secret
+            .derive_ed25519_rng_for_account(self.account)?;
+        let mut secp_rng = self
+            .root_secret
+            .derive_secp256k1_rng_for_account(self.account)?;
 
         // Ed25519 round 1
         let ed_identifier = Ed25519Curve::identifier_from_u16(self.participant_index)?;
-        let (ed_r1_secret, ed_r1_package) = frost_ed25519::keys::dkg::part1(
-            ed_identifier,
-            self.total,
-            self.threshold,
-            &mut ed_rng,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        let (ed_r1_secret, ed_r1_package) =
+            frost_ed25519::keys::dkg::part1(ed_identifier, self.total, self.threshold, &mut ed_rng)
+                .map_err(|e| FrostError::DkgError(e.to_string()))?;
         self.ed25519_round1_secret = Some(ed_r1_secret);
 
         // Secp256k1 round 1
@@ -161,7 +166,8 @@ impl UnifiedDkg {
             self.total,
             self.threshold,
             &mut secp_rng,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        )
+        .map_err(|e| FrostError::DkgError(e.to_string()))?;
         self.secp256k1_round1_secret = Some(secp_r1_secret);
 
         // Serialize packages
@@ -177,7 +183,11 @@ impl UnifiedDkg {
     }
 
     /// Add a round 1 package from another participant for both curves.
-    pub fn add_round1_package(&mut self, participant_index: u16, package: &UnifiedRound1Package) -> Result<()> {
+    pub fn add_round1_package(
+        &mut self,
+        participant_index: u16,
+        package: &UnifiedRound1Package,
+    ) -> Result<()> {
         // Ed25519
         let ed_json = hex::decode(&package.ed25519)
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
@@ -189,8 +199,9 @@ impl UnifiedDkg {
         // Secp256k1
         let secp_json = hex::decode(&package.secp256k1)
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
-        let secp_pkg: frost_secp256k1::keys::dkg::round1::Package = serde_json::from_slice(&secp_json)
-            .map_err(|e| FrostError::SerializationError(e.to_string()))?;
+        let secp_pkg: frost_secp256k1::keys::dkg::round1::Package =
+            serde_json::from_slice(&secp_json)
+                .map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let secp_id = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.secp256k1_round1_packages.insert(secp_id, secp_pkg);
 
@@ -212,31 +223,35 @@ impl UnifiedDkg {
         let self_secp_id = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
 
         // Filter out own round 1 packages (frost part2 expects only others')
-        let ed_r1_others: BTreeMap<_, _> = self.ed25519_round1_packages.iter()
+        let ed_r1_others: BTreeMap<_, _> = self
+            .ed25519_round1_packages
+            .iter()
             .filter(|(id, _)| **id != self_ed_id)
             .map(|(id, pkg)| (*id, pkg.clone()))
             .collect();
-        let secp_r1_others: BTreeMap<_, _> = self.secp256k1_round1_packages.iter()
+        let secp_r1_others: BTreeMap<_, _> = self
+            .secp256k1_round1_packages
+            .iter()
             .filter(|(id, _)| **id != self_secp_id)
             .map(|(id, pkg)| (*id, pkg.clone()))
             .collect();
 
         // Ed25519 round 2
-        let ed_r1_secret = self.ed25519_round1_secret.clone()
-            .ok_or_else(|| FrostError::InvalidState("Ed25519 round 1 secret not available".into()))?;
-        let (ed_r2_secret, ed_r2_packages) = frost_ed25519::keys::dkg::part2(
-            ed_r1_secret,
-            &ed_r1_others,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        let ed_r1_secret = self.ed25519_round1_secret.clone().ok_or_else(|| {
+            FrostError::InvalidState("Ed25519 round 1 secret not available".into())
+        })?;
+        let (ed_r2_secret, ed_r2_packages) =
+            frost_ed25519::keys::dkg::part2(ed_r1_secret, &ed_r1_others)
+                .map_err(|e| FrostError::DkgError(e.to_string()))?;
         self.ed25519_round2_secret = Some(ed_r2_secret);
 
         // Secp256k1 round 2
-        let secp_r1_secret = self.secp256k1_round1_secret.clone()
-            .ok_or_else(|| FrostError::InvalidState("Secp256k1 round 1 secret not available".into()))?;
-        let (secp_r2_secret, secp_r2_packages) = frost_secp256k1::keys::dkg::part2(
-            secp_r1_secret,
-            &secp_r1_others,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        let secp_r1_secret = self.secp256k1_round1_secret.clone().ok_or_else(|| {
+            FrostError::InvalidState("Secp256k1 round 1 secret not available".into())
+        })?;
+        let (secp_r2_secret, secp_r2_packages) =
+            frost_secp256k1::keys::dkg::part2(secp_r1_secret, &secp_r1_others)
+                .map_err(|e| FrostError::DkgError(e.to_string()))?;
         self.secp256k1_round2_secret = Some(secp_r2_secret);
 
         // Serialize ed25519 round 2 packages
@@ -266,20 +281,26 @@ impl UnifiedDkg {
     }
 
     /// Add a round 2 package from another participant for both curves.
-    pub fn add_round2_package(&mut self, sender_index: u16, ed_hex: &str, secp_hex: &str) -> Result<()> {
+    pub fn add_round2_package(
+        &mut self,
+        sender_index: u16,
+        ed_hex: &str,
+        secp_hex: &str,
+    ) -> Result<()> {
         // Ed25519
-        let ed_json = hex::decode(ed_hex)
-            .map_err(|e| FrostError::SerializationError(e.to_string()))?;
+        let ed_json =
+            hex::decode(ed_hex).map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let ed_pkg: frost_ed25519::keys::dkg::round2::Package = serde_json::from_slice(&ed_json)
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let ed_id = Ed25519Curve::identifier_from_u16(sender_index)?;
         self.ed25519_round2_packages.insert(ed_id, ed_pkg);
 
         // Secp256k1
-        let secp_json = hex::decode(secp_hex)
-            .map_err(|e| FrostError::SerializationError(e.to_string()))?;
-        let secp_pkg: frost_secp256k1::keys::dkg::round2::Package = serde_json::from_slice(&secp_json)
-            .map_err(|e| FrostError::SerializationError(e.to_string()))?;
+        let secp_json =
+            hex::decode(secp_hex).map_err(|e| FrostError::SerializationError(e.to_string()))?;
+        let secp_pkg: frost_secp256k1::keys::dkg::round2::Package =
+            serde_json::from_slice(&secp_json)
+                .map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let secp_id = Secp256k1Curve::identifier_from_u16(sender_index)?;
         self.secp256k1_round2_packages.insert(secp_id, secp_pkg);
 
@@ -300,39 +321,49 @@ impl UnifiedDkg {
         let self_secp_id = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
 
         // Filter out own round 1 packages for part3
-        let ed_r1_others: BTreeMap<_, _> = self.ed25519_round1_packages.iter()
+        let ed_r1_others: BTreeMap<_, _> = self
+            .ed25519_round1_packages
+            .iter()
             .filter(|(id, _)| **id != self_ed_id)
             .map(|(id, pkg)| (*id, pkg.clone()))
             .collect();
-        let secp_r1_others: BTreeMap<_, _> = self.secp256k1_round1_packages.iter()
+        let secp_r1_others: BTreeMap<_, _> = self
+            .secp256k1_round1_packages
+            .iter()
             .filter(|(id, _)| **id != self_secp_id)
             .map(|(id, pkg)| (*id, pkg.clone()))
             .collect();
 
         // Finalize ed25519
-        let ed_r2_secret = self.ed25519_round2_secret.as_ref()
-            .ok_or_else(|| FrostError::InvalidState("Ed25519 round 2 secret not available".into()))?;
+        let ed_r2_secret = self.ed25519_round2_secret.as_ref().ok_or_else(|| {
+            FrostError::InvalidState("Ed25519 round 2 secret not available".into())
+        })?;
         let (ed_key_pkg, ed_pub_pkg) = frost_ed25519::keys::dkg::part3(
             ed_r2_secret,
             &ed_r1_others,
             &self.ed25519_round2_packages,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        )
+        .map_err(|e| FrostError::DkgError(e.to_string()))?;
         // Derive chain code from ed25519 group public key
-        let ed_vk_bytes = Ed25519Curve::serialize_verifying_key(&Ed25519Curve::verifying_key(&ed_pub_pkg))?;
+        let ed_vk_bytes =
+            Ed25519Curve::serialize_verifying_key(&Ed25519Curve::verifying_key(&ed_pub_pkg))?;
         self.ed25519_chain_code = Some(ChainCode::from_group_key(&ed_vk_bytes));
         self.ed25519_key_package = Some(ed_key_pkg.clone());
         self.ed25519_public_key_package = Some(ed_pub_pkg.clone());
 
         // Finalize secp256k1
-        let secp_r2_secret = self.secp256k1_round2_secret.as_ref()
-            .ok_or_else(|| FrostError::InvalidState("Secp256k1 round 2 secret not available".into()))?;
+        let secp_r2_secret = self.secp256k1_round2_secret.as_ref().ok_or_else(|| {
+            FrostError::InvalidState("Secp256k1 round 2 secret not available".into())
+        })?;
         let (secp_key_pkg, secp_pub_pkg) = frost_secp256k1::keys::dkg::part3(
             secp_r2_secret,
             &secp_r1_others,
             &self.secp256k1_round2_packages,
-        ).map_err(|e| FrostError::DkgError(e.to_string()))?;
+        )
+        .map_err(|e| FrostError::DkgError(e.to_string()))?;
         // Derive chain code from secp256k1 group public key
-        let secp_vk_bytes = Secp256k1Curve::serialize_verifying_key(&Secp256k1Curve::verifying_key(&secp_pub_pkg))?;
+        let secp_vk_bytes =
+            Secp256k1Curve::serialize_verifying_key(&Secp256k1Curve::verifying_key(&secp_pub_pkg))?;
         self.secp256k1_chain_code = Some(ChainCode::from_group_key(&secp_vk_bytes));
         self.secp256k1_key_package = Some(secp_key_pkg.clone());
         self.secp256k1_public_key_package = Some(secp_pub_pkg.clone());
@@ -374,7 +405,9 @@ impl UnifiedDkg {
 
     /// Get the ed25519 group public key (hex).
     pub fn get_ed25519_group_public_key(&self) -> Result<String> {
-        let pub_pkg = self.ed25519_public_key_package.as_ref()
+        let pub_pkg = self
+            .ed25519_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Ed25519 DKG not complete".into()))?;
         let vk = Ed25519Curve::verifying_key(pub_pkg);
         let bytes = Ed25519Curve::serialize_verifying_key(&vk)?;
@@ -383,7 +416,9 @@ impl UnifiedDkg {
 
     /// Get the secp256k1 group public key (hex).
     pub fn get_secp256k1_group_public_key(&self) -> Result<String> {
-        let pub_pkg = self.secp256k1_public_key_package.as_ref()
+        let pub_pkg = self
+            .secp256k1_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Secp256k1 DKG not complete".into()))?;
         let vk = Secp256k1Curve::verifying_key(pub_pkg);
         let bytes = Secp256k1Curve::serialize_verifying_key(&vk)?;
@@ -392,7 +427,9 @@ impl UnifiedDkg {
 
     /// Get the Solana address (base58 ed25519 public key).
     pub fn get_solana_address(&self) -> Result<String> {
-        let pub_pkg = self.ed25519_public_key_package.as_ref()
+        let pub_pkg = self
+            .ed25519_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Ed25519 DKG not complete".into()))?;
         let vk = Ed25519Curve::verifying_key(pub_pkg);
         Ok(Ed25519Curve::get_address(&vk))
@@ -400,7 +437,9 @@ impl UnifiedDkg {
 
     /// Get the Ethereum address (keccak256 of secp256k1 public key).
     pub fn get_eth_address(&self) -> Result<String> {
-        let pub_pkg = self.secp256k1_public_key_package.as_ref()
+        let pub_pkg = self
+            .secp256k1_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Secp256k1 DKG not complete".into()))?;
         let vk = Secp256k1Curve::verifying_key(pub_pkg);
         Secp256k1Curve::get_eth_address(&vk)
@@ -453,23 +492,34 @@ impl UnifiedDkg {
         DerivedKeys<frost_ed25519::Ed25519Sha512>,
         DerivedKeys<frost_secp256k1::Secp256K1Sha256>,
     )> {
-        let ed_kp = self.ed25519_key_package.as_ref()
+        let ed_kp = self
+            .ed25519_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Ed25519 DKG not complete".into()))?;
-        let ed_pub = self.ed25519_public_key_package.as_ref()
+        let ed_pub = self
+            .ed25519_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Ed25519 DKG not complete".into()))?;
-        let ed_cc = self.ed25519_chain_code.as_ref()
+        let ed_cc = self
+            .ed25519_chain_code
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Ed25519 chain code not available".into()))?;
 
-        let secp_kp = self.secp256k1_key_package.as_ref()
+        let secp_kp = self
+            .secp256k1_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Secp256k1 DKG not complete".into()))?;
-        let secp_pub = self.secp256k1_public_key_package.as_ref()
+        let secp_pub = self
+            .secp256k1_public_key_package
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Secp256k1 DKG not complete".into()))?;
-        let secp_cc = self.secp256k1_chain_code.as_ref()
+        let secp_cc = self
+            .secp256k1_chain_code
+            .as_ref()
             .ok_or_else(|| FrostError::InvalidState("Secp256k1 chain code not available".into()))?;
 
-        let ed_derived = derive_child_key::<frost_ed25519::Ed25519Sha512>(
-            ed_kp, ed_pub, ed_cc, ed_index,
-        )?;
+        let ed_derived =
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, ed_cc, ed_index)?;
         let secp_derived = derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
             secp_kp, secp_pub, secp_cc, secp_index,
         )?;

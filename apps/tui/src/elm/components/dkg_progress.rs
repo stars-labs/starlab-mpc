@@ -3,18 +3,18 @@
 //! Professional component for displaying the progress of the Distributed Key Generation
 //! process in online mode with WebRTC mesh networking.
 
-use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
-use crate::elm::message::{Message, DKGRound};
+use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
+use crate::elm::message::{DKGRound, Message};
 
-use tuirealm::command::{Cmd, CmdResult};
-use tuirealm::event::{Event, Key, KeyEvent};
-use ratatui::layout::{Rect, Constraint, Direction, Layout, Alignment};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, BorderType, Paragraph, Gauge, List, ListItem};
+use ratatui::widgets::{Block, BorderType, Borders, Gauge, List, ListItem, Paragraph};
+use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::component::{AppComponent, Component};
-use tuirealm::ratatui::Frame;
+use tuirealm::event::{Event, Key, KeyEvent};
 use tuirealm::props::Props;
+use tuirealm::ratatui::Frame;
 use tuirealm::state::{State, StateValue};
 
 /// What ceremony this progress component is rendering. Drives three
@@ -79,9 +79,9 @@ pub struct DKGProgressComponent {
     progress_percentage: f64,
     error_message: Option<String>,
     focused: bool,
-    selected_action: usize, // 0 = Cancel, 1 = Copy Session ID
-    websocket_connected: bool, // Track WebSocket connection status
-    mesh_ready_count: usize,  // Track how many participants are mesh-ready
+    selected_action: usize,       // 0 = Cancel, 1 = Copy Session ID
+    websocket_connected: bool,    // Track WebSocket connection status
+    mesh_ready_count: usize,      // Track how many participants are mesh-ready
     all_data_channels_open: bool, // Track if all data channels are open
     /// What ceremony this progress bar is tracking — drives the title,
     /// the chain row in the header, and the "expected other
@@ -149,27 +149,31 @@ impl DKGProgressComponent {
             Ceremony::Signing { .. } => "🖊️  Signing",
         }
     }
-    
+
     /// Set WebSocket connection status
     pub fn set_websocket_connected(&mut self, connected: bool) {
         self.websocket_connected = connected;
     }
-    
+
     /// Set selected action (0 = Cancel DKG, 1 = Copy Session ID)
     pub fn set_selected_action(&mut self, action: usize) {
         self.selected_action = action;
     }
-    
+
     /// Update the session information
     pub fn set_session_info(&mut self, session_id: String, total: u16, threshold: u16) {
         self.session_id = session_id;
         self.total_participants = total;
         self.threshold = threshold;
     }
-    
+
     /// Add or update a participant
     pub fn update_participant(&mut self, device_id: String, status: ParticipantStatus) {
-        if let Some(participant) = self.participants.iter_mut().find(|p| p.device_id == device_id) {
+        if let Some(participant) = self
+            .participants
+            .iter_mut()
+            .find(|p| p.device_id == device_id)
+        {
             participant.status = status;
         } else {
             self.participants.push(ParticipantInfo {
@@ -183,7 +187,7 @@ impl DKGProgressComponent {
         }
         self.update_progress();
     }
-    
+
     /// Update the current DKG round
     pub fn set_round(&mut self, round: DKGRound) {
         self.current_round = round;
@@ -191,8 +195,17 @@ impl DKGProgressComponent {
     }
 
     /// Update WebRTC connection status for a participant
-    pub fn update_webrtc_status(&mut self, device_id: String, webrtc_connected: bool, data_channel_open: bool) {
-        if let Some(participant) = self.participants.iter_mut().find(|p| p.device_id == device_id) {
+    pub fn update_webrtc_status(
+        &mut self,
+        device_id: String,
+        webrtc_connected: bool,
+        data_channel_open: bool,
+    ) {
+        if let Some(participant) = self
+            .participants
+            .iter_mut()
+            .find(|p| p.device_id == device_id)
+        {
             participant.webrtc_connected = webrtc_connected;
             participant.data_channel_open = data_channel_open;
 
@@ -224,8 +237,8 @@ impl DKGProgressComponent {
         // ceremony-specific other-participant count: total-1 for DKG,
         // threshold-1 for signing).
         let expected_other_participants = self.expected_other_participants();
-        self.all_data_channels_open = self.participants.len() >= expected_other_participants &&
-            self.participants.iter().all(|p| p.data_channel_open);
+        self.all_data_channels_open = self.participants.len() >= expected_other_participants
+            && self.participants.iter().all(|p| p.data_channel_open);
 
         // Update mesh_ready_count based on actual data channels open
         // Mesh is ready when we have all expected participants with open data channels
@@ -248,12 +261,12 @@ impl DKGProgressComponent {
             }
         }
     }
-    
+
     /// Calculate overall progress
     fn update_progress(&mut self) {
         let connected = self.participants.len() as f64;
         let total = self.total_participants as f64;
-        
+
         match self.current_round {
             DKGRound::Initialization => {
                 // Initial setup
@@ -265,15 +278,31 @@ impl DKGProgressComponent {
             }
             DKGRound::Round1 => {
                 // 25% base + progress through round 1
-                let round1_complete = self.participants.iter()
-                    .filter(|p| matches!(p.status, ParticipantStatus::Round1Complete | ParticipantStatus::Round2Complete | ParticipantStatus::Completed))
+                let round1_complete = self
+                    .participants
+                    .iter()
+                    .filter(|p| {
+                        matches!(
+                            p.status,
+                            ParticipantStatus::Round1Complete
+                                | ParticipantStatus::Round2Complete
+                                | ParticipantStatus::Completed
+                        )
+                    })
                     .count() as f64;
                 self.progress_percentage = 25.0 + (round1_complete / total) * 35.0;
             }
             DKGRound::Round2 => {
                 // 60% base + progress through round 2
-                let round2_complete = self.participants.iter()
-                    .filter(|p| matches!(p.status, ParticipantStatus::Round2Complete | ParticipantStatus::Completed))
+                let round2_complete = self
+                    .participants
+                    .iter()
+                    .filter(|p| {
+                        matches!(
+                            p.status,
+                            ParticipantStatus::Round2Complete | ParticipantStatus::Completed
+                        )
+                    })
                     .count() as f64;
                 self.progress_percentage = 60.0 + (round2_complete / total) * 35.0;
             }
@@ -296,7 +325,7 @@ impl DKGProgressComponent {
             DKGRound::Complete => Color::LightGreen,
         }
     }
-    
+
     fn get_status_symbol(status: &ParticipantStatus) -> &'static str {
         match status {
             ParticipantStatus::Waiting => "⏳",
@@ -309,7 +338,7 @@ impl DKGProgressComponent {
             ParticipantStatus::Failed(_) => "❌",
         }
     }
-    
+
     fn get_status_color(status: &ParticipantStatus) -> Color {
         match status {
             ParticipantStatus::Waiting => Color::Gray,
@@ -335,67 +364,82 @@ impl Component for DKGProgressComponent {
             frame.render_widget(msg, area);
             return;
         }
-        
+
         // Main container — title reflects the ceremony (DKG or signing).
         let title_text = format!(" {} Progress - Online Mode ", self.ceremony_title());
         let block = Block::default()
             .title(title_text)
-            .title_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+            .title_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(if self.focused { Color::Cyan } else { Color::Gray }));
+            .border_style(Style::default().fg(if self.focused {
+                Color::Cyan
+            } else {
+                Color::Gray
+            }));
         frame.render_widget(block.clone(), area);
-        
+
         // Create inner area for content (accounting for borders)
         let inner_area = block.inner(area);
-        
+
         // Use more flexible constraints
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(5),     // Header with session info (flexible)
-                Constraint::Length(3),  // Progress bar
-                Constraint::Min(5),     // Participants list (flexible)
-                Constraint::Min(3),     // Actions/Status (flexible)
+                Constraint::Min(5),    // Header with session info (flexible)
+                Constraint::Length(3), // Progress bar
+                Constraint::Min(5),    // Participants list (flexible)
+                Constraint::Min(3),    // Actions/Status (flexible)
             ])
             .margin(1)
             .split(inner_area);
-        
+
         // Safely render each section if chunk exists
         if chunks.len() >= 4 {
             // Header - Session Information
             self.render_header(frame, chunks[0]);
-            
+
             // Progress Bar
             self.render_progress_bar(frame, chunks[1]);
-            
+
             // Participants List
             self.render_participants(frame, chunks[2]);
-            
+
             // Actions/Status
             self.render_actions(frame, chunks[3]);
         } else {
             // Fallback: render simple status if layout failed
-            let msg = Paragraph::new(format!("DKG Session: {}\nParticipants: {}/{}", 
-                self.session_id, self.participants.len(), self.total_participants))
-                .style(Style::default().fg(Color::Yellow))
-                .alignment(Alignment::Center);
+            let msg = Paragraph::new(format!(
+                "DKG Session: {}\nParticipants: {}/{}",
+                self.session_id,
+                self.participants.len(),
+                self.total_participants
+            ))
+            .style(Style::default().fg(Color::Yellow))
+            .alignment(Alignment::Center);
             frame.render_widget(msg, inner_area);
         }
     }
-    
-    fn query<'a>(&'a self, attr: tuirealm::props::Attribute) -> Option<tuirealm::props::QueryResult<'a>> {
+
+    fn query<'a>(
+        &'a self,
+        attr: tuirealm::props::Attribute,
+    ) -> Option<tuirealm::props::QueryResult<'a>> {
         self.props.get_for_query(attr)
     }
-    
+
     fn attr(&mut self, attr: tuirealm::props::Attribute, value: tuirealm::props::AttrValue) {
         self.props.set(attr, value);
     }
-    
+
     fn state(&self) -> tuirealm::state::State {
         State::Single(StateValue::String(self.session_id.clone()))
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Move(tuirealm::command::Direction::Left) => {
@@ -439,26 +483,31 @@ impl DKGProgressComponent {
                 Constraint::Length(2),
             ])
             .split(area);
-        
+
         // Session ID with WebSocket status
         let ws_status = if self.websocket_connected {
             Span::styled("🟢 WebSocket Connected", Style::default().fg(Color::Green))
         } else {
-            Span::styled("🔴 WebSocket Disconnected", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            Span::styled(
+                "🔴 WebSocket Disconnected",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            )
         };
-        
-        let session_text = vec![
-            Line::from(vec![
-                Span::styled("Session ID: ", Style::default().fg(Color::Gray)),
-                Span::styled(&self.session_id, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw("  |  "),
-                ws_status,
-            ]),
-        ];
-        let session_para = Paragraph::new(session_text)
-            .alignment(Alignment::Center);
+
+        let session_text = vec![Line::from(vec![
+            Span::styled("Session ID: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                &self.session_id,
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  |  "),
+            ws_status,
+        ])];
+        let session_para = Paragraph::new(session_text).alignment(Alignment::Center);
         frame.render_widget(session_para, chunks[0]);
-        
+
         // Configuration row. For signing we suffix the resolved chain
         // identifier so the user can sanity-check what they're about
         // to put a signature on; DKG has no chain at this point in
@@ -466,71 +515,88 @@ impl DKGProgressComponent {
         let mut config_spans = vec![
             Span::styled("Configuration: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{}-of-{} Threshold", self.threshold, self.total_participants),
+                format!(
+                    "{}-of-{} Threshold",
+                    self.threshold, self.total_participants
+                ),
                 Style::default().fg(Color::Cyan),
             ),
         ];
-        if let Ceremony::Signing { chain: Some(ref chain) } = self.ceremony {
+        if let Ceremony::Signing {
+            chain: Some(ref chain),
+        } = self.ceremony
+        {
             config_spans.push(Span::raw("  |  "));
-            config_spans.push(Span::styled(
-                "Chain: ",
-                Style::default().fg(Color::Gray),
-            ));
+            config_spans.push(Span::styled("Chain: ", Style::default().fg(Color::Gray)));
             config_spans.push(Span::styled(
                 chain.clone(),
-                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
-        let config_para = Paragraph::new(vec![Line::from(config_spans)])
-            .alignment(Alignment::Center);
+        let config_para =
+            Paragraph::new(vec![Line::from(config_spans)]).alignment(Alignment::Center);
         frame.render_widget(config_para, chunks[1]);
-        
+
         // Current Round
-        let round_text = vec![
-            Line::from(vec![
-                Span::styled("Current Round: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:?}", self.current_round),
-                    Style::default().fg(self.get_round_color()).add_modifier(Modifier::BOLD)
-                ),
-            ]),
-        ];
-        let round_para = Paragraph::new(round_text)
-            .alignment(Alignment::Center);
+        let round_text = vec![Line::from(vec![
+            Span::styled("Current Round: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{:?}", self.current_round),
+                Style::default()
+                    .fg(self.get_round_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ])];
+        let round_para = Paragraph::new(round_text).alignment(Alignment::Center);
         frame.render_widget(round_para, chunks[2]);
-        
+
         // Participants Count with WebRTC details
-        let data_channels_open = self.participants.iter().filter(|p| p.data_channel_open).count();
-        let webrtc_connected = self.participants.iter().filter(|p| p.webrtc_connected).count();
+        let data_channels_open = self
+            .participants
+            .iter()
+            .filter(|p| p.data_channel_open)
+            .count();
+        let webrtc_connected = self
+            .participants
+            .iter()
+            .filter(|p| p.webrtc_connected)
+            .count();
 
         // For DKG we need every party (total - 1 others); for signing
         // only `threshold - 1` others. Without this swap a 2-of-3 sign
         // ceremony would forever read "0/2" when only 1 peer is needed.
         let other_participants = self.expected_other_participants();
 
-        let participants_text = vec![
-            Line::from(vec![
-                Span::styled("P2P Status: ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("WebRTC: {}/{} | Channels: {}/{} | Mesh: {}/1",
-                            webrtc_connected, other_participants,
-                            data_channels_open, other_participants,
-                            if self.mesh_ready_count >= other_participants { 1 } else { 0 }),
-                    Style::default().fg(if self.all_data_channels_open {
-                        Color::Green
-                    } else if data_channels_open > 0 {
-                        Color::Yellow
+        let participants_text = vec![Line::from(vec![
+            Span::styled("P2P Status: ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!(
+                    "WebRTC: {}/{} | Channels: {}/{} | Mesh: {}/1",
+                    webrtc_connected,
+                    other_participants,
+                    data_channels_open,
+                    other_participants,
+                    if self.mesh_ready_count >= other_participants {
+                        1
                     } else {
-                        Color::Red
-                    })
+                        0
+                    }
                 ),
-            ]),
-        ];
-        let participants_para = Paragraph::new(participants_text)
-            .alignment(Alignment::Center);
+                Style::default().fg(if self.all_data_channels_open {
+                    Color::Green
+                } else if data_channels_open > 0 {
+                    Color::Yellow
+                } else {
+                    Color::Red
+                }),
+            ),
+        ])];
+        let participants_para = Paragraph::new(participants_text).alignment(Alignment::Center);
         frame.render_widget(participants_para, chunks[3]);
     }
-    
+
     fn render_progress_bar(&self, frame: &mut Frame, area: Rect) {
         let progress_label = format!(
             "Progress: {:.0}% - {}",
@@ -544,44 +610,46 @@ impl DKGProgressComponent {
                 DKGRound::Complete => "DKG complete!",
             }
         );
-        
+
         // Ensure percentage is valid (0-100) before passing to Gauge
-        let safe_percentage = if self.progress_percentage.is_nan() || self.progress_percentage.is_infinite() {
-            0
-        } else {
-            self.progress_percentage.clamp(0.0, 100.0) as u16
-        };
-        
+        let safe_percentage =
+            if self.progress_percentage.is_nan() || self.progress_percentage.is_infinite() {
+                0
+            } else {
+                self.progress_percentage.clamp(0.0, 100.0) as u16
+            };
+
         let gauge = Gauge::default()
             .block(Block::default().borders(Borders::NONE))
             .gauge_style(Style::default().fg(self.get_round_color()).bg(Color::Black))
             .percent(safe_percentage)
             .label(progress_label);
-        
+
         frame.render_widget(gauge, area);
     }
-    
+
     fn render_participants(&self, frame: &mut Frame, area: Rect) {
         let block = Block::default()
             .title(" Participants ")
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::DarkGray));
-        
-        let items: Vec<ListItem> = self.participants
+
+        let items: Vec<ListItem> = self
+            .participants
             .iter()
             .map(|p| {
                 let status_symbol = Self::get_status_symbol(&p.status);
                 let status_color = Self::get_status_color(&p.status);
                 // Show detailed connection status
                 let connection_symbol = if p.data_channel_open {
-                    "🟢"  // Green circle for data channel open
+                    "🟢" // Green circle for data channel open
                 } else if p.webrtc_connected {
-                    "🟡"  // Yellow circle for WebRTC connected
+                    "🟡" // Yellow circle for WebRTC connected
                 } else {
-                    "🔴"  // Red circle for disconnected
+                    "🔴" // Red circle for disconnected
                 };
-                
+
                 let content = Line::from(vec![
                     Span::raw(format!("  {} ", connection_symbol)),
                     Span::styled(&p.device_id, Style::default().fg(Color::White)),
@@ -599,14 +667,14 @@ impl DKGProgressComponent {
                             ParticipantStatus::Completed => "Completed".to_string(),
                             ParticipantStatus::Failed(e) => format!("Failed: {}", e),
                         },
-                        Style::default().fg(status_color)
+                        Style::default().fg(status_color),
                     ),
                 ]);
-                
+
                 ListItem::new(content)
             })
             .collect();
-        
+
         // Add placeholder slots for missing participants (excluding self).
         // Uses the ceremony-aware count so a 2-of-3 sign run only shows
         // ONE waiting slot, not two — signing genuinely doesn't need
@@ -619,37 +687,36 @@ impl DKGProgressComponent {
                 Span::raw("  ⏳ "),
                 Span::styled(
                     format!("Waiting for participant {}...", i + 1),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 ),
             ])));
         }
-        
+
         let list = List::new(all_items)
             .block(block)
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
-        
+
         frame.render_widget(list, area);
     }
-    
+
     fn render_actions(&self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(2),
-                Constraint::Length(3),
-            ])
+            .constraints([Constraint::Length(2), Constraint::Length(3)])
             .split(area);
-        
+
         // Error message or status
         if let Some(ref error) = self.error_message {
-            let error_text = vec![
-                Line::from(vec![
-                    Span::styled("⚠️ Error: ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-                    Span::styled(error, Style::default().fg(Color::Red)),
-                ]),
-            ];
-            let error_para = Paragraph::new(error_text)
-                .alignment(Alignment::Center);
+            let error_text = vec![Line::from(vec![
+                Span::styled(
+                    "⚠️ Error: ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(error, Style::default().fg(Color::Red)),
+            ])];
+            let error_para = Paragraph::new(error_text).alignment(Alignment::Center);
             frame.render_widget(error_para, chunks[0]);
         } else {
             // Check WebSocket connection first
@@ -665,22 +732,35 @@ impl DKGProgressComponent {
                         } else {
                             "📡 Establishing WebRTC connections...".to_string()
                         }
-                    },
+                    }
                     DKGRound::WaitingForParticipants => {
                         let expected_other_participants = self.expected_other_participants();
                         if self.mesh_ready_count == expected_other_participants {
                             match self.ceremony {
-                                Ceremony::Dkg => "🟢 Mesh fully connected! Starting DKG...".to_string(),
-                                Ceremony::Signing { .. } => "🟢 Mesh ready! Starting signing ceremony...".to_string(),
+                                Ceremony::Dkg => {
+                                    "🟢 Mesh fully connected! Starting DKG...".to_string()
+                                }
+                                Ceremony::Signing { .. } => {
+                                    "🟢 Mesh ready! Starting signing ceremony...".to_string()
+                                }
                             }
                         } else {
-                            format!("⏳ Mesh formation: {}/{} ready", self.mesh_ready_count, expected_other_participants)
+                            format!(
+                                "⏳ Mesh formation: {}/{} ready",
+                                self.mesh_ready_count, expected_other_participants
+                            )
                         }
-                    },
-                    DKGRound::Round1 => "🔄 Round 1: Generating and broadcasting commitments...".to_string(),
-                    DKGRound::Round2 => "🔄 Round 2: Generating and distributing shares...".to_string(),
+                    }
+                    DKGRound::Round1 => {
+                        "🔄 Round 1: Generating and broadcasting commitments...".to_string()
+                    }
+                    DKGRound::Round2 => {
+                        "🔄 Round 2: Generating and distributing shares...".to_string()
+                    }
                     DKGRound::Finalization => "🔄 Finalizing key generation...".to_string(),
-                    DKGRound::Complete => "🎉 DKG complete! Wallet created — press Esc to return.".to_string(),
+                    DKGRound::Complete => {
+                        "🎉 DKG complete! Wallet created — press Esc to return.".to_string()
+                    }
                 }
             };
 
@@ -695,20 +775,20 @@ impl DKGProgressComponent {
                 .alignment(Alignment::Center);
             frame.render_widget(status_para, chunks[0]);
         }
-        
+
         // Action buttons
         let cancel_style = if self.selected_action == 0 {
             Style::default().fg(Color::Black).bg(Color::Red)
         } else {
             Style::default().fg(Color::Red)
         };
-        
+
         let copy_style = if self.selected_action == 1 {
             Style::default().fg(Color::Black).bg(Color::Green)
         } else {
             Style::default().fg(Color::Green)
         };
-        
+
         let actions_text = vec![
             Line::from(vec![
                 Span::raw("  "),
@@ -726,13 +806,13 @@ impl DKGProgressComponent {
                 Span::raw(" Back"),
             ]),
         ];
-        
+
         let actions_para = Paragraph::new(actions_text)
             .alignment(Alignment::Center)
             .block(
                 Block::default()
                     .borders(Borders::TOP)
-                    .border_style(Style::default().fg(Color::DarkGray))
+                    .border_style(Style::default().fg(Color::DarkGray)),
             );
         frame.render_widget(actions_para, chunks[1]);
     }
@@ -741,7 +821,7 @@ impl DKGProgressComponent {
 impl AppComponent<Message, UserEvent> for DKGProgressComponent {
     fn on(&mut self, event: &Event<UserEvent>) -> Option<Message> {
         tracing::debug!("🎮 DKGProgress received event: {:?}", event);
-        
+
         match event {
             // Intentionally do NOT consume Left/Right here — return `None` so
             // the key bubbles up to the global keymap, which dispatches
@@ -751,11 +831,14 @@ impl AppComponent<Message, UserEvent> for DKGProgressComponent {
             // and mutate only our local `self.selected_action`, the very next
             // `ForceRemount` resets it to whatever's in the model (0), which
             // is exactly the "right arrow doesn't work" bug.
-            Event::Keyboard(KeyEvent { code: Key::Left, .. })
-            | Event::Keyboard(KeyEvent { code: Key::Right, .. }) => None,
             Event::Keyboard(KeyEvent {
-                code: Key::Enter,
-                ..
+                code: Key::Left, ..
+            })
+            | Event::Keyboard(KeyEvent {
+                code: Key::Right, ..
+            }) => None,
+            Event::Keyboard(KeyEvent {
+                code: Key::Enter, ..
             }) => {
                 if self.selected_action == 0 {
                     // Cancel DKG
@@ -768,12 +851,7 @@ impl AppComponent<Message, UserEvent> for DKGProgressComponent {
                     })
                 }
             }
-            Event::Keyboard(KeyEvent {
-                code: Key::Esc,
-                ..
-            }) => {
-                Some(Message::NavigateBack)
-            }
+            Event::Keyboard(KeyEvent { code: Key::Esc, .. }) => Some(Message::NavigateBack),
             Event::User(UserEvent::FocusGained) => {
                 self.focused = true;
                 None

@@ -1,7 +1,7 @@
 //! Type definitions for offline mode data structures
 
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Version of the offline data format
@@ -12,20 +12,20 @@ pub const OFFLINE_DATA_VERSION: &str = "1.0";
 pub struct OfflineData {
     /// Format version
     pub version: String,
-    
+
     /// Type of data
     #[serde(rename = "type")]
     pub data_type: OfflineDataType,
-    
+
     /// Unique session identifier
     pub session_id: String,
-    
+
     /// When this data was created
     pub created_at: DateTime<Utc>,
-    
+
     /// When this data expires and should not be used
     pub expires_at: DateTime<Utc>,
-    
+
     /// The actual data payload
     pub data: serde_json::Value,
 }
@@ -36,16 +36,16 @@ pub struct OfflineData {
 pub enum OfflineDataType {
     /// Initial signing request from coordinator
     SigningRequest,
-    
+
     /// Nonce commitments from a signer
     Commitments,
-    
+
     /// Aggregated commitments package from coordinator
     SigningPackage,
-    
+
     /// Signature share from a signer
     SignatureShare,
-    
+
     /// Final aggregated signature
     AggregatedSignature,
 }
@@ -55,19 +55,19 @@ pub enum OfflineDataType {
 pub struct SigningRequest {
     /// Wallet identifier
     pub wallet_id: String,
-    
+
     /// Transaction to be signed
     pub transaction: TransactionData,
-    
+
     /// Human-readable description
     pub message: String,
-    
+
     /// Required signing devices
     pub required_signers: Vec<String>,
-    
+
     /// Minimum number of signers needed
     pub threshold: u16,
-    
+
     /// Optional metadata
     pub metadata: Option<serde_json::Value>,
 }
@@ -78,13 +78,13 @@ pub struct TransactionData {
     /// Blockchain type
     #[serde(rename = "type")]
     pub chain_type: String, // "ethereum" or "solana"
-    
+
     /// Encoded transaction payload
     pub payload: String, // Base64 encoded
-    
+
     /// Transaction hash
     pub hash: String, // Hex encoded
-    
+
     /// Chain-specific data
     pub chain_data: Option<serde_json::Value>,
 }
@@ -94,16 +94,16 @@ pub struct TransactionData {
 pub struct CommitmentsData {
     /// Original session ID this is responding to
     pub session_id: String,
-    
+
     /// Device that generated these commitments
     pub device_id: String,
-    
+
     /// FROST identifier (hex)
     pub identifier: String,
-    
+
     /// Hiding nonce commitment (hex)
     pub hiding_nonce_commitment: String,
-    
+
     /// Binding nonce commitment (hex)
     pub binding_nonce_commitment: String,
 }
@@ -113,10 +113,10 @@ pub struct CommitmentsData {
 pub struct SigningPackage {
     /// Session identifier
     pub session_id: String,
-    
+
     /// Message to sign (hex encoded)
     pub message: String,
-    
+
     /// Commitments from all participants
     pub commitments: HashMap<String, ParticipantCommitments>,
 }
@@ -126,10 +126,10 @@ pub struct SigningPackage {
 pub struct ParticipantCommitments {
     /// FROST identifier (hex)
     pub identifier: String,
-    
+
     /// Hiding commitment (hex)
     pub hiding: String,
-    
+
     /// Binding commitment (hex)
     pub binding: String,
 }
@@ -139,13 +139,13 @@ pub struct ParticipantCommitments {
 pub struct SignatureShareData {
     /// Session identifier
     pub session_id: String,
-    
+
     /// Device that generated this share
     pub device_id: String,
-    
+
     /// FROST identifier (hex)
     pub identifier: String,
-    
+
     /// The signature share (hex)
     pub signature_share: String,
 }
@@ -155,13 +155,13 @@ pub struct SignatureShareData {
 pub struct AggregatedSignature {
     /// Session identifier
     pub session_id: String,
-    
+
     /// The complete signature
     pub signature: SignatureData,
-    
+
     /// Devices that contributed
     pub signers: Vec<String>,
-    
+
     /// Original transaction data
     pub transaction: TransactionData,
 }
@@ -171,7 +171,7 @@ pub struct AggregatedSignature {
 pub struct SignatureData {
     /// Signature algorithm
     pub algorithm: String, // "ecdsa" or "eddsa"
-    
+
     /// The signature value
     pub value: SignatureValue,
 }
@@ -182,7 +182,7 @@ pub struct SignatureData {
 pub enum SignatureValue {
     /// ECDSA signature (r, s)
     Ecdsa { r: String, s: String },
-    
+
     /// EdDSA signature
     Eddsa { signature: String },
 }
@@ -197,10 +197,10 @@ impl OfflineData {
     ) -> Result<Self, super::OfflineError> {
         let now = Utc::now();
         let expires_at = now + chrono::Duration::minutes(expiration_minutes as i64);
-        
+
         let data_value = serde_json::to_value(data)
             .map_err(|e| super::OfflineError::SerializationError(e.to_string()))?;
-        
+
         Ok(Self {
             version: OFFLINE_DATA_VERSION.to_string(),
             data_type,
@@ -210,12 +210,12 @@ impl OfflineData {
             data: data_value,
         })
     }
-    
+
     /// Check if this data has expired
     pub fn is_expired(&self) -> bool {
         Utc::now() > self.expires_at
     }
-    
+
     /// Validate the data
     pub fn validate(&self) -> Result<(), super::OfflineError> {
         // Check version
@@ -225,15 +225,15 @@ impl OfflineData {
                 self.version, OFFLINE_DATA_VERSION
             )));
         }
-        
+
         // Check expiration
         if self.is_expired() {
             return Err(super::OfflineError::SessionExpired(self.expires_at));
         }
-        
+
         Ok(())
     }
-    
+
     /// Extract typed data
     pub fn extract<T: for<'de> Deserialize<'de>>(&self) -> Result<T, super::OfflineError> {
         serde_json::from_value(self.data.clone())

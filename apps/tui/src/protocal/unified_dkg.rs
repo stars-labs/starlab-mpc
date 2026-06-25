@@ -25,8 +25,8 @@ use frost_core::Ciphersuite;
 use starlab_core::unified_dkg::{UnifiedDkg, UnifiedRound2Packages};
 // Re-export the core round-1 package so callers (command layer, dispatch) can
 // name it through this driver module — single import surface for the unified path.
-pub use starlab_core::unified_dkg::UnifiedRound1Package;
 use serde::{Deserialize, Serialize};
+pub use starlab_core::unified_dkg::UnifiedRound1Package;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -108,8 +108,7 @@ where
         Ok(pkg) => pkg,
         Err(e) => {
             error!("unified DKG: generate_round1 failed: {}", e);
-            guard.dkg_state =
-                crate::utils::state::DkgState::Failed(format!("unified round1: {e}"));
+            guard.dkg_state = crate::utils::state::DkgState::Failed(format!("unified round1: {e}"));
             return None;
         }
     };
@@ -155,7 +154,10 @@ where
         }
     };
     if let Err(e) = dkg.add_round1_package(from_index, &package) {
-        error!("unified DKG: add_round1_package({}) failed: {}", from_index, e);
+        error!(
+            "unified DKG: add_round1_package({}) failed: {}",
+            from_index, e
+        );
         return false;
     }
     let ready = dkg.can_start_round2();
@@ -190,8 +192,7 @@ where
         }
         Err(e) => {
             error!("unified DKG: generate_round2 failed: {}", e);
-            guard.dkg_state =
-                crate::utils::state::DkgState::Failed(format!("unified round2: {e}"));
+            guard.dkg_state = crate::utils::state::DkgState::Failed(format!("unified round2: {e}"));
             None
         }
     }
@@ -199,10 +200,7 @@ where
 
 /// Fold in a peer's round-2 message (we pick out the entry addressed to us).
 /// Returns `true` when DKG can be finalized.
-pub async fn ingest_round2<C>(
-    state: Arc<Mutex<AppState<C>>>,
-    msg: UnifiedRound2Message,
-) -> bool
+pub async fn ingest_round2<C>(state: Arc<Mutex<AppState<C>>>, msg: UnifiedRound2Message) -> bool
 where
     C: Ciphersuite + Send + Sync + 'static,
 {
@@ -299,8 +297,7 @@ where
     let dkg = guard.unified_dkg.as_mut()?;
     if let Err(e) = dkg.finalize_dkg() {
         error!("unified DKG: finalize_dkg failed: {}", e);
-        guard.dkg_state =
-            crate::utils::state::DkgState::Failed(format!("unified finalize: {e}"));
+        guard.dkg_state = crate::utils::state::DkgState::Failed(format!("unified finalize: {e}"));
         return None;
     }
 
@@ -386,7 +383,10 @@ where
         error!("unified DKG: persist both curves failed: {}", e);
         return None;
     }
-    info!("unified DKG: persisted ed25519 + secp256k1 shares for wallet {}", wallet_id);
+    info!(
+        "unified DKG: persisted ed25519 + secp256k1 shares for wallet {}",
+        wallet_id
+    );
     drop(password);
 
     // Re-hydrate the shared read-only keystore so the next LoadWallets sees both.

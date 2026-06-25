@@ -202,7 +202,10 @@ mod tests {
     #[tokio::test]
     async fn completes_with_the_aggregated_signature() {
         let (backend, _h) = fake_runner(|msg| {
-            if let Message::HeadlessSign { wallet_id, message, .. } = msg {
+            if let Message::HeadlessSign {
+                wallet_id, message, ..
+            } = msg
+            {
                 assert_eq!(wallet_id, "w1");
                 assert_eq!(message, "deadbeef");
                 Some(Message::SigningComplete {

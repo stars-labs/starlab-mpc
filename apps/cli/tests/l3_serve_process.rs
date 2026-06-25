@@ -17,11 +17,11 @@
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::time::{timeout, Instant};
+use tokio::time::{Instant, timeout};
 
 /// A running `serve` child with line-buffered JSONL I/O.
 struct ServeProc {
@@ -47,7 +47,10 @@ impl ServeProc {
             .args(["--keystore", keystore])
             .args(["--signal-server", ws_url])
             .args(extra)
-            .args(["--log-level", std::env::var("L3_LOG").as_deref().unwrap_or("warn")])
+            .args([
+                "--log-level",
+                std::env::var("L3_LOG").as_deref().unwrap_or("warn"),
+            ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(if std::env::var("L3_LOG").is_ok() {
@@ -147,7 +150,11 @@ impl ServeProc {
 
 /// Spawn a serve process, consume its `ready`, connect it, and wait until the
 /// signal-server connection is up.
-async fn spawn_connected(device_id: &str, keystore: &str, ws_url: &str) -> anyhow::Result<ServeProc> {
+async fn spawn_connected(
+    device_id: &str,
+    keystore: &str,
+    ws_url: &str,
+) -> anyhow::Result<ServeProc> {
     let mut p = ServeProc::spawn(device_id, keystore, ws_url).await?;
     p.wait_for("ready", 10).await?;
     p.send(json!({"cmd": "connect"})).await?;
@@ -159,13 +166,18 @@ async fn spawn_connected(device_id: &str, keystore: &str, ws_url: &str) -> anyho
 /// Returns the creator's reported (wallet_id, group_public_key). Also asserts
 /// the creator's `session_announced` id matches the joiner's discovered id.
 async fn dkg_2of2(a: &mut ServeProc, b: &mut ServeProc) -> anyhow::Result<(String, String)> {
-    a.send(json!({"id": 1, "cmd": "create_wallet", "threshold": 2, "total": 2, "password": "pw-a"}))
-        .await?;
+    a.send(
+        json!({"id": 1, "cmd": "create_wallet", "threshold": 2, "total": 2, "password": "pw-a"}),
+    )
+    .await?;
     let announced = a.wait_for("session_announced", 20).await?;
     let id_a = announced["session_id"].as_str().unwrap().to_string();
     let avail = b.wait_for("session_available", 20).await?;
     let id_b = avail["session"]["session_id"].as_str().unwrap().to_string();
-    anyhow::ensure!(id_a == id_b, "creator/peer disagree on session id: {id_a} != {id_b}");
+    anyhow::ensure!(
+        id_a == id_b,
+        "creator/peer disagree on session id: {id_a} != {id_b}"
+    );
     b.send(json!({"id": 2, "cmd": "join_session", "session_id": id_b, "password": "pw-b"}))
         .await?;
     let done_a = a.wait_for("dkg_complete", 90).await?;
@@ -188,7 +200,10 @@ fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
     ) else {
         return false;
     };
-    match (VerifyingKey::deserialize(&vkb), Signature::deserialize(&sigb)) {
+    match (
+        VerifyingKey::deserialize(&vkb),
+        Signature::deserialize(&sigb),
+    ) {
         (Ok(vk), Ok(sig)) => vk.verify(&msg, &sig).is_ok(),
         _ => false,
     }
@@ -271,9 +286,16 @@ async fn auto_approve_co_signer_signs_without_manual_approval() {
     .unwrap();
 
     // a receives the aggregated signature purely via b's auto-contribution.
-    let sc = a.wait_for("signature_complete", 90).await.expect("signature_complete");
+    let sc = a
+        .wait_for("signature_complete", 90)
+        .await
+        .expect("signature_complete");
     assert!(
-        verify_secp256k1(&group_key, sc["message_hash"].as_str().unwrap(), sc["signature"].as_str().unwrap()),
+        verify_secp256k1(
+            &group_key,
+            sc["message_hash"].as_str().unwrap(),
+            sc["signature"].as_str().unwrap()
+        ),
         "auto-approved signature failed to verify"
     );
     eprintln!("✅ SIG-8: co-signer auto-approved; signature verified");
@@ -293,9 +315,13 @@ async fn password_never_appears_in_events() {
     let ks = tempfile::TempDir::new().unwrap();
     // No real signal server; create_wallet still carries the password and the
     // daemon acks/announces, which is enough to catch any echo.
-    let mut p = ServeProc::spawn("sec5-node", &ks.path().to_string_lossy(), "ws://127.0.0.1:1")
-        .await
-        .expect("spawn");
+    let mut p = ServeProc::spawn(
+        "sec5-node",
+        &ks.path().to_string_lossy(),
+        "ws://127.0.0.1:1",
+    )
+    .await
+    .expect("spawn");
     p.wait_for("ready", 10).await.expect("ready");
 
     p.send(json!({
@@ -316,7 +342,10 @@ async fn password_never_appears_in_events() {
             "password leaked into an emitted event: {line}"
         );
     }
-    eprintln!("✅ SEC-5: scanned {} event lines, no password leak", lines.len());
+    eprintln!(
+        "✅ SEC-5: scanned {} event lines, no password leak",
+        lines.len()
+    );
     p.quit().await;
 }
 
@@ -328,9 +357,13 @@ async fn password_never_appears_in_events() {
 async fn malformed_jsonl_is_rejected_and_loop_survives() {
     // No signal server needed — this never connects.
     let ks = tempfile::TempDir::new().unwrap();
-    let mut p = ServeProc::spawn("err7-node", &ks.path().to_string_lossy(), "ws://127.0.0.1:1")
-        .await
-        .expect("spawn");
+    let mut p = ServeProc::spawn(
+        "err7-node",
+        &ks.path().to_string_lossy(),
+        "ws://127.0.0.1:1",
+    )
+    .await
+    .expect("spawn");
     p.wait_for("ready", 10).await.expect("ready");
 
     // Garbage in → a bad_request error out, no crash.
@@ -340,7 +373,10 @@ async fn malformed_jsonl_is_rejected_and_loop_survives() {
 
     // The loop must still be alive: a valid command still gets answered.
     p.send(json!({"cmd": "status"})).await.unwrap();
-    let status = p.wait_for("status", 10).await.expect("status after bad input");
+    let status = p
+        .wait_for("status", 10)
+        .await
+        .expect("status after bad input");
     assert_eq!(status["device_id"], "err7-node");
 
     eprintln!("✅ ERR-7: bad_request emitted, loop survived");
@@ -387,8 +423,12 @@ async fn sign_after_process_restart_verifies() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // --- Phase 2: fresh processes on the SAME keystores, then sign. ---
-    let mut a = spawn_connected("restart-a", &pa, &ws_url).await.expect("a restart");
-    let mut b = spawn_connected("restart-b", &pb, &ws_url).await.expect("b restart");
+    let mut a = spawn_connected("restart-a", &pa, &ws_url)
+        .await
+        .expect("a restart");
+    let mut b = spawn_connected("restart-b", &pb, &ws_url)
+        .await
+        .expect("b restart");
 
     // a initiates the signing (unlocks the persisted share, announces).
     a.send(json!({
@@ -399,14 +439,20 @@ async fn sign_after_process_restart_verifies() {
     .unwrap();
 
     // b discovers the signing request and approves by joining.
-    let req = b.wait_for("signing_request", 30).await.expect("b signing_request");
+    let req = b
+        .wait_for("signing_request", 30)
+        .await
+        .expect("b signing_request");
     let sid = req["session_id"].as_str().unwrap().to_string();
     b.send(json!({"id": 11, "cmd": "approve_signing", "session_id": sid, "password": "pw-b"}))
         .await
         .unwrap();
 
     // a receives the aggregated signature; it must verify against the group key.
-    let sc = a.wait_for("signature_complete", 90).await.expect("a signature_complete");
+    let sc = a
+        .wait_for("signature_complete", 90)
+        .await
+        .expect("a signature_complete");
     let sig = sc["signature"].as_str().unwrap();
     let msg = sc["message_hash"].as_str().unwrap();
     assert!(
@@ -456,8 +502,12 @@ async fn reshare_then_sign_across_serve_processes() {
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     // --- Phase 2: fresh processes on the SAME keystores, then reshare. ---
-    let mut a = spawn_connected("reshare-a", &pa, &ws_url).await.expect("a restart");
-    let mut b = spawn_connected("reshare-b", &pb, &ws_url).await.expect("b restart");
+    let mut a = spawn_connected("reshare-a", &pa, &ws_url)
+        .await
+        .expect("a restart");
+    let mut b = spawn_connected("reshare-b", &pb, &ws_url)
+        .await
+        .expect("b restart");
 
     // a initiates the reshare (loads its OLD share, announces a reshare session).
     a.send(json!({"id": 20, "cmd": "reshare", "wallet_id": wallet_id, "password": "pw-a"}))
@@ -466,15 +516,24 @@ async fn reshare_then_sign_across_serve_processes() {
 
     // b discovers the reshare request and approves by joining (contributing a
     // refreshed share). `join_session` is the reshare approval path.
-    let req = b.wait_for("reshare_request", 30).await.expect("b reshare_request");
+    let req = b
+        .wait_for("reshare_request", 30)
+        .await
+        .expect("b reshare_request");
     let sid = req["session_id"].as_str().unwrap().to_string();
     b.send(json!({"id": 21, "cmd": "join_session", "session_id": sid, "password": "pw-b"}))
         .await
         .unwrap();
 
     // Both nodes complete the refresh; the group key (address) must be unchanged.
-    let rc_a = a.wait_for("reshare_complete", 90).await.expect("a reshare_complete");
-    let _rc_b = b.wait_for("reshare_complete", 90).await.expect("b reshare_complete");
+    let rc_a = a
+        .wait_for("reshare_complete", 90)
+        .await
+        .expect("a reshare_complete");
+    let _rc_b = b
+        .wait_for("reshare_complete", 90)
+        .await
+        .expect("b reshare_complete");
     assert_eq!(
         rc_a["group_public_key"].as_str().unwrap(),
         group_key,
@@ -488,12 +547,18 @@ async fn reshare_then_sign_across_serve_processes() {
     }))
     .await
     .unwrap();
-    let req = b.wait_for("signing_request", 30).await.expect("b signing_request");
+    let req = b
+        .wait_for("signing_request", 30)
+        .await
+        .expect("b signing_request");
     let sid = req["session_id"].as_str().unwrap().to_string();
     b.send(json!({"id": 31, "cmd": "approve_signing", "session_id": sid, "password": "pw-b"}))
         .await
         .unwrap();
-    let sc = a.wait_for("signature_complete", 90).await.expect("a signature_complete");
+    let sc = a
+        .wait_for("signature_complete", 90)
+        .await
+        .expect("a signature_complete");
     let sig = sc["signature"].as_str().unwrap();
     let msg = sc["message_hash"].as_str().unwrap();
     assert!(

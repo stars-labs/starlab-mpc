@@ -211,8 +211,8 @@ mod tests {
     fn info_fixture() -> CompletedWalletInfo {
         CompletedWalletInfo {
             wallet_id: "wallet-dkg_abcd".to_string(),
-            group_pubkey_hex:
-                "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+            group_pubkey_hex: "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143"
+                .to_string(),
             curve_type: "secp256k1".to_string(),
             addresses: vec![
                 ("ethereum".to_string(), "0x1234abcd".to_string()),
@@ -229,7 +229,10 @@ mod tests {
         };
         let mut c = WalletCompleteComponent::new();
         c.set_from_model(&ws);
-        assert_eq!(c.info.as_ref().map(|i| i.wallet_id.as_str()), Some("wallet-dkg_abcd"));
+        assert_eq!(
+            c.info.as_ref().map(|i| i.wallet_id.as_str()),
+            Some("wallet-dkg_abcd")
+        );
     }
 
     #[test]

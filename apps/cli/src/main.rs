@@ -358,10 +358,20 @@ async fn run() -> anyhow::Result<()> {
             WalletCmd::List { common } => {
                 finish(oneshot::wallet_list(common.init_and_opts()).await)
             }
-            WalletCmd::Accounts { wallet_id, count, common } => {
-                finish(oneshot::wallet_accounts(common.init_and_opts(), wallet_id, count).await)
-            }
-            WalletCmd::Derive { wallet_id, account, chain, path, save, pw, common } => {
+            WalletCmd::Accounts {
+                wallet_id,
+                count,
+                common,
+            } => finish(oneshot::wallet_accounts(common.init_and_opts(), wallet_id, count).await),
+            WalletCmd::Derive {
+                wallet_id,
+                account,
+                chain,
+                path,
+                save,
+                pw,
+                common,
+            } => {
                 let password = pw.resolve()?;
                 let (resolved_path, child_suffix) = match (path, account) {
                     (Some(p), _) => (p, None),
@@ -498,7 +508,9 @@ async fn run() -> anyhow::Result<()> {
 /// A "strong" room the hosted multi-tenant server will accept: ≥16 chars of
 /// `[A-Za-z0-9_-]` (mirrors the server's `MIN_ROOM_LEN` / `isValidRoom`).
 fn is_strong_room(r: &str) -> bool {
-    r.chars().count() >= 16 && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    r.chars().count() >= 16
+        && r.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Merge a tenant `room` into a signal-server URL as a `room` query param.
@@ -542,7 +554,10 @@ mod tests {
         assert_eq!(with_room("wss://h/", Some("r")), "wss://h/?room=r");
         assert_eq!(with_room("wss://h/p", Some("r")), "wss://h/p?room=r");
         assert_eq!(with_room("wss://h/?x=1", Some("r")), "wss://h/?x=1&room=r");
-        assert_eq!(with_room("wss://h/?room=keep", Some("r")), "wss://h/?room=keep");
+        assert_eq!(
+            with_room("wss://h/?room=keep", Some("r")),
+            "wss://h/?room=keep"
+        );
         assert_eq!(with_room("wss://h", None), "wss://h");
         assert_eq!(with_room("wss://h", Some("")), "wss://h");
     }

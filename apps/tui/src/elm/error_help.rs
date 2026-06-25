@@ -16,7 +16,11 @@ pub fn dkg(error: &str) -> String {
     let hint = if e.contains("timeout") || e.contains("timed out") || e.contains("waiting") {
         "\n→ DKG needs ALL participants online together. Check every device used the SAME \
          signal server + room, a UNIQUE device id each, and that the network is up."
-    } else if e.contains("connect") || e.contains("websocket") || e.contains("signal") || e.contains("offline") {
+    } else if e.contains("connect")
+        || e.contains("websocket")
+        || e.contains("signal")
+        || e.contains("offline")
+    {
         "\n→ Couldn't reach the signal server. Check your network / the signal-server URL, or \
          use a LAN server (ws://<host-ip>:9000)."
     } else if e.contains("room") {

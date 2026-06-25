@@ -107,7 +107,10 @@ pub enum WebSocketMessage {
     /// Session offer (compatibility with message validator)
     SessionOffer(SessionInfo),
     /// Session accepted (compatibility with message validator)
-    SessionAccepted { device_id: String, session_id: String },
+    SessionAccepted {
+        device_id: String,
+        session_id: String,
+    },
     WebRTCSignal(WebRTCSignal),
 }
 
@@ -154,10 +157,10 @@ pub struct SessionAnnouncement {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionResponse {
     pub session_id: String,
-    pub from_device_id: String,  // Added to identify sender
+    pub from_device_id: String, // Added to identify sender
     pub accepted: bool,
     pub wallet_status: Option<WalletStatus>,
-    pub reason: Option<String>,   // Added for rejoin reason
+    pub reason: Option<String>, // Added for rejoin reason
 }
 
 /// Session update information - broadcast when participants join/leave
@@ -166,14 +169,14 @@ pub struct SessionUpdate {
     pub session_id: String,
     pub participants: Vec<String>,
     pub update_type: SessionUpdateType,
-    pub timestamp: u64,  // Added for ordering updates
+    pub timestamp: u64, // Added for ordering updates
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SessionUpdateType {
     ParticipantJoined,
     ParticipantLeft,
-    ParticipantRejoined,  // Added for rejoin scenario
+    ParticipantRejoined, // Added for rejoin scenario
     FullSync,
 }
 
@@ -249,8 +252,8 @@ pub enum WebRTCMessage<C: Ciphersuite> {
         signing_id: String,
         transaction_data: String, // Hex-encoded transaction data
         required_signers: usize,
-        blockchain: String,       // Blockchain identifier
-        chain_id: Option<u64>,    // Chain ID for EVM chains
+        blockchain: String,    // Blockchain identifier
+        chain_id: Option<u64>, // Chain ID for EVM chains
     },
 
     /// Acceptance of a signing request

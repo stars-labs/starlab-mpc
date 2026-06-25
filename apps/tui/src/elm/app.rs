@@ -3,44 +3,46 @@
 //! This is the main application that brings together the Model, Update, View, and Commands
 //! to create a fully functional TUI application following the Elm Architecture pattern.
 
-use crate::elm::model::{Model, Screen};
+use crate::elm::components::{
+    Id, MainMenu, ModalComponent, NotificationBar, WalletDetail, WalletList,
+};
 use crate::elm::message::Message;
+use crate::elm::model::{Model, Screen};
 use crate::elm::update::update;
-use crate::elm::components::{Id, MainMenu, WalletList, WalletDetail, ModalComponent, NotificationBar};
 use crate::utils::appstate_compat::AppState;
 
 use tuirealm::application::Application;
 use tuirealm::listener::EventListenerCfg;
 // `TerminalBridge` was removed in tuirealm 4.0; use the adapter directly —
 // its `TerminalAdapter` impl exposes raw-mode / alt-screen / draw methods.
-use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter};
-use ratatui::layout::{Constraint, Direction, Layout};
 use crossterm::event::Event as CrosstermEvent;
-use tokio::sync::mpsc::{UnboundedSender, UnboundedReceiver};
+use ratatui::layout::{Constraint, Direction, Layout};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{info, debug, error};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tracing::{debug, error, info};
+use tuirealm::terminal::{CrosstermTerminalAdapter, TerminalAdapter};
 
 /// The main Elm application
 pub struct ElmApp<C: frost_core::Ciphersuite> {
     /// The application model (state)
     model: Model,
-    
+
     /// The tui-realm application
     app: Application<Id, Message, crate::elm::components::UserEvent>,
-    
+
     /// Terminal adapter for rendering (tuirealm 4.0 removed TerminalBridge)
     terminal: CrosstermTerminalAdapter,
-    
+
     /// Channel for sending messages
     message_tx: UnboundedSender<Message>,
-    
+
     /// Channel for receiving messages
     message_rx: UnboundedReceiver<Message>,
-    
+
     /// Reference to the shared app state (for compatibility with existing code)
     app_state: Arc<Mutex<AppState<C>>>,
-    
+
     /// Whether the app should quit
     should_quit: bool,
 }
@@ -1235,8 +1237,8 @@ where
     }
 }
 
-use std::time::Duration;
 use ratatui::layout::Rect;
+use std::time::Duration;
 
 /// Helper function to create a centered rectangle
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -1248,7 +1250,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
             Constraint::Percentage((100 - percent_y) / 2),
         ])
         .split(area);
-    
+
     Layout::default()
         .direction(Direction::Horizontal)
         .constraints([

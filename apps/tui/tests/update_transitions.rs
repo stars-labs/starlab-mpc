@@ -264,7 +264,11 @@ fn joiner_on_password_prompt() -> starlab_client::elm::Model {
         proposer_id: "mpc-1".to_string(),
         total: 3,
         threshold: 2,
-        participants: vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+        participants: vec![
+            "mpc-1".to_string(),
+            "mpc-2".to_string(),
+            "mpc-3".to_string(),
+        ],
         session_type: SessionType::DKG,
         curve_type: "secp256k1".to_string(),
         coordination_type: "online".to_string(),
@@ -600,8 +604,8 @@ fn finalized_fixture_model() -> starlab_client::elm::Model {
 fn sample_dkg_finalized_msg() -> Message {
     Message::DKGFinalized {
         wallet_id: "finalized-test".to_string(),
-        group_pubkey_hex:
-            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        group_pubkey_hex: "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143"
+            .to_string(),
         curve_type: "secp256k1".to_string(),
         addresses: vec![
             ("ethereum".to_string(), "0xabc123".to_string()),
@@ -667,7 +671,10 @@ fn dkg_finalized_back_navigation_lands_on_main_menu() {
     use starlab_client::elm::message::Message;
     let mut model = finalized_fixture_model();
     let _ = update(&mut model, sample_dkg_finalized_msg());
-    assert!(matches!(model.current_screen, Screen::WalletComplete { .. }));
+    assert!(matches!(
+        model.current_screen,
+        Screen::WalletComplete { .. }
+    ));
 
     let _ = update(&mut model, Message::NavigateBack);
     assert!(
@@ -813,7 +820,10 @@ fn sign_submit_dispatches_initiate_signing_and_clears_draft() {
     // Step 1: SignSubmit opens the confirmation modal; no Command
     // dispatched yet, draft intact for the preview.
     let cmd = update(&mut model, Message::SignSubmit);
-    assert!(cmd.is_none(), "SignSubmit no longer dispatches directly — modal first");
+    assert!(
+        cmd.is_none(),
+        "SignSubmit no longer dispatches directly — modal first"
+    );
     assert!(
         matches!(model.ui_state.modal, Some(Modal::Confirm { .. })),
         "SignSubmit must stage a confirm modal; got {:?}",
@@ -970,7 +980,10 @@ fn signing_complete_back_navigation_lands_on_main_menu() {
             signature: vec![0u8; 64],
         },
     );
-    assert!(matches!(model.current_screen, Screen::SignatureComplete { .. }));
+    assert!(matches!(
+        model.current_screen,
+        Screen::SignatureComplete { .. }
+    ));
 
     let _ = update(&mut model, Message::NavigateBack);
     assert!(
@@ -1086,7 +1099,12 @@ fn sign_submit_when_wallet_unlocked_dispatches_initiate_signing_directly() {
     let cmd = update(&mut model, Message::SignSubmit);
     assert!(cmd.is_none(), "modal opens first, no Command yet");
     assert!(
-        model.wallet_state.pending_sign_preview.as_ref().unwrap().warm,
+        model
+            .wallet_state
+            .pending_sign_preview
+            .as_ref()
+            .unwrap()
+            .warm,
         "warm path must be recognised in the preview"
     );
     let cmd = update(&mut model, Message::ConfirmSigningRequest);
@@ -1132,7 +1150,12 @@ fn sign_submit_when_wallet_not_unlocked_routes_to_password_prompt() {
     let cmd = update(&mut model, Message::SignSubmit);
     assert!(cmd.is_none(), "modal gate — no Command yet");
     assert!(
-        !model.wallet_state.pending_sign_preview.as_ref().unwrap().warm,
+        !model
+            .wallet_state
+            .pending_sign_preview
+            .as_ref()
+            .unwrap()
+            .warm,
         "cold path must be flagged so ConfirmSigningRequest routes to password"
     );
     // Cold path: pending_sign_* fields only populate AFTER the user
@@ -1190,7 +1213,11 @@ fn submit_password_for_creator_cold_start_dispatches_unlock_wallet() {
         },
     );
     match cmd {
-        Some(Command::UnlockWallet { wallet_id, keystore_path, .. }) => {
+        Some(Command::UnlockWallet {
+            wallet_id,
+            keystore_path,
+            ..
+        }) => {
             assert_eq!(wallet_id, "w-cold");
             assert_eq!(keystore_path, "/tmp/k");
         }
@@ -1446,7 +1473,10 @@ fn full_chain_failed_sign_then_fresh_dkg_does_not_misroute() {
         "after WalletUnlockFailed, pending_sign_message must be gone"
     );
     assert!(
-        matches!(model.ui_state.modal, Some(starlab_client::elm::model::Modal::Error { .. })),
+        matches!(
+            model.ui_state.modal,
+            Some(starlab_client::elm::model::Modal::Error { .. })
+        ),
         "error modal must surface so the user acknowledges"
     );
 
@@ -1612,7 +1642,11 @@ fn submit_password_on_signing_session_dispatches_unlock_and_stashes_payload() {
     );
 
     match cmd {
-        Some(Command::UnlockWallet { wallet_id, keystore_path, .. }) => {
+        Some(Command::UnlockWallet {
+            wallet_id,
+            keystore_path,
+            ..
+        }) => {
             assert_eq!(wallet_id, "wallet-dkg_abcd");
             assert_eq!(keystore_path, "/tmp/k");
         }
@@ -1657,7 +1691,10 @@ fn wallet_unlocked_with_pending_sign_dispatches_join_signing() {
     );
 
     match cmd {
-        Some(Command::JoinSigning { session_id, message_bytes }) => {
+        Some(Command::JoinSigning {
+            session_id,
+            message_bytes,
+        }) => {
             assert_eq!(session_id, "sign_xyz");
             assert_eq!(message_bytes, b"hello");
         }
@@ -1778,7 +1815,11 @@ fn fixture_ready_to_finalize() -> starlab_client::elm::Model {
         proposer_id: "mpc-1".to_string(),
         total: 3,
         threshold: 2,
-        participants: vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+        participants: vec![
+            "mpc-1".to_string(),
+            "mpc-2".to_string(),
+            "mpc-3".to_string(),
+        ],
         session_type: SessionType::DKG,
         curve_type: "secp256k1".to_string(),
         coordination_type: "online".to_string(),
@@ -1789,8 +1830,8 @@ fn fixture_ready_to_finalize() -> starlab_client::elm::Model {
 
 fn sample_dkg_key_generated_msg() -> Message {
     Message::DKGKeyGenerated {
-        group_pubkey_hex:
-            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        group_pubkey_hex: "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143"
+            .to_string(),
     }
 }
 
@@ -1821,7 +1862,10 @@ fn dkg_key_generated_auto_dispatches_finalize_with_correct_fields() {
         .and_then(find_finalize)
         .expect("expected FinalizeWalletFromDkg (bare or inside Batch) in the command");
 
-    assert_eq!(password, "hunter2abc", "password must be passed through to the Command verbatim");
+    assert_eq!(
+        password, "hunter2abc",
+        "password must be passed through to the Command verbatim"
+    );
     assert_eq!(keystore_path, "/tmp/keystore-unittest");
     // Derivation matches protocal::dkg::wallet_id_from_session: the first 12
     // hex digits of the session id ("dkg-abc12345-more" → "dabc12345e"), so
@@ -2019,14 +2063,19 @@ fn scroll_down_on_manage_wallets_advances_wallet_list_selection() {
         ),
     ];
 
-    assert!(!model
-        .ui_state
-        .selected_indices
-        .contains_key(&ComponentId::WalletList));
+    assert!(
+        !model
+            .ui_state
+            .selected_indices
+            .contains_key(&ComponentId::WalletList)
+    );
 
     let _ = update(&mut model, Message::ScrollDown);
     assert_eq!(
-        model.ui_state.selected_indices.get(&ComponentId::WalletList),
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::WalletList),
         Some(&1),
         "ScrollDown should advance WalletList cursor"
     );
@@ -2035,14 +2084,20 @@ fn scroll_down_on_manage_wallets_advances_wallet_list_selection() {
     // is intentional — users expect arrow-down-at-bottom to stop).
     let _ = update(&mut model, Message::ScrollDown);
     assert_eq!(
-        model.ui_state.selected_indices.get(&ComponentId::WalletList),
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::WalletList),
         Some(&1),
         "ScrollDown past end must clamp to last index"
     );
 
     let _ = update(&mut model, Message::ScrollUp);
     assert_eq!(
-        model.ui_state.selected_indices.get(&ComponentId::WalletList),
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::WalletList),
         Some(&0),
         "ScrollUp should move WalletList cursor toward top"
     );
@@ -2050,7 +2105,10 @@ fn scroll_down_on_manage_wallets_advances_wallet_list_selection() {
     // ScrollUp at 0 must not underflow
     let _ = update(&mut model, Message::ScrollUp);
     assert_eq!(
-        model.ui_state.selected_indices.get(&ComponentId::WalletList),
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::WalletList),
         Some(&0),
     );
 }
@@ -2089,7 +2147,10 @@ fn select_item_on_manage_wallets_uses_selected_indices_for_target() {
     // Simulate one ScrollDown (cursor → wallet-second).
     let _ = update(&mut model, Message::ScrollDown);
     assert_eq!(
-        model.ui_state.selected_indices.get(&ComponentId::WalletList),
+        model
+            .ui_state
+            .selected_indices
+            .get(&ComponentId::WalletList),
         Some(&1),
     );
 
@@ -2105,7 +2166,10 @@ fn select_item_on_manage_wallets_uses_selected_indices_for_target() {
                 "Enter on ManageWallets must target the highlighted row, not wallet[0]"
             );
         }
-        other => panic!("expected SignTransaction after Enter on ManageWallets, got {:?}", other),
+        other => panic!(
+            "expected SignTransaction after Enter on ManageWallets, got {:?}",
+            other
+        ),
     }
     assert_eq!(
         model.selected_wallet.as_deref(),
@@ -2122,7 +2186,11 @@ fn select_item_on_manage_wallets_uses_selected_indices_for_target() {
 // to know a request exists, which defeats "2-of-3, any 2 online is
 // enough".
 // -----------------------------------------------------------------
-fn signing_session(session_id: &str, participants: Vec<&str>, proposer: &str) -> starlab_client::protocal::signal::SessionInfo {
+fn signing_session(
+    session_id: &str,
+    participants: Vec<&str>,
+    proposer: &str,
+) -> starlab_client::protocal::signal::SessionInfo {
     use starlab_client::protocal::signal::{SessionInfo, SessionType};
     SessionInfo {
         session_id: session_id.to_string(),
@@ -2142,7 +2210,11 @@ fn signing_session(session_id: &str, participants: Vec<&str>, proposer: &str) ->
     }
 }
 
-fn dkg_session(session_id: &str, participants: Vec<&str>, proposer: &str) -> starlab_client::protocal::signal::SessionInfo {
+fn dkg_session(
+    session_id: &str,
+    participants: Vec<&str>,
+    proposer: &str,
+) -> starlab_client::protocal::signal::SessionInfo {
     use starlab_client::protocal::signal::{SessionInfo, SessionType};
     SessionInfo {
         session_id: session_id.to_string(),
@@ -2198,11 +2270,7 @@ fn session_discovered_signing_ignored_for_self_proposed() {
     // Creator already has SigningProgress pushed; they don't need a
     // self-addressed modal about their own request.
     let mut model = fresh_model();
-    let session = signing_session(
-        "sign-3",
-        vec!["test-device", "alice", "bob"],
-        "test-device",
-    );
+    let session = signing_session("sign-3", vec!["test-device", "alice", "bob"], "test-device");
     let _ = update(&mut model, Message::SessionDiscovered { session });
     assert!(
         model.ui_state.modal.is_none(),
@@ -2254,7 +2322,10 @@ fn review_signing_request_navigates_to_join_session_signing_tab() {
     );
 
     assert_eq!(model.current_screen, Screen::JoinSession);
-    assert_eq!(model.ui_state.join_session_tab, 1, "must land on Signing tab");
+    assert_eq!(
+        model.ui_state.join_session_tab, 1,
+        "must land on Signing tab"
+    );
     assert_eq!(
         model
             .ui_state
@@ -2348,12 +2419,7 @@ fn session_discovered_cancel_chain_purges_invite() {
 
     let mut model = fresh_model();
     let sess = signing_session("sign-chain", vec!["test-device", "alice"], "alice");
-    let _ = update(
-        &mut model,
-        Message::SessionDiscovered {
-            session: sess,
-        },
-    );
+    let _ = update(&mut model, Message::SessionDiscovered { session: sess });
     match &model.ui_state.modal {
         Some(Modal::Confirm { on_cancel, .. }) => {
             // Verify the modal's on_cancel payload carries the session id.
@@ -2570,10 +2636,7 @@ fn cancel_modal_dispatches_on_cancel_message() {
     assert!(model.ui_state.modal.is_none());
     match cmd {
         Some(Command::SendMessage(Message::NavigateHome)) => {}
-        other => panic!(
-            "CancelModal must dispatch on_cancel; got {:?}",
-            other
-        ),
+        other => panic!("CancelModal must dispatch on_cancel; got {:?}", other),
     }
 }
 
@@ -2700,7 +2763,10 @@ fn double_confirm_signing_request_is_a_safe_noop() {
 
     let first = update(&mut model, Message::ConfirmSigningRequest);
     assert!(
-        matches!(first, Some(Command::SendMessage(Message::InitiateSigning { .. }))),
+        matches!(
+            first,
+            Some(Command::SendMessage(Message::InitiateSigning { .. }))
+        ),
         "first confirm must dispatch"
     );
 

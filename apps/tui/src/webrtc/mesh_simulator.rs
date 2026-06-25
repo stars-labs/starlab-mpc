@@ -14,13 +14,13 @@
 //! for the examples under apps/tui/examples/.
 #![allow(clippy::await_holding_lock)]
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
 
-use super::mesh_manager::{WebRTCMeshManager, PeerId};
 use super::connection_monitor::ConnectionMonitor;
+use super::mesh_manager::{PeerId, WebRTCMeshManager};
 use super::rejoin_coordinator::RejoinCoordinator;
 
 /// Network condition for simulation
@@ -33,7 +33,10 @@ pub enum NetworkCondition {
     /// Complete failure
     Failed,
     /// Intermittent connectivity
-    Intermittent { up_time: Duration, down_time: Duration },
+    Intermittent {
+        up_time: Duration,
+        down_time: Duration,
+    },
 }
 
 /// Simulation event
@@ -52,7 +55,11 @@ pub enum SimulationEvent {
     /// Signing starts
     SigningStart,
     /// Message sent
-    MessageSent { from: PeerId, to: PeerId, size: usize },
+    MessageSent {
+        from: PeerId,
+        to: PeerId,
+        size: usize,
+    },
     /// Rejoin attempt
     RejoinAttempt(PeerId),
 }
@@ -105,12 +112,30 @@ impl SimulationScenario {
                 (Duration::from_secs(0), SimulationEvent::PeerJoin(1)),
                 (Duration::from_secs(0), SimulationEvent::PeerJoin(2)),
                 (Duration::from_secs(0), SimulationEvent::PeerJoin(3)),
-                (Duration::from_secs(1), SimulationEvent::NetworkChange(2, 
-                    NetworkCondition::Degraded { latency_ms: 500, packet_loss: 0.1 })),
-                (Duration::from_secs(3), SimulationEvent::NetworkChange(2, 
-                    NetworkCondition::Degraded { latency_ms: 1000, packet_loss: 0.3 })),
-                (Duration::from_secs(5), SimulationEvent::NetworkChange(2, 
-                    NetworkCondition::Perfect)),
+                (
+                    Duration::from_secs(1),
+                    SimulationEvent::NetworkChange(
+                        2,
+                        NetworkCondition::Degraded {
+                            latency_ms: 500,
+                            packet_loss: 0.1,
+                        },
+                    ),
+                ),
+                (
+                    Duration::from_secs(3),
+                    SimulationEvent::NetworkChange(
+                        2,
+                        NetworkCondition::Degraded {
+                            latency_ms: 1000,
+                            packet_loss: 0.3,
+                        },
+                    ),
+                ),
+                (
+                    Duration::from_secs(5),
+                    SimulationEvent::NetworkChange(2, NetworkCondition::Perfect),
+                ),
             ],
         }
     }
@@ -126,12 +151,16 @@ impl SimulationScenario {
                 (Duration::from_secs(0), SimulationEvent::PeerJoin(3)),
                 (Duration::from_secs(1), SimulationEvent::DkgStart),
                 // Partition: (1,2) | (3)
-                (Duration::from_secs(2), SimulationEvent::NetworkChange(3, 
-                    NetworkCondition::Failed)),
+                (
+                    Duration::from_secs(2),
+                    SimulationEvent::NetworkChange(3, NetworkCondition::Failed),
+                ),
                 (Duration::from_secs(4), SimulationEvent::SigningStart),
                 // Heal partition
-                (Duration::from_secs(6), SimulationEvent::NetworkChange(3, 
-                    NetworkCondition::Perfect)),
+                (
+                    Duration::from_secs(6),
+                    SimulationEvent::NetworkChange(3, NetworkCondition::Perfect),
+                ),
             ],
         }
     }
@@ -163,18 +192,15 @@ impl MeshSimulator {
         for peer in &peers {
             let manager = WebRTCMeshManager::new(*peer, peers.len(), threshold);
             managers.insert(*peer, Arc::new(Mutex::new(manager)));
-            
+
             let monitor = ConnectionMonitor::new();
             monitors.insert(*peer, Arc::new(monitor));
-            
+
             network_conditions.insert(*peer, NetworkCondition::Perfect);
         }
 
-        let rejoin_coordinator = RejoinCoordinator::new(
-            "simulation-session".to_string(),
-            peers,
-            threshold,
-        );
+        let rejoin_coordinator =
+            RejoinCoordinator::new("simulation-session".to_string(), peers, threshold);
 
         Self {
             managers,
@@ -233,7 +259,10 @@ impl MeshSimulator {
                 self.handle_peer_crash(peer).await;
             }
             SimulationEvent::NetworkChange(peer, condition) => {
-                self.log_event(format!("🌐 Network change for peer {}: {:?}", peer, condition));
+                self.log_event(format!(
+                    "🌐 Network change for peer {}: {:?}",
+                    peer, condition
+                ));
                 self.handle_network_change(peer, condition).await;
             }
             SimulationEvent::DkgStart => {
@@ -258,7 +287,7 @@ impl MeshSimulator {
     /// Handles peer join
     async fn handle_peer_join(&mut self, peer: PeerId) {
         let all_peers: Vec<PeerId> = self.managers.keys().copied().collect();
-        
+
         if let Some(manager) = self.managers.get(&peer) {
             let mut mgr = manager.lock().unwrap();
             mgr.establish_mesh(all_peers).await.ok();
@@ -304,7 +333,10 @@ impl MeshSimulator {
 
     /// Handles network condition change
     async fn handle_network_change(&mut self, peer: PeerId, condition: NetworkCondition) {
-        self.network_conditions.lock().unwrap().insert(peer, condition.clone());
+        self.network_conditions
+            .lock()
+            .unwrap()
+            .insert(peer, condition.clone());
 
         match condition {
             NetworkCondition::Perfect => {
@@ -316,7 +348,10 @@ impl MeshSimulator {
                     }
                 }
             }
-            NetworkCondition::Degraded { latency_ms, packet_loss } => {
+            NetworkCondition::Degraded {
+                latency_ms,
+                packet_loss,
+            } => {
                 if let Some(monitor) = self.monitors.get(&peer) {
                     for other_peer in self.managers.keys() {
                         if *other_peer != peer {
@@ -358,12 +393,15 @@ impl MeshSimulator {
     /// Handles signing start
     async fn handle_signing_start(&mut self) {
         // Check if we have threshold
-        let connected_counts: Vec<usize> = self.managers.values()
+        let connected_counts: Vec<usize> = self
+            .managers
+            .values()
             .map(|m| m.lock().unwrap().get_connected_peers().len())
             .collect();
 
         let max_connected = connected_counts.iter().max().unwrap_or(&0);
-        if *max_connected >= 1 { // At least 2 peers (self + 1)
+        if *max_connected >= 1 {
+            // At least 2 peers (self + 1)
             self.log_event("✅ Threshold met, signing can proceed".to_string());
         } else {
             self.log_event("❌ Below threshold, signing blocked".to_string());
@@ -374,10 +412,16 @@ impl MeshSimulator {
     async fn handle_message_sent(&mut self, from: PeerId, to: PeerId, size: usize) {
         // Check network conditions
         let conditions = self.network_conditions.lock().unwrap();
-        
+
         // Simulate based on conditions
-        let from_condition = conditions.get(&from).cloned().unwrap_or(NetworkCondition::Perfect);
-        let to_condition = conditions.get(&to).cloned().unwrap_or(NetworkCondition::Perfect);
+        let from_condition = conditions
+            .get(&from)
+            .cloned()
+            .unwrap_or(NetworkCondition::Perfect);
+        let to_condition = conditions
+            .get(&to)
+            .cloned()
+            .unwrap_or(NetworkCondition::Perfect);
 
         let delivered = match (&from_condition, &to_condition) {
             (NetworkCondition::Failed, _) | (_, NetworkCondition::Failed) => false,
@@ -415,17 +459,22 @@ impl MeshSimulator {
 
         if response.accepted {
             self.log_event(format!("✅ Rejoin accepted for peer {}", peer));
-            self.log_event(format!("  • Missed messages: {}", response.missed_messages.len()));
-            
+            self.log_event(format!(
+                "  • Missed messages: {}",
+                response.missed_messages.len()
+            ));
+
             // Re-establish connections
             self.handle_peer_join(peer).await;
-            
+
             // Sync state
             let coordinator = self.rejoin_coordinator.lock().unwrap();
             coordinator.sync_participant(peer).await;
         } else {
-            self.log_event(format!("❌ Rejoin rejected for peer {}: {:?}", 
-                peer, response.rejection_reason));
+            self.log_event(format!(
+                "❌ Rejoin rejected for peer {}: {:?}",
+                peer, response.rejection_reason
+            ));
         }
     }
 
@@ -439,16 +488,23 @@ impl MeshSimulator {
         for (peer, manager) in &self.managers {
             let mgr = manager.lock().unwrap();
             let stats = mgr.get_mesh_stats();
-            
+
             println!("\n📊 Peer {} Statistics:", peer);
-            println!("  • Connected: {}/{}", stats.connected_peers, stats.total_peers - 1);
-            println!("  • Threshold met: {}", if stats.meets_threshold { "✅" } else { "❌" });
+            println!(
+                "  • Connected: {}/{}",
+                stats.connected_peers,
+                stats.total_peers - 1
+            );
+            println!(
+                "  • Threshold met: {}",
+                if stats.meets_threshold { "✅" } else { "❌" }
+            );
         }
 
         // Connection quality
         for (peer, monitor) in &self.monitors {
             let stats = monitor.get_stats();
-            
+
             if stats.total_peers > 0 {
                 println!("\n🔍 Peer {} Connection Quality:", peer);
                 println!("  • Healthy: {}/{}", stats.healthy_peers, stats.total_peers);
@@ -460,7 +516,7 @@ impl MeshSimulator {
         // Rejoin statistics
         let coordinator = self.rejoin_coordinator.lock().unwrap();
         let rejoin_stats = coordinator.get_rejoin_stats();
-        
+
         if rejoin_stats.total_attempts > 0 {
             println!("\n🔄 Rejoin Statistics:");
             println!("  • Total attempts: {}", rejoin_stats.total_attempts);
@@ -499,5 +555,4 @@ mod tests {
         let scenario = SimulationScenario::basic_mesh();
         simulator.run_scenario(scenario).await;
     }
-
 }

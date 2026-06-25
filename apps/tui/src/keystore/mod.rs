@@ -5,17 +5,16 @@
 //! mechanisms in line with the threshold security model.
 
 mod encryption;
+mod extension_compat;
 mod models;
 mod storage;
-mod extension_compat;
 
-pub use storage::Keystore;
-pub use models::{DeviceInfo, BlockchainInfo, WalletMetadata};
 pub use extension_compat::{
-    ExtensionKeyShareData, ExtensionWalletMetadata,
-    ExtensionKeystoreBackup, ExtensionBackupWallet,
-    encrypt_for_extension, decrypt_from_extension, WalletData
+    ExtensionBackupWallet, ExtensionKeyShareData, ExtensionKeystoreBackup, ExtensionWalletMetadata,
+    WalletData, decrypt_from_extension, encrypt_for_extension,
 };
+pub use models::{BlockchainInfo, DeviceInfo, WalletMetadata};
+pub use storage::Keystore;
 
 /// Error types that can occur during keystore operations
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +24,7 @@ pub enum KeystoreError {
 
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Encryption error: {0}")]
     EncryptionError(String),
 
@@ -40,7 +39,7 @@ pub enum KeystoreError {
 
     #[error("Invalid password")]
     InvalidPassword,
-    
+
     #[error("Unsupported blockchain: {0}")]
     UnsupportedBlockchain(String),
 
@@ -53,4 +52,3 @@ pub type Result<T> = std::result::Result<T, KeystoreError>;
 
 /// Current keystore file format version
 pub const KEYSTORE_VERSION: u8 = 1;
-

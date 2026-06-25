@@ -45,11 +45,9 @@ impl ReshareResult {
 fn group_key_hex<C: Ciphersuite>(
     p: &frost_core::keys::PublicKeyPackage<C>,
 ) -> anyhow::Result<String> {
-    Ok(hex::encode(
-        p.verifying_key()
-            .serialize()
-            .map_err(|e| anyhow::anyhow!("serialize verifying key: {e}"))?,
-    ))
+    Ok(hex::encode(p.verifying_key().serialize().map_err(|e| {
+        anyhow::anyhow!("serialize verifying key: {e}")
+    })?))
 }
 
 fn run<C: Ciphersuite>(

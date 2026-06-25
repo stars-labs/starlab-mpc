@@ -1,14 +1,14 @@
 //! MPC Wallet TUI - Terminal User Interface using Elm Architecture
-//! 
+//!
 //! This is the main entry point for the MPC Wallet Terminal Interface.
 //! It uses the Elm Architecture pattern for clean, predictable state management.
 
 use clap::Parser;
 use frost_secp256k1::Secp256K1Sha256;
+use starlab_client::elm::ElmApp;
 use std::io::IsTerminal;
 use std::sync::Arc;
 use tracing::info;
-use starlab_client::elm::ElmApp;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -49,7 +49,9 @@ struct Args {
 /// `[A-Za-z0-9_-]` (mirrors the server's `MIN_ROOM_LEN`). Kept identical to the
 /// CLI's check so both front-ends reject the same weak rooms.
 fn is_strong_room(r: &str) -> bool {
-    r.chars().count() >= 16 && r.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    r.chars().count() >= 16
+        && r.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Merge a `room` into the signal URL as a query param (`?room=` / `&room=`).
@@ -159,30 +161,41 @@ async fn main() -> anyhow::Result<()> {
 }
 
 /// Run the Elm Architecture TUI
-async fn run_elm_tui(device_id: String, signal_server: String, offline: bool) -> anyhow::Result<()> {
+async fn run_elm_tui(
+    device_id: String,
+    signal_server: String,
+    offline: bool,
+) -> anyhow::Result<()> {
     use crossterm::{
-        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
         execute,
+        terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
     };
     use std::io;
 
     info!("🚀 Starting Elm Architecture TUI");
 
     // Create app state with device ID and signal server URL
-    let app_state = Arc::new(tokio::sync::Mutex::new(
-        starlab_client::utils::appstate_compat::AppState::<Secp256K1Sha256>::with_device_id_and_server(
-            device_id.clone(),
-            signal_server.clone()
-        )
-    ));
+    let app_state = Arc::new(
+        tokio::sync::Mutex::new(starlab_client::utils::appstate_compat::AppState::<
+            Secp256K1Sha256,
+        >::with_device_id_and_server(
+            device_id.clone(), signal_server.clone()
+        )),
+    );
 
     // Create and initialize Elm app
     let mut elm_app = ElmApp::new(device_id.clone(), app_state.clone())?;
-    
+
     // Initialize keystore automatically
-    let keystore_path = format!("{}/.frost_keystore", std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-    info!("Initializing keystore at: {} for device: {}", keystore_path, device_id);
-    
+    let keystore_path = format!(
+        "{}/.frost_keystore",
+        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+    );
+    info!(
+        "Initializing keystore at: {} for device: {}",
+        keystore_path, device_id
+    );
+
     // Initialize keystore in app state
     {
         let mut state = app_state.lock().await;
@@ -201,7 +214,7 @@ async fn run_elm_tui(device_id: String, signal_server: String, offline: bool) ->
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
-    
+
     // Set up Ctrl+C handler for graceful shutdown
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -229,11 +242,11 @@ async fn run_elm_tui(device_id: String, signal_server: String, offline: bool) ->
 
     // Run the Elm app (blocks until user quits)
     let result = elm_app.run().await;
-    
+
     // Cleanup - restore terminal
     disable_raw_mode()?;
     execute!(stdout, LeaveAlternateScreen)?;
-    
+
     match result {
         Ok(()) => {
             info!("✅ TUI exited successfully");

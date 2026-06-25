@@ -22,7 +22,7 @@ use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use tracing::{error, warn};
@@ -41,9 +41,7 @@ pub(crate) struct ConnectParams {
     pub existing_session: Option<SessionInfo>,
 }
 
-pub(crate) async fn read_connect_params<C>(
-    app_state: &Arc<Mutex<AppState<C>>>,
-) -> ConnectParams
+pub(crate) async fn read_connect_params<C>(app_state: &Arc<Mutex<AppState<C>>>) -> ConnectParams
 where
     C: Ciphersuite + Send + Sync + 'static,
     <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
@@ -80,17 +78,14 @@ pub(crate) struct InstalledChannels {
     pub broadcast_tx: broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>,
 }
 
-pub(crate) async fn install_handles<C>(
-    app_state: &Arc<Mutex<AppState<C>>>,
-) -> InstalledChannels
+pub(crate) async fn install_handles<C>(app_state: &Arc<Mutex<AppState<C>>>) -> InstalledChannels
 where
     C: Ciphersuite + Send + Sync + 'static,
     <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
     <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
 {
     let (ws_msg_tx, ws_msg_rx) = mpsc::unbounded_channel::<String>();
-    let (broadcast_tx, _) =
-        broadcast::channel::<Arc<starlab_signal_server::ServerMsg>>(128);
+    let (broadcast_tx, _) = broadcast::channel::<Arc<starlab_signal_server::ServerMsg>>(128);
     {
         let mut state = app_state.lock().await;
         state.websocket_connected = true;
@@ -160,13 +155,9 @@ pub(crate) async fn send_reannounce(
 /// Drain the outbound `mpsc` into the socket, with a 30s ping to keep
 /// idle connections alive (Cloudflare Workers otherwise idle-close after
 /// ~100s). Exits when either the channel closes or a send fails.
-pub(crate) fn spawn_sender_task(
-    mut sink: WsSink,
-    mut rx: mpsc::UnboundedReceiver<String>,
-) {
+pub(crate) fn spawn_sender_task(mut sink: WsSink, mut rx: mpsc::UnboundedReceiver<String>) {
     tokio::spawn(async move {
-        let mut ping_interval =
-            tokio::time::interval(tokio::time::Duration::from_secs(30));
+        let mut ping_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
         ping_interval.tick().await; // Skip the immediate initial tick.
         loop {
             tokio::select! {

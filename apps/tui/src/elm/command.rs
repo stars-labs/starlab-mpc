@@ -6,9 +6,9 @@
 
 use crate::elm::message::{Message, SigningRequest};
 use crate::elm::model::WalletConfig;
-use tokio::sync::mpsc::UnboundedSender;
 use std::path::PathBuf;
-use tracing::{info, error, warn};
+use tokio::sync::mpsc::UnboundedSender;
+use tracing::{error, info, warn};
 
 /// Commands represent side effects to be executed
 #[derive(Debug, Clone)]
@@ -16,34 +16,58 @@ pub enum Command {
     // Data loading commands
     LoadWallets,
     LoadSessions,
-    LoadWalletDetails { wallet_id: String },
+    LoadWalletDetails {
+        wallet_id: String,
+    },
     LoadSigningRequests,
-    
+
     // Network operations
     // (Intentionally no ConnectWebSocket: `ReconnectWebSocket` already handles
     // both the initial dial and every subsequent redial, so there's no "connect
     // once then reconnect" distinction at the command layer.)
     ReconnectWebSocket,
     DisconnectWebSocket,
-    SendNetworkMessage { to: String, data: Vec<u8> },
-    BroadcastMessage { data: Vec<u8> },
-    InitiateWebRTCConnections { participants: Vec<String> },
+    SendNetworkMessage {
+        to: String,
+        data: Vec<u8>,
+    },
+    BroadcastMessage {
+        data: Vec<u8>,
+    },
+    InitiateWebRTCConnections {
+        participants: Vec<String>,
+    },
     VerifyWebRTCMesh,
     EnsureFullMesh,
-    
+
     // Keystore operations
-    InitializeKeystore { path: String, device_id: String },
-    SaveWallet { wallet_data: Vec<u8> },
-    DeleteWallet { wallet_id: String },
-    ExportWallet { wallet_id: String, path: PathBuf },
-    ImportWallet { path: PathBuf },
-    
+    InitializeKeystore {
+        path: String,
+        device_id: String,
+    },
+    SaveWallet {
+        wallet_data: Vec<u8>,
+    },
+    DeleteWallet {
+        wallet_id: String,
+    },
+    ExportWallet {
+        wallet_id: String,
+        path: PathBuf,
+    },
+    ImportWallet {
+        path: PathBuf,
+    },
+
     // DKG operations
     /// Creator-only: mint session id, persist to AppState, broadcast
     /// AnnounceSession over the signaling WebSocket. Does NOT trigger the
     /// FROST cryptographic protocol — that waits for `StartFrostProtocol`
     /// once the WebRTC mesh is actually established.
-    StartDKG { config: WalletConfig, unified: bool },
+    StartDKG {
+        config: WalletConfig,
+        unified: bool,
+    },
     /// Everyone (creator + joiners): the WebRTC mesh is up and data channels
     /// are reachable; run FROST Round 1 against the participants captured in
     /// `AppState::session`. No session announcement happens here, which is
@@ -61,22 +85,38 @@ pub enum Command {
         label: Option<String>,
     },
     /// Process a peer's UNIFIED round-1 package received over a data channel.
-    ProcessUnifiedDKGRound1 { from_device: String, package_json: String },
+    ProcessUnifiedDKGRound1 {
+        from_device: String,
+        package_json: String,
+    },
     /// Process a peer's UNIFIED round-2 message received over a data channel.
-    ProcessUnifiedDKGRound2 { from_device: String, message_json: String },
+    ProcessUnifiedDKGRound2 {
+        from_device: String,
+        message_json: String,
+    },
     /// Process a peer's Round 1 package received over a data channel.
     /// Calls `protocal::dkg::process_dkg_round1` which stores the package and
     /// auto-triggers Round 2 once all `session.total` packages have arrived.
-    ProcessDKGRound1 { from_device: String, package_bytes: Vec<u8> },
+    ProcessDKGRound1 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    },
     /// Process a peer's Round 2 package received over a data channel.
     /// Calls `protocal::dkg::process_dkg_round2` which finalises the key with
     /// `part3` once all Round 2 packages for us have arrived.
-    ProcessDKGRound2 { from_device: String, package_bytes: Vec<u8> },
+    ProcessDKGRound2 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    },
     /// Reshare **initiator** (#56): load the OLD share from the keystore, seed
     /// the reshare context, and announce a `SessionType::Reshare` session. The
     /// refresh itself fires later via the shared mesh-ready path
     /// (`StartFrostProtocol`), exactly like DKG. Triggered by `HeadlessReshare`.
-    StartReshare { wallet_id: String, password: String, keystore_path: String },
+    StartReshare {
+        wallet_id: String,
+        password: String,
+        keystore_path: String,
+    },
     /// Reshare **joiner** (#56): load the OLD share, seed the reshare context,
     /// and send a `SessionStatusUpdate` to join the announced reshare session so
     /// the mesh forms. Refresh fires via `StartFrostProtocol`. Dispatched from
@@ -94,8 +134,14 @@ pub enum Command {
     },
     /// Process a peer's reshare round-1 / round-2 package received over a data
     /// channel — drives `protocal::reshare`.
-    ProcessReshareRound1 { from_device: String, package_bytes: Vec<u8> },
-    ProcessReshareRound2 { from_device: String, package_bytes: Vec<u8> },
+    ProcessReshareRound1 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    },
+    ProcessReshareRound2 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    },
     JoinDKG {
         session_id: String,
         /// Session shape known to the joiner from the discovered announcement.
@@ -146,15 +192,27 @@ pub enum Command {
     },
 
     // Signing operations
-    StartSigning { request: SigningRequest },
-    ApproveSignature { request_id: String },
-    RejectSignature { request_id: String },
+    StartSigning {
+        request: SigningRequest,
+    },
+    ApproveSignature {
+        request_id: String,
+    },
+    RejectSignature {
+        request_id: String,
+    },
     /// Forward a peer's Round-1 signing commitment to the protocol layer.
     /// Dispatched by the `Message::ProcessSigningRound1` handler after the
     /// primary WebRTC reader decoded the `SIGN_COMMIT:<b64>` frame.
-    ProcessSigningRound1 { from_device: String, commitment_bytes: Vec<u8> },
+    ProcessSigningRound1 {
+        from_device: String,
+        commitment_bytes: Vec<u8>,
+    },
     /// Same shape for Round-2 signature shares.
-    ProcessSigningRound2 { from_device: String, share_bytes: Vec<u8> },
+    ProcessSigningRound2 {
+        from_device: String,
+        share_bytes: Vec<u8>,
+    },
     /// Joiner-side counterpart of `StartSigning`: record the
     /// just-accepted signing session on AppState, then (after the wallet
     /// has been unlocked) kick off `handle_start_signing` on the joiner's
@@ -164,19 +222,25 @@ pub enum Command {
         session_id: String,
         message_bytes: Vec<u8>,
     },
-    
+
     // UI operations
     SendMessage(Message),
-    ScheduleMessage { delay_ms: u64, message: Box<Message> },
+    ScheduleMessage {
+        delay_ms: u64,
+        message: Box<Message>,
+    },
     /// Run several commands in sequence. Later commands don't depend on earlier ones completing —
     /// they're dispatched in order on the same task, so use this for fire-and-forget side effects.
     Batch(Vec<Command>),
     RefreshUI,
-    
+
     // Settings operations
-    SaveSettings { websocket_url: String, device_id: String },
+    SaveSettings {
+        websocket_url: String,
+        device_id: String,
+    },
     LoadSettings,
-    
+
     // System operations
     Quit,
     None,
@@ -285,8 +349,7 @@ pub fn derive_child_for_curve<C: frost_core::Ciphersuite>(
     blob: &[u8],
     path: &starlab_core::DerivationPath,
 ) -> Result<(Vec<u8>, String), String> {
-    let (kp, pp) = decode_keystore_blob::<C>(blob)
-        .map_err(|e| format!("decode key share: {e}"))?;
+    let (kp, pp) = decode_keystore_blob::<C>(blob).map_err(|e| format!("decode key share: {e}"))?;
     let group = pp
         .verifying_key()
         .serialize()
@@ -337,9 +400,13 @@ pub fn ensure_account_wallet(
 
     // Default chain: the primary chain of the wallet's curve(s).
     let has_secp = metas.iter().any(|m| m.curve_type == "secp256k1");
-    let chain = chain
-        .map(str::to_string)
-        .unwrap_or_else(|| if has_secp { "ethereum".into() } else { "solana".into() });
+    let chain = chain.map(str::to_string).unwrap_or_else(|| {
+        if has_secp {
+            "ethereum".into()
+        } else {
+            "solana".into()
+        }
+    });
     let path_s = starlab_core::accounts::standard_path(&chain, account)
         .ok_or_else(|| format!("unknown chain {chain:?}"))?;
     let curve = starlab_core::accounts::curve_for_chain(&chain)
@@ -355,8 +422,8 @@ pub fn ensure_account_wallet(
         return Ok((child_id, false));
     }
 
-    let parsed = starlab_core::DerivationPath::parse(&path_s)
-        .map_err(|e| format!("parse {path_s}: {e}"))?;
+    let parsed =
+        starlab_core::DerivationPath::parse(&path_s).map_err(|e| format!("parse {path_s}: {e}"))?;
     let blob = ks
         .load_wallet_file_for_curve(parent_id, curve, password)
         .map_err(|e| format!("unlock '{parent_id}' ({curve}): {e}"))?;
@@ -401,8 +468,7 @@ pub fn materialize_child_wallet_if_needed(
     wallet_id: &str,
     password: &str,
 ) -> Result<(), String> {
-    let Some((parent, chain, account)) =
-        starlab_core::accounts::parse_child_wallet_id(wallet_id)
+    let Some((parent, chain, account)) = starlab_core::accounts::parse_child_wallet_id(wallet_id)
     else {
         return Ok(());
     };
@@ -464,7 +530,10 @@ async fn broadcast_unified_round1<C>(
                     break;
                 }
                 Err(e) if attempt < 9 => {
-                    info!("⏳ unified round1 to {} not ready ({}); retrying", device_id, e);
+                    info!(
+                        "⏳ unified round1 to {} not ready ({}); retrying",
+                        device_id, e
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
                 Err(e) => warn!("❌ unified round1 to {} failed: {}", device_id, e),
@@ -567,8 +636,7 @@ async fn try_finalize_unified<C>(
         // Both curves' ACCOUNT-0 addresses, surfaced to the UI/CLI. The
         // outcome's root-key addresses are deliberately not shown — see
         // `account0_addresses`.
-        let mut addresses =
-            account0_addresses("secp256k1", &outcome.secp256k1_group_public_key);
+        let mut addresses = account0_addresses("secp256k1", &outcome.secp256k1_group_public_key);
         addresses.extend(account0_addresses(
             "ed25519",
             &outcome.ed25519_group_public_key,
@@ -769,38 +837,37 @@ impl Command {
         app_state: &std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
     ) -> anyhow::Result<()>
     where
-        // Bounds all in the where-clause to avoid clippy's
-        // `multiple_bound_locations` lint (prior form had
-        // `<C: frost_core::Ciphersuite + ...>` on the fn header AND
-        // `C: CurveIdentifier` in the where-clause).
+    // Bounds all in the where-clause to avoid clippy's
+    // `multiple_bound_locations` lint (prior form had
+    // `<C: frost_core::Ciphersuite + ...>` on the fn header AND
+    // `C: CurveIdentifier` in the where-clause).
         C: frost_core::Ciphersuite + Send + Sync + 'static,
         <<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
         <<<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
-        // Needed by `process_dkg_round2` so the completion path can derive
-        // the real curve name ("secp256k1" / "ed25519") from the generic
-        // `C` for blockchain-address generation. Both ciphersuites the TUI
-        // instantiates implement this trait.
+    // Needed by `process_dkg_round2` so the completion path can derive
+    // the real curve name ("secp256k1" / "ed25519") from the generic
+    // `C` for blockchain-address generation. Both ciphersuites the TUI
+    // instantiates implement this trait.
         C: crate::utils::curve_traits::CurveIdentifier,
     {
         match self {
             Command::LoadWallets => {
                 info!("Loading wallets from keystore");
-                
+
                 let state = app_state.lock().await;
                 if let Some(ref keystore) = state.keystore {
                     let wallets = keystore.list_wallets();
                     // Convert Vec<&WalletMetadata> to Vec<WalletMetadata> by cloning
-                    let wallets: Vec<crate::keystore::WalletMetadata> = wallets.into_iter()
-                        .cloned()
-                        .collect();
+                    let wallets: Vec<crate::keystore::WalletMetadata> =
+                        wallets.into_iter().cloned().collect();
                     let _ = tx.send(Message::WalletsLoaded { wallets });
                 } else {
-                    let _ = tx.send(Message::Error { 
-                        message: "Keystore not initialized".to_string() 
+                    let _ = tx.send(Message::Error {
+                        message: "Keystore not initialized".to_string(),
                     });
                 }
             }
-            
+
             Command::LoadSessions => {
                 // Send `RequestActiveSessions` on the shared primary WebSocket. The
                 // server now replies with one `SessionAvailable` frame per stored
@@ -839,28 +906,28 @@ impl Command {
                     Err(e) => error!("LoadSessions: failed to serialize request: {}", e),
                 }
             }
-            
+
             Command::LoadWalletDetails { wallet_id } => {
                 info!("Loading details for wallet: {}", wallet_id);
-                
+
                 let state = app_state.lock().await;
                 if let Some(ref keystore) = state.keystore {
                     if let Some(_wallet) = keystore.get_wallet(&wallet_id) {
                         // Wallet details loaded, update UI
-                        let _ = tx.send(Message::Success { 
-                            message: format!("Wallet {} loaded", wallet_id) 
+                        let _ = tx.send(Message::Success {
+                            message: format!("Wallet {} loaded", wallet_id),
                         });
                     } else {
-                        let _ = tx.send(Message::Error { 
-                            message: format!("Wallet {} not found", wallet_id) 
+                        let _ = tx.send(Message::Error {
+                            message: format!("Wallet {} not found", wallet_id),
                         });
                     }
                 }
             }
-            
+
             Command::InitializeKeystore { path, device_id } => {
                 info!("Initializing keystore at: {}", path);
-                
+
                 use crate::keystore::Keystore;
                 match Keystore::new(&path, &device_id) {
                     Ok(keystore) => {
@@ -870,13 +937,13 @@ impl Command {
                     }
                     Err(e) => {
                         error!("Failed to initialize keystore: {}", e);
-                        let _ = tx.send(Message::KeystoreError { 
-                            error: e.to_string() 
+                        let _ = tx.send(Message::KeystoreError {
+                            error: e.to_string(),
                         });
                     }
                 }
             }
-            
+
             Command::StartDKG { config, unified } => {
                 // Creator-only path. Responsibility: mint a session_id, store
                 // it in AppState, broadcast AnnounceSession so joiners can
@@ -884,7 +951,10 @@ impl Command {
                 // the WebRTC mesh + populated session.participants, neither of
                 // which exist yet. `Command::StartFrostProtocol` does that when
                 // mesh-ready fires.
-                info!("Creator path: create + announce session. config={:?}", config);
+                info!(
+                    "Creator path: create + announce session. config={:?}",
+                    config
+                );
 
                 {
                     let mut state = app_state.lock().await;
@@ -900,19 +970,21 @@ impl Command {
 
                 if config.mode == crate::elm::model::WalletMode::Online {
                     // For online mode, use the real DKG session manager
-                    info!("Online mode - need {} participants with threshold {}", 
-                          config.total_participants, config.threshold);
-                    
+                    info!(
+                        "Online mode - need {} participants with threshold {}",
+                        config.total_participants, config.threshold
+                    );
+
                     // Send initial progress
-                    let _ = tx.send(Message::UpdateDKGProgress { 
+                    let _ = tx.send(Message::UpdateDKGProgress {
                         round: crate::elm::message::DKGRound::Initialization,
                         progress: 0.1,
                     });
-                    
+
                     // Start the real DKG with session manager
                     let tx_clone = tx.clone();
                     let config_clone = config.clone();
-                    
+
                     // Note: We can't use tokio::spawn here due to Send/Sync constraints
                     // with FROST cryptographic types. For now, show informative messages.
 
@@ -937,27 +1009,34 @@ impl Command {
                     };
 
                     let _ = tx_clone.send(Message::UpdateDKGSessionId {
-                        real_session_id: session_id.clone()
+                        real_session_id: session_id.clone(),
                     });
-                    
-                    let _ = tx_clone.send(Message::Info { 
-                        message: format!("📝 Created DKG session: {}", session_id)
+
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!("📝 Created DKG session: {}", session_id),
                     });
-                    
+
                     // Show instructions
-                    let _ = tx_clone.send(Message::Info { 
-                        message: "📋 To complete REAL DKG in online mode:".to_string()
+                    let _ = tx_clone.send(Message::Info {
+                        message: "📋 To complete REAL DKG in online mode:".to_string(),
                     });
-                    let _ = tx_clone.send(Message::Info { 
-                        message: format!("1. Share session ID '{}' with other participants", session_id)
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!(
+                            "1. Share session ID '{}' with other participants",
+                            session_id
+                        ),
                     });
-                    let _ = tx_clone.send(Message::Info { 
-                        message: "2. Each participant must run this TUI with 'Join Session'".to_string()
+                    let _ = tx_clone.send(Message::Info {
+                        message: "2. Each participant must run this TUI with 'Join Session'"
+                            .to_string(),
                     });
-                    let _ = tx_clone.send(Message::Info { 
-                        message: format!("3. Need {} total participants connected", config_clone.total_participants)
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!(
+                            "3. Need {} total participants connected",
+                            config_clone.total_participants
+                        ),
                     });
-                    
+
                     // Acquire the shared primary-WebSocket handles (`websocket_msg_tx`
                     // for outbound JSON, `server_msg_broadcast_tx` for parsed-frame
                     // fan-out). These are installed exactly once, by
@@ -1012,15 +1091,15 @@ impl Command {
                         "curve_type": announced_curve,
                         "coordination_type": "Network",
                     });
-                    let announce = starlab_signal_server::ClientMsg::AnnounceSession {
-                        session_info,
-                    };
+                    let announce =
+                        starlab_signal_server::ClientMsg::AnnounceSession { session_info };
                     match serde_json::to_string(&announce) {
                         Ok(json) => {
                             info!("Announcing session: {}", json);
                             if ws_tx.send(json).is_err() {
                                 let _ = tx_clone.send(Message::Error {
-                                    message: "Primary WebSocket channel closed mid-announce".to_string(),
+                                    message: "Primary WebSocket channel closed mid-announce"
+                                        .to_string(),
                                 });
                             } else {
                                 let _ = tx_clone.send(Message::Info {
@@ -1056,130 +1135,146 @@ impl Command {
                         progress: 0.2,
                     });
 
+                    // Spawn a task to handle incoming WebSocket messages
+                    let tx_msg = tx_clone.clone();
+                    let session_id_clone = session_id.clone();
+                    let total_participants = config_clone.total_participants;
+                    let device_id_clone = device_id.clone();
 
-                            // Spawn a task to handle incoming WebSocket messages
-                            let tx_msg = tx_clone.clone();
-                            let session_id_clone = session_id.clone();
-                            let total_participants = config_clone.total_participants;
-                            let device_id_clone = device_id.clone();
+                    // Subscribe to the shared server-message fan-out owned by
+                    // `Command::ReconnectWebSocket`. We see every parsed frame
+                    // without maintaining our own socket. Relay frames (peer
+                    // WebRTC signals + participant_update) are handled by the
+                    // always-on relay handler (spawn_relay_handler_task), not
+                    // here — this loop only mirrors display/roster updates.
+                    let mut broadcast_rx = broadcast_tx.subscribe();
 
-                            // Subscribe to the shared server-message fan-out owned by
-                            // `Command::ReconnectWebSocket`. We see every parsed frame
-                            // without maintaining our own socket. Relay frames (peer
-                            // WebRTC signals + participant_update) are handled by the
-                            // always-on relay handler (spawn_relay_handler_task), not
-                            // here — this loop only mirrors display/roster updates.
-                            let mut broadcast_rx = broadcast_tx.subscribe();
+                    tokio::spawn(async move {
+                        let mut participants_seen = std::collections::HashSet::new();
+                        participants_seen.insert(device_id_clone.clone());
 
-                            tokio::spawn(async move {
-                                let mut participants_seen = std::collections::HashSet::new();
-                                participants_seen.insert(device_id_clone.clone());
-
-                                loop {
-                                    let shared = match broadcast_rx.recv().await {
-                                        Ok(m) => m,
-                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                            warn!("DKG driver lagged {} messages; continuing", n);
-                                            continue;
-                                        }
-                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                            info!("DKG driver: broadcast channel closed, exiting");
-                                            let _ = tx_msg.send(Message::WebSocketDisconnected);
-                                            break;
-                                        }
-                                    };
-                                    match &*shared {
-                                                    starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
-                                                        // Another participant announced a session - check if it's us joining theirs
-                                                        if let Some(sid) = session_info.get("session_id").and_then(|v| v.as_str())
-                                                            && sid != session_id_clone {
-                                                                // Different session
-                                                                let _ = tx_msg.send(Message::Info { 
-                                                                    message: format!("📢 Another session available: {}", sid)
-                                                                });
-                                                            }
-                                                    }
-                                                    starlab_signal_server::ServerMsg::Devices { devices } => {
-                                                        // Display-only: show the raw signal-server
-                                                        // device roster. `Devices` fires on every WS
-                                                        // register/deregister, which is NOT the same
-                                                        // as "joined this session" — a fresh peer that
-                                                        // just hit Welcome also shows up here. We used
-                                                        // to use this as the trigger for WebRTC init,
-                                                        // which fired before joiners had a broadcast
-                                                        // subscriber alive, so offers vanished into a
-                                                        // dead channel. The authoritative "all joined"
-                                                        // signal is `participant_update` via Relay,
-                                                        // handled in `webrtc_signaling::handle_server_frame`.
-                                                        let _ = tx_msg.send(Message::Info {
-                                                            message: format!("📡 Connected devices: {:?}", devices),
-                                                        });
-                                                        for device in devices.iter() {
-                                                            participants_seen.insert(device.clone());
-                                                        }
-                                                        let participants_list: Vec<String> =
-                                                            participants_seen.iter().cloned().collect();
-                                                        let _ = tx_msg.send(Message::UpdateParticipants {
-                                                            participants: participants_list,
-                                                        });
-                                                        let _ = &total_participants; // silence unused capture
-                                                    }
-                                        // Relay frames handled by the always-on
-                                        // relay handler, not this loop.
-                                        _ => {}
+                        loop {
+                            let shared = match broadcast_rx.recv().await {
+                                Ok(m) => m,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                    warn!("DKG driver lagged {} messages; continuing", n);
+                                    continue;
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                    info!("DKG driver: broadcast channel closed, exiting");
+                                    let _ = tx_msg.send(Message::WebSocketDisconnected);
+                                    break;
+                                }
+                            };
+                            match &*shared {
+                                starlab_signal_server::ServerMsg::SessionAvailable {
+                                    session_info,
+                                } => {
+                                    // Another participant announced a session - check if it's us joining theirs
+                                    if let Some(sid) =
+                                        session_info.get("session_id").and_then(|v| v.as_str())
+                                        && sid != session_id_clone
+                                    {
+                                        // Different session
+                                        let _ = tx_msg.send(Message::Info {
+                                            message: format!(
+                                                "📢 Another session available: {}",
+                                                sid
+                                            ),
+                                        });
                                     }
                                 }
-                            });
+                                starlab_signal_server::ServerMsg::Devices { devices } => {
+                                    // Display-only: show the raw signal-server
+                                    // device roster. `Devices` fires on every WS
+                                    // register/deregister, which is NOT the same
+                                    // as "joined this session" — a fresh peer that
+                                    // just hit Welcome also shows up here. We used
+                                    // to use this as the trigger for WebRTC init,
+                                    // which fired before joiners had a broadcast
+                                    // subscriber alive, so offers vanished into a
+                                    // dead channel. The authoritative "all joined"
+                                    // signal is `participant_update` via Relay,
+                                    // handled in `webrtc_signaling::handle_server_frame`.
+                                    let _ = tx_msg.send(Message::Info {
+                                        message: format!("📡 Connected devices: {:?}", devices),
+                                    });
+                                    for device in devices.iter() {
+                                        participants_seen.insert(device.clone());
+                                    }
+                                    let participants_list: Vec<String> =
+                                        participants_seen.iter().cloned().collect();
+                                    let _ = tx_msg.send(Message::UpdateParticipants {
+                                        participants: participants_list,
+                                    });
+                                    let _ = &total_participants; // silence unused capture
+                                }
+                                // Relay frames handled by the always-on
+                                // relay handler, not this loop.
+                                _ => {}
+                            }
+                        }
+                    });
 
-                            // Show current participant count
-                            let _ = tx_clone.send(Message::Info {
-                                message: format!("👥 Current participants: 1/{}", config_clone.total_participants)
-                            });
-                            
-                            // Update DKG progress to show we're waiting for participants  
-                            let _ = tx_clone.send(Message::UpdateDKGProgress {
-                                round: crate::elm::message::DKGRound::WaitingForParticipants,
-                                progress: 0.2,
-                            });
-                            
-                            // Keep the DKG progress screen open and wait for participants
-                            // Don't automatically fail - let the user cancel if they want
-                            let _ = tx_clone.send(Message::Info { 
-                                message: format!("⏳ Waiting for {} more participants...", config_clone.total_participants - 1)
-                            });
-                            
-                            let _ = tx_clone.send(Message::Info { 
-                                message: format!("📋 Share this session ID with other participants: {}", session_id)
-                            });
-                            
-                            // The broadcast subscriber task will continue listening
-                            // for participants joining. User can press Esc to cancel.
+                    // Show current participant count
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!(
+                            "👥 Current participants: 1/{}",
+                            config_clone.total_participants
+                        ),
+                    });
+
+                    // Update DKG progress to show we're waiting for participants
+                    let _ = tx_clone.send(Message::UpdateDKGProgress {
+                        round: crate::elm::message::DKGRound::WaitingForParticipants,
+                        progress: 0.2,
+                    });
+
+                    // Keep the DKG progress screen open and wait for participants
+                    // Don't automatically fail - let the user cancel if they want
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!(
+                            "⏳ Waiting for {} more participants...",
+                            config_clone.total_participants - 1
+                        ),
+                    });
+
+                    let _ = tx_clone.send(Message::Info {
+                        message: format!(
+                            "📋 Share this session ID with other participants: {}",
+                            session_id
+                        ),
+                    });
+
+                    // The broadcast subscriber task will continue listening
+                    // for participants joining. User can press Esc to cancel.
                 } else {
                     // Offline mode - use SD card exchange
                     info!("Offline mode selected - air-gapped DKG");
-                    
-                    let _ = tx.send(Message::Info { 
-                        message: "🔒 Offline DKG Mode".to_string()
+
+                    let _ = tx.send(Message::Info {
+                        message: "🔒 Offline DKG Mode".to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "📋 Steps for offline DKG:".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "📋 Steps for offline DKG:".to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "1. Each participant generates their Round 1 commitment".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "1. Each participant generates their Round 1 commitment"
+                            .to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "2. Export commitments to SD card".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "2. Export commitments to SD card".to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "3. Exchange SD cards physically".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "3. Exchange SD cards physically".to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "4. Import other participants' commitments".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "4. Import other participants' commitments".to_string(),
                     });
-                    let _ = tx.send(Message::Info { 
-                        message: "5. Generate and exchange Round 2 shares".to_string()
+                    let _ = tx.send(Message::Info {
+                        message: "5. Generate and exchange Round 2 shares".to_string(),
                     });
-                    
+
                     // TODO: Implement offline DKG with SD card exchange
                     let _ = tx.send(Message::DKGFailed {
                         error: "Offline DKG implementation in progress. For now, please use online mode with multiple nodes.".to_string()
@@ -1200,9 +1295,18 @@ impl Command {
                 // twice would regenerate the secret/package and break the
                 // protocol mid-flight. We atomically transition dkg_state to
                 // `Round1InProgress` only from `Idle` — subsequent calls bail.
-                let (device_id, internal_cmd_tx, have_session, already_running, is_reshare, dkg_in_progress, is_unified) = {
+                let (
+                    device_id,
+                    internal_cmd_tx,
+                    have_session,
+                    already_running,
+                    is_reshare,
+                    dkg_in_progress,
+                    is_unified,
+                ) = {
                     let mut state_guard = app_state.lock().await;
-                    let already = !matches!(state_guard.dkg_state, crate::utils::state::DkgState::Idle);
+                    let already =
+                        !matches!(state_guard.dkg_state, crate::utils::state::DkgState::Idle);
                     if !already {
                         state_guard.dkg_state = crate::utils::state::DkgState::Round1InProgress;
                     }
@@ -1221,9 +1325,7 @@ impl Command {
                     return Ok(());
                 }
                 if !have_session {
-                    warn!(
-                        "StartFrostProtocol fired but AppState::session is None — ignoring"
-                    );
+                    warn!("StartFrostProtocol fired but AppState::session is None — ignoring");
                     // Roll back the state transition since we didn't actually run.
                     let mut state = app_state.lock().await;
                     state.dkg_state = crate::utils::state::DkgState::Idle;
@@ -1290,7 +1392,8 @@ impl Command {
                     {
                         broadcast_unified_round1(app_state.clone(), &device_id, &pkg).await;
                         let _ = tx.send(Message::Info {
-                            message: "✅ Unified DKG Round 1 initiated (ed25519 + secp256k1)".into(),
+                            message: "✅ Unified DKG Round 1 initiated (ed25519 + secp256k1)"
+                                .into(),
                         });
                     }
                     return Ok(());
@@ -1318,12 +1421,19 @@ impl Command {
                 });
             }
 
-            Command::PrepareUnifiedFinalize { password, keystore_path, label } => {
+            Command::PrepareUnifiedFinalize {
+                password,
+                keystore_path,
+                label,
+            } => {
                 let mut state = app_state.lock().await;
                 state.unified_finalize = Some((password, keystore_path, label));
             }
 
-            Command::ProcessUnifiedDKGRound1 { from_device, package_json } => {
+            Command::ProcessUnifiedDKGRound1 {
+                from_device,
+                package_json,
+            } => {
                 let pkg: crate::protocal::unified_dkg::UnifiedRound1Package =
                     match serde_json::from_str(&package_json) {
                         Ok(p) => p,
@@ -1356,7 +1466,10 @@ impl Command {
                 }
             }
 
-            Command::ProcessUnifiedDKGRound2 { from_device, message_json } => {
+            Command::ProcessUnifiedDKGRound2 {
+                from_device,
+                message_json,
+            } => {
                 let msg: crate::protocal::unified_dkg::UnifiedRound2Message =
                     match serde_json::from_str(&message_json) {
                         Ok(m) => m,
@@ -1408,7 +1521,11 @@ impl Command {
                 }
             }
 
-            Command::StartReshare { wallet_id, password, keystore_path } => {
+            Command::StartReshare {
+                wallet_id,
+                password,
+                keystore_path,
+            } => {
                 // Reshare INITIATOR (#56). Mirrors `StartDKG`: load the OLD share
                 // from the keystore, seed the reshare context, then announce a
                 // `SessionType::Reshare` session so the retained signers can
@@ -1416,10 +1533,18 @@ impl Command {
                 // fires on every node via the shared mesh-ready path
                 // (`StartFrostProtocol`, which forks on `reshare_in_progress`),
                 // exactly like DKG Round 1.
-                info!("Reshare initiator: load '{}' + announce reshare session", wallet_id);
+                info!(
+                    "Reshare initiator: load '{}' + announce reshare session",
+                    wallet_id
+                );
                 let (orig_participants, threshold, total, curve_type, group_pk) =
-                    match seed_reshare_context::<C>(app_state, &wallet_id, &password, &keystore_path)
-                        .await
+                    match seed_reshare_context::<C>(
+                        app_state,
+                        &wallet_id,
+                        &password,
+                        &keystore_path,
+                    )
+                    .await
                     {
                         Ok(v) => v,
                         Err(e) => {
@@ -1476,7 +1601,8 @@ impl Command {
                         info!("Announcing reshare session: {}", json);
                         if ws_tx.send(json).is_err() {
                             let _ = tx.send(Message::Error {
-                                message: "Primary WebSocket closed mid reshare-announce".to_string(),
+                                message: "Primary WebSocket closed mid reshare-announce"
+                                    .to_string(),
                             });
                         }
                     }
@@ -1502,7 +1628,10 @@ impl Command {
                     });
                 }
                 let _ = tx.send(Message::Info {
-                    message: format!("🔄 Reshare session announced: {} — waiting for signers", session_id),
+                    message: format!(
+                        "🔄 Reshare session announced: {} — waiting for signers",
+                        session_id
+                    ),
                 });
             }
 
@@ -1521,7 +1650,10 @@ impl Command {
                 // seed the reshare context, then send a `SessionStatusUpdate` so
                 // the server+initiator grow the participant set and the mesh
                 // forms. Refresh fires via the shared `StartFrostProtocol` path.
-                info!("Reshare joiner: load '{}' + join session {}", wallet_name, session_id);
+                info!(
+                    "Reshare joiner: load '{}' + join session {}",
+                    wallet_name, session_id
+                );
                 if let Err(e) =
                     seed_reshare_context::<C>(app_state, &wallet_name, &password, &keystore_path)
                         .await
@@ -1652,10 +1784,19 @@ impl Command {
                 }
             }
 
-            Command::JoinDKG { session_id, total: known_total, threshold: known_threshold, proposer_id: known_proposer, curve_type: known_curve } => {
-                info!("Joining DKG session: {} ({}-of-{})", session_id, known_threshold, known_total);
+            Command::JoinDKG {
+                session_id,
+                total: known_total,
+                threshold: known_threshold,
+                proposer_id: known_proposer,
+                curve_type: known_curve,
+            } => {
+                info!(
+                    "Joining DKG session: {} ({}-of-{})",
+                    session_id, known_threshold, known_total
+                );
                 let _ = tx.send(Message::Info {
-                    message: format!("🔗 Joining DKG session: {}", session_id)
+                    message: format!("🔗 Joining DKG session: {}", session_id),
                 });
 
                 // Acquire the shared primary-WS handles. `ReconnectWebSocket`
@@ -1702,7 +1843,7 @@ impl Command {
                             });
                         } else {
                             let _ = tx_clone.send(Message::Info {
-                                message: format!("✅ Joined session: {}", session_id)
+                                message: format!("✅ Joined session: {}", session_id),
                             });
                             let _ = tx_clone.send(Message::UpdateDKGProgress {
                                 round: crate::elm::message::DKGRound::WaitingForParticipants,
@@ -1722,12 +1863,17 @@ impl Command {
                     let curve_type = if !known_curve.is_empty() {
                         known_curve.clone()
                     } else {
-                        state.available_sessions.iter()
+                        state
+                            .available_sessions
+                            .iter()
                             .find(|s| s.session_code == session_id)
                             .map(|s| s.curve_type.clone())
                             .unwrap_or_else(|| "Ed25519".to_string())
                     };
-                    info!("📊 Joining session with curve type: {}, total {}", curve_type, known_total);
+                    info!(
+                        "📊 Joining session with curve type: {}, total {}",
+                        curve_type, known_total
+                    );
                     // A "unified" announce means the dual-curve ceremony — flip
                     // the joiner into unified mode so mesh-ready runs that path.
                     if curve_type == "unified" {
@@ -1761,163 +1907,190 @@ impl Command {
                 let app_state_clone = app_state.clone();
                 let mut broadcast_rx = broadcast_tx.subscribe();
 
-                        tokio::spawn(async move {
-                            let mut participants_seen = std::collections::HashSet::new();
-                            // Don't add ourselves yet - wait for server to confirm
+                tokio::spawn(async move {
+                    let mut participants_seen = std::collections::HashSet::new();
+                    // Don't add ourselves yet - wait for server to confirm
 
-                            loop {
-                                let shared = match broadcast_rx.recv().await {
-                                    Ok(m) => m,
-                                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                        warn!("JoinDKG driver lagged {} messages; continuing", n);
-                                        continue;
+                    loop {
+                        let shared = match broadcast_rx.recv().await {
+                            Ok(m) => m,
+                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                warn!("JoinDKG driver lagged {} messages; continuing", n);
+                                continue;
+                            }
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                info!("JoinDKG driver: broadcast closed");
+                                let _ = tx_msg.send(Message::WebSocketDisconnected);
+                                break;
+                            }
+                        };
+                        match &*shared {
+                            starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
+                                // Check if this is our session being announced/updated
+                                if let Some(sid) =
+                                    session_info.get("session_id").and_then(|v| v.as_str())
+                                    && sid == session_id_clone
+                                {
+                                    // Our session - update full session info
+                                    let curve_type = session_info
+                                        .get("curve_type")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("Ed25519")
+                                        .to_string();
+
+                                    let _ = tx_msg.send(Message::Info {
+                                        message: format!(
+                                            "📋 Session update - curve type: {}",
+                                            curve_type
+                                        ),
+                                    });
+
+                                    // Update the session in app state with correct curve type
+                                    {
+                                        let mut state = app_state_clone.lock().await;
+                                        if let Some(ref mut session) = state.session {
+                                            session.curve_type = curve_type.clone();
+
+                                            // Also update other session fields
+                                            if let Some(total) =
+                                                session_info.get("total").and_then(|v| v.as_u64())
+                                            {
+                                                session.total = total as u16;
+                                            }
+                                            if let Some(threshold) = session_info
+                                                .get("threshold")
+                                                .and_then(|v| v.as_u64())
+                                            {
+                                                session.threshold = threshold as u16;
+                                            }
+                                        }
                                     }
-                                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                                        info!("JoinDKG driver: broadcast closed");
-                                        let _ = tx_msg.send(Message::WebSocketDisconnected);
-                                        break;
+
+                                    // Update participants list
+                                    if let Some(participants) =
+                                        session_info.get("participants").and_then(|v| v.as_array())
+                                    {
+                                        let _ = tx_msg.send(Message::Info {
+                                            message: format!(
+                                                "📋 Session update - participants: {}",
+                                                participants.len()
+                                            ),
+                                        });
+
+                                        participants_seen.clear();
+                                        for p in participants {
+                                            if let Some(pid) = p.as_str() {
+                                                participants_seen.insert(pid.to_string());
+                                            }
+                                        }
                                     }
-                                };
-                                match &*shared {
-                                                starlab_signal_server::ServerMsg::SessionAvailable { session_info } => {
-                                                    // Check if this is our session being announced/updated
-                                                    if let Some(sid) = session_info.get("session_id").and_then(|v| v.as_str())
-                                                        && sid == session_id_clone {
-                                                            // Our session - update full session info
-                                                            let curve_type = session_info.get("curve_type")
-                                                                .and_then(|v| v.as_str())
-                                                                .unwrap_or("Ed25519")
-                                                                .to_string();
-                                                            
-                                                            let _ = tx_msg.send(Message::Info { 
-                                                                message: format!("📋 Session update - curve type: {}", curve_type)
-                                                            });
-                                                            
-                                                            // Update the session in app state with correct curve type
-                                                            {
-                                                                let mut state = app_state_clone.lock().await;
-                                                                if let Some(ref mut session) = state.session {
-                                                                    session.curve_type = curve_type.clone();
-                                                                    
-                                                                    // Also update other session fields
-                                                                    if let Some(total) = session_info.get("total").and_then(|v| v.as_u64()) {
-                                                                        session.total = total as u16;
-                                                                    }
-                                                                    if let Some(threshold) = session_info.get("threshold").and_then(|v| v.as_u64()) {
-                                                                        session.threshold = threshold as u16;
-                                                                    }
-                                                                }
-                                                            }
-                                                            
-                                                            // Update participants list
-                                                            if let Some(participants) = session_info.get("participants").and_then(|v| v.as_array()) {
-                                                                let _ = tx_msg.send(Message::Info { 
-                                                                    message: format!("📋 Session update - participants: {}", participants.len())
-                                                                });
-                                                                
-                                                                participants_seen.clear();
-                                                                for p in participants {
-                                                                    if let Some(pid) = p.as_str() {
-                                                                        participants_seen.insert(pid.to_string());
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                }
-                                                starlab_signal_server::ServerMsg::Devices { devices } => {
-                                                    let _ = tx_msg.send(Message::Info { 
-                                                        message: format!("📡 Connected devices: {:?}", devices)
-                                                    });
-                                                    
-                                                    // Track previous count to detect new participants
-                                                    let prev_count = participants_seen.len();
-                                                    
-                                                    // Count unique participants in our session (devices is &Vec<String>)
-                                                    for device in devices.iter() {
-                                                        participants_seen.insert(device.clone());
-                                                    }
-                                                    
-                                                    // Send UpdateParticipants message to update the model
-                                                    let participants_list: Vec<String> = participants_seen.iter().cloned().collect();
-                                                    let _ = tx_msg.send(Message::UpdateParticipants { 
-                                                        participants: participants_list.clone() 
-                                                    });
-                                                    
-                                                    let participants_count = participants_seen.len();
-                                                    
-                                                    let _ = tx_msg.send(Message::Info { 
-                                                        message: format!("👥 Current participants: {}/{}", 
-                                                            participants_count, session_total)
-                                                    });
-                                                    
-                                                    // Re-initiate WebRTC if we have new participants
-                                                    if participants_count > prev_count && participants_count > 1 {
-                                                        let _ = tx_msg.send(Message::Info { 
-                                                            message: format!("🔄 New participant detected, re-initiating WebRTC with all {} participants", participants_count)
-                                                        });
-                                                        
-                                                        // Get participants list WITHOUT self for WebRTC initiation
-                                                        let self_device = device_id_clone.clone();
-                                                        let other_participants: Vec<String> = participants_seen.iter()
-                                                            .filter(|p| **p != self_device)
-                                                            .cloned()
-                                                            .collect();
-                                                        
-                                                        // Re-initiate WebRTC with OTHER participants only
-                                                        let _ = tx_msg.send(Message::InitiateWebRTCWithParticipants {
-                                                            participants: other_participants,
-                                                        });
-                                                    }
-                                                    
-                                                    if participants_count >= session_total as usize {
-                                                        let _ = tx_msg.send(Message::Info { 
-                                                            message: "🎉 All participants connected! Starting DKG...".to_string()
-                                                        });
-                                                        
-                                                        // Final WebRTC initiation to ensure all connections
-                                                        let _ = tx_msg.send(Message::Info { 
-                                                            message: "🔗 Ensuring all peer-to-peer connections are established...".to_string()
-                                                        });
-                                                        
-                                                        // Send with ALL participants to ensure full mesh
-                                                        let _ = tx_msg.send(Message::InitiateWebRTCWithParticipants {
-                                                            participants: participants_list,
-                                                        });
-                                                        
-                                                        // Schedule mesh verification after a delay
-                                                        let tx_verify = tx_msg.clone();
-                                                        tokio::spawn(async move {
-                                                            tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
-                                                            let _ = tx_verify.send(Message::VerifyMeshConnectivity);
-                                                        });
-                                                        
-                                                        // Update DKG progress
-                                                        let _ = tx_msg.send(Message::UpdateDKGProgress {
-                                                            round: crate::elm::message::DKGRound::Round1,
-                                                            progress: 0.3,
-                                                        });
-                                                    }
-                                                }
-                                    // Relay frames (peer WebRTC signals +
-                                    // participant_update) are handled by the
-                                    // always-on relay handler, not this loop.
-                                    _ => {}
                                 }
                             }
-                        });
+                            starlab_signal_server::ServerMsg::Devices { devices } => {
+                                let _ = tx_msg.send(Message::Info {
+                                    message: format!("📡 Connected devices: {:?}", devices),
+                                });
 
-                        // Show initial status
-                        let _ = tx_clone.send(Message::Info {
-                            message: "⏳ Waiting for other participants to join...".to_string()
-                        });
-                        let _ = tx_clone.send(Message::Info {
-                            message: format!("📋 Session ID: {}", session_id)
-                        });
+                                // Track previous count to detect new participants
+                                let prev_count = participants_seen.len();
+
+                                // Count unique participants in our session (devices is &Vec<String>)
+                                for device in devices.iter() {
+                                    participants_seen.insert(device.clone());
+                                }
+
+                                // Send UpdateParticipants message to update the model
+                                let participants_list: Vec<String> =
+                                    participants_seen.iter().cloned().collect();
+                                let _ = tx_msg.send(Message::UpdateParticipants {
+                                    participants: participants_list.clone(),
+                                });
+
+                                let participants_count = participants_seen.len();
+
+                                let _ = tx_msg.send(Message::Info {
+                                    message: format!(
+                                        "👥 Current participants: {}/{}",
+                                        participants_count, session_total
+                                    ),
+                                });
+
+                                // Re-initiate WebRTC if we have new participants
+                                if participants_count > prev_count && participants_count > 1 {
+                                    let _ = tx_msg.send(Message::Info { 
+                                                            message: format!("🔄 New participant detected, re-initiating WebRTC with all {} participants", participants_count)
+                                                        });
+
+                                    // Get participants list WITHOUT self for WebRTC initiation
+                                    let self_device = device_id_clone.clone();
+                                    let other_participants: Vec<String> = participants_seen
+                                        .iter()
+                                        .filter(|p| **p != self_device)
+                                        .cloned()
+                                        .collect();
+
+                                    // Re-initiate WebRTC with OTHER participants only
+                                    let _ = tx_msg.send(Message::InitiateWebRTCWithParticipants {
+                                        participants: other_participants,
+                                    });
+                                }
+
+                                if participants_count >= session_total as usize {
+                                    let _ = tx_msg.send(Message::Info {
+                                        message: "🎉 All participants connected! Starting DKG..."
+                                            .to_string(),
+                                    });
+
+                                    // Final WebRTC initiation to ensure all connections
+                                    let _ = tx_msg.send(Message::Info { 
+                                                            message: "🔗 Ensuring all peer-to-peer connections are established...".to_string()
+                                                        });
+
+                                    // Send with ALL participants to ensure full mesh
+                                    let _ = tx_msg.send(Message::InitiateWebRTCWithParticipants {
+                                        participants: participants_list,
+                                    });
+
+                                    // Schedule mesh verification after a delay
+                                    let tx_verify = tx_msg.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                                            2000,
+                                        ))
+                                        .await;
+                                        let _ = tx_verify.send(Message::VerifyMeshConnectivity);
+                                    });
+
+                                    // Update DKG progress
+                                    let _ = tx_msg.send(Message::UpdateDKGProgress {
+                                        round: crate::elm::message::DKGRound::Round1,
+                                        progress: 0.3,
+                                    });
+                                }
+                            }
+                            // Relay frames (peer WebRTC signals +
+                            // participant_update) are handled by the
+                            // always-on relay handler, not this loop.
+                            _ => {}
+                        }
+                    }
+                });
+
+                // Show initial status
+                let _ = tx_clone.send(Message::Info {
+                    message: "⏳ Waiting for other participants to join...".to_string(),
+                });
+                let _ = tx_clone.send(Message::Info {
+                    message: format!("📋 Session ID: {}", session_id),
+                });
             }
-            
+
             Command::InitiateWebRTCConnections { participants } => {
-                info!("Initiating WebRTC connections with {} participants", participants.len());
-                
+                info!(
+                    "Initiating WebRTC connections with {} participants",
+                    participants.len()
+                );
+
                 // Store participants in app state for WebRTC handler to process
                 let (self_device_id, device_connections_arc, _signal_server_url) = {
                     let mut state = app_state.lock().await;
@@ -1931,20 +2104,30 @@ impl Command {
                         }
                         info!("Updated session participants: {:?}", session.participants);
                     }
-                    (state.device_id.clone(), state.device_connections.clone(), state.signal_server_url.clone())
+                    (
+                        state.device_id.clone(),
+                        state.device_connections.clone(),
+                        state.signal_server_url.clone(),
+                    )
                 };
-                
+
                 // Send message to trigger WebRTC through the UI
-                let _ = tx.send(Message::Info { 
-                    message: format!("🚀 WebRTC mesh creation triggered for {} participants", participants.len())
+                let _ = tx.send(Message::Info {
+                    message: format!(
+                        "🚀 WebRTC mesh creation triggered for {} participants",
+                        participants.len()
+                    ),
                 });
-                
-                let _ = tx.send(Message::Info { 
-                    message: "⏳ Starting WebRTC connection process...".to_string()
+
+                let _ = tx.send(Message::Info {
+                    message: "⏳ Starting WebRTC connection process...".to_string(),
                 });
-                
+
                 // CRITICAL FIX: Actually initiate WebRTC connections NOW
-                info!("🚀 Actually initiating WebRTC for participants: {:?}", participants);
+                info!(
+                    "🚀 Actually initiating WebRTC for participants: {:?}",
+                    participants
+                );
 
                 // Store participant count before moving the vector
                 let expected_peer_connections = participants.len() - 1; // Exclude self
@@ -1955,8 +2138,9 @@ impl Command {
                     participants,
                     device_connections_arc,
                     app_state.clone(),
-                    Some(tx.clone()),  // Pass the UI message sender
-                ).await;
+                    Some(tx.clone()), // Pass the UI message sender
+                )
+                .await;
 
                 // Also update DKG progress to show we're connecting
                 let _ = tx.send(Message::UpdateDKGProgress {
@@ -1977,7 +2161,7 @@ impl Command {
                         attempts += 1;
                         if attempts > MAX_ATTEMPTS {
                             let _ = tx_mesh.send(Message::Error {
-                                message: "Timeout waiting for WebRTC mesh to be ready".to_string()
+                                message: "Timeout waiting for WebRTC mesh to be ready".to_string(),
                             });
                             break;
                         }
@@ -2004,24 +2188,29 @@ impl Command {
                                 }
                             }
 
-                            info!("🔍 Mesh check: {}/{} peer connections in Connected state (total connections: {})",
-                                  connected_count, expected_peer_connections, total_connections);
+                            info!(
+                                "🔍 Mesh check: {}/{} peer connections in Connected state (total connections: {})",
+                                connected_count, expected_peer_connections, total_connections
+                            );
 
                             // Mesh is ready when we have connected to all other participants
                             connected_count >= expected_peer_connections
                         };
 
                         if mesh_ready {
-                            info!("✅ WebRTC mesh is ready! Connected to all {} other participants", expected_peer_connections);
+                            info!(
+                                "✅ WebRTC mesh is ready! Connected to all {} other participants",
+                                expected_peer_connections
+                            );
 
                             // Update UI that mesh is complete
                             let _ = tx_mesh.send(Message::Info {
-                                message: "✅ WebRTC mesh established successfully!".to_string()
+                                message: "✅ WebRTC mesh established successfully!".to_string(),
                             });
 
                             // Trigger DKG Round 1
                             let _ = tx_mesh.send(Message::Info {
-                                message: "🚀 Starting DKG Round 1...".to_string()
+                                message: "🚀 Starting DKG Round 1...".to_string(),
                             });
 
                             // Update progress to show DKG is actually starting
@@ -2034,12 +2223,14 @@ impl Command {
                             // Get session info to create wallet config
                             let wallet_config = {
                                 let state = app_state_mesh.lock().await;
-                                state.session.as_ref().map(|session| crate::elm::model::WalletConfig {
+                                state.session.as_ref().map(|session| {
+                                    crate::elm::model::WalletConfig {
                                         name: format!("MPC Wallet {}", &session.session_id[..8]),
                                         total_participants: session.total,
                                         threshold: session.threshold,
                                         mode: crate::elm::model::WalletMode::Online,
-                                    })
+                                    }
+                                })
                             };
 
                             if let Some(config) = wallet_config {
@@ -2049,16 +2240,18 @@ impl Command {
                                         wallet_config: config,
                                         session_id: None,
                                         coordinator: true, // Assume we're coordinator since we're triggering
-                                    }
+                                    },
                                 });
 
                                 let _ = tx_mesh.send(crate::elm::message::Message::Info {
-                                    message: "🚀 Mesh ready! Starting real DKG protocol...".to_string()
+                                    message: "🚀 Mesh ready! Starting real DKG protocol..."
+                                        .to_string(),
                                 });
                             } else {
                                 // Fallback if no session info available
                                 let _ = tx_mesh.send(crate::elm::message::Message::Info {
-                                    message: "⚠️ Mesh ready but no session info available for DKG".to_string()
+                                    message: "⚠️ Mesh ready but no session info available for DKG"
+                                        .to_string(),
                                 });
                             }
 
@@ -2073,62 +2266,77 @@ impl Command {
                     }
                 });
             }
-            
+
             Command::VerifyWebRTCMesh => {
                 info!("🔍 Verifying WebRTC mesh connectivity");
-                
+
                 let (self_device_id, expected_connections) = {
                     let state = app_state.lock().await;
                     let expected = if let Some(ref session) = state.session {
-                        session.participants.len() - 1  // Exclude self
+                        session.participants.len() - 1 // Exclude self
                     } else {
                         0
                     };
                     (state.device_id.clone(), expected)
                 };
-                
+
                 // Check current connection status
                 let connections_status = {
                     let state = app_state.lock().await;
                     let device_connections = state.device_connections.clone();
                     let connections = device_connections.lock().await;
-                    
+
                     let mut status_report = Vec::new();
                     let mut connected_count = 0;
                     let mut failed_count = 0;
-                    
+
                     for (peer_id, pc) in connections.iter() {
                         let conn_state = pc.connection_state();
                         let is_connected = conn_state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected;
-                        
+
                         if is_connected {
                             connected_count += 1;
-                            status_report.push(format!("✅ {} -> {}: Connected", self_device_id, peer_id));
+                            status_report
+                                .push(format!("✅ {} -> {}: Connected", self_device_id, peer_id));
                         } else {
                             failed_count += 1;
-                            status_report.push(format!("❌ {} -> {}: {:?}", self_device_id, peer_id, conn_state));
+                            status_report.push(format!(
+                                "❌ {} -> {}: {:?}",
+                                self_device_id, peer_id, conn_state
+                            ));
                         }
                     }
-                    
-                    (connected_count, failed_count, status_report, connections.len())
+
+                    (
+                        connected_count,
+                        failed_count,
+                        status_report,
+                        connections.len(),
+                    )
                 };
-                
-                let (connected_count, failed_count, status_report, _total_connections) = connections_status;
-                
+
+                let (connected_count, failed_count, status_report, _total_connections) =
+                    connections_status;
+
                 // Send status report
                 let _ = tx.send(Message::Info {
-                    message: format!("📊 Mesh Status: {}/{} connected ({} failed)", 
-                                   connected_count, expected_connections, failed_count)
+                    message: format!(
+                        "📊 Mesh Status: {}/{} connected ({} failed)",
+                        connected_count, expected_connections, failed_count
+                    ),
                 });
-                
+
                 for status_line in status_report {
                     info!("{}", status_line);
                 }
-                
+
                 // If not all connections are established, trigger re-initiation
                 if connected_count < expected_connections {
-                    warn!("⚠️ Incomplete mesh: only {}/{} connections established", connected_count, expected_connections);
-                    
+                    warn!(
+                        "⚠️ Incomplete mesh: only {}/{} connections established",
+                        connected_count, expected_connections
+                    );
+
                     // Get participants and re-initiate for missing connections
                     let participants = {
                         let state = app_state.lock().await;
@@ -2138,28 +2346,33 @@ impl Command {
                             vec![]
                         }
                     };
-                    
+
                     if !participants.is_empty() {
                         let _ = tx.send(Message::Info {
-                            message: "🔄 Re-initiating WebRTC for missing connections...".to_string()
+                            message: "🔄 Re-initiating WebRTC for missing connections..."
+                                .to_string(),
                         });
-                        
+
                         let _ = tx.send(Message::InitiateWebRTCWithParticipants {
-                            participants: participants.into_iter()
+                            participants: participants
+                                .into_iter()
                                 .filter(|p| p != &self_device_id)
-                                .collect()
+                                .collect(),
                         });
                     }
                 } else {
                     let _ = tx.send(Message::Success {
-                        message: format!("✅ Full mesh established: {} connections", connected_count)
+                        message: format!(
+                            "✅ Full mesh established: {} connections",
+                            connected_count
+                        ),
                     });
                 }
             }
-            
+
             Command::EnsureFullMesh => {
                 info!("🔗 Ensuring full mesh connectivity");
-                
+
                 let (self_device_id, participants) = {
                     let state = app_state.lock().await;
                     let participants = if let Some(ref session) = state.session {
@@ -2169,26 +2382,26 @@ impl Command {
                     };
                     (state.device_id.clone(), participants)
                 };
-                
+
                 if participants.is_empty() {
                     let _ = tx.send(Message::Warning {
-                        message: "No active session to verify mesh for".to_string()
+                        message: "No active session to verify mesh for".to_string(),
                     });
                     return Ok(());
                 }
-                
+
                 // Check each expected connection
                 let mut missing_connections = Vec::new();
                 {
                     let state = app_state.lock().await;
                     let device_connections = state.device_connections.clone();
                     let connections = device_connections.lock().await;
-                    
+
                     for participant in &participants {
                         if participant == &self_device_id {
                             continue;
                         }
-                        
+
                         match connections.get(participant) {
                             Some(pc) => {
                                 let conn_state = pc.connection_state();
@@ -2204,23 +2417,24 @@ impl Command {
                         }
                     }
                 }
-                
+
                 if !missing_connections.is_empty() {
                     let _ = tx.send(Message::Warning {
-                        message: format!("Missing connections to: {:?}", missing_connections)
+                        message: format!("Missing connections to: {:?}", missing_connections),
                     });
-                    
+
                     // Re-initiate WebRTC for all participants to fix missing connections
                     let _ = tx.send(Message::Info {
-                        message: "🔄 Re-establishing WebRTC connections...".to_string()
+                        message: "🔄 Re-establishing WebRTC connections...".to_string(),
                     });
-                    
+
                     let _ = tx.send(Message::InitiateWebRTCWithParticipants {
-                        participants: participants.into_iter()
+                        participants: participants
+                            .into_iter()
                             .filter(|p| p != &self_device_id)
-                            .collect()
+                            .collect(),
                     });
-                    
+
                     // Schedule a verification check after a delay
                     let tx_check = tx.clone();
                     tokio::spawn(async move {
@@ -2229,22 +2443,27 @@ impl Command {
                     });
                 } else {
                     let _ = tx.send(Message::Success {
-                        message: "✅ Full mesh connectivity confirmed".to_string()
+                        message: "✅ Full mesh connectivity confirmed".to_string(),
                     });
                 }
             }
-            
+
             Command::DeleteWallet { wallet_id } => {
                 info!("Deleting wallet: {}", wallet_id);
 
                 // TODO: Implement wallet deletion in keystore
                 // For now, just send an error message
                 let _ = tx.send(Message::Error {
-                    message: "Wallet deletion not yet implemented".to_string()
+                    message: "Wallet deletion not yet implemented".to_string(),
                 });
             }
 
-            Command::FinalizeWalletFromDkg { password, keystore_path, wallet_name, wallet_label } => {
+            Command::FinalizeWalletFromDkg {
+                password,
+                keystore_path,
+                wallet_name,
+                wallet_label,
+            } => {
                 // Runs right after `Message::DKGKeyGenerated`. Pulls the
                 // FROST output from AppState, serializes the key share,
                 // encrypts it with `password`, and writes the wallet file.
@@ -2271,7 +2490,8 @@ impl Command {
                     let state = app_state.lock().await;
 
                     let Some(session) = state.session.as_ref() else {
-                        let err = "FinalizeWalletFromDkg: no active session on AppState".to_string();
+                        let err =
+                            "FinalizeWalletFromDkg: no active session on AppState".to_string();
                         error!("{}", err);
                         let _ = tx.send(Message::DKGFailed { error: err });
                         return Ok(());
@@ -2285,7 +2505,8 @@ impl Command {
                     };
 
                     let Some(public_key_package) = state.public_key_package.as_ref() else {
-                        let err = "FinalizeWalletFromDkg: AppState has no public_key_package".to_string();
+                        let err =
+                            "FinalizeWalletFromDkg: AppState has no public_key_package".to_string();
                         error!("{}", err);
                         let _ = tx.send(Message::DKGFailed { error: err });
                         return Ok(());
@@ -2300,10 +2521,14 @@ impl Command {
                     // into a single encrypted blob as:
                     //     [kp_len: u32 LE][kp_bytes][pkp_len: u32 LE][pkp_bytes]
                     // Stage C.1's UnlockWallet reverses this framing.
-                    let key_share_data = match encode_keystore_blob(key_package, public_key_package) {
+                    let key_share_data = match encode_keystore_blob(key_package, public_key_package)
+                    {
                         Ok(bytes) => bytes,
                         Err(e) => {
-                            let err = format!("FinalizeWalletFromDkg: encode_keystore_blob failed: {}", e);
+                            let err = format!(
+                                "FinalizeWalletFromDkg: encode_keystore_blob failed: {}",
+                                e
+                            );
                             error!("{}", err);
                             let _ = tx.send(Message::DKGFailed { error: err });
                             return Ok(());
@@ -2314,7 +2539,8 @@ impl Command {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             let err = format!(
-                                "FinalizeWalletFromDkg: VerifyingKey::serialize failed: {:?}", e
+                                "FinalizeWalletFromDkg: VerifyingKey::serialize failed: {:?}",
+                                e
                             );
                             error!("{}", err);
                             let _ = tx.send(Message::DKGFailed { error: err });
@@ -2332,9 +2558,7 @@ impl Command {
                     // `participant_index = 3`.
                     let mut sorted = session.participants.clone();
                     sorted.sort();
-                    let participant_index = match sorted
-                        .iter()
-                        .position(|p| p == &state.device_id)
+                    let participant_index = match sorted.iter().position(|p| p == &state.device_id)
                     {
                         Some(idx) => (idx as u16) + 1,
                         None => {
@@ -2351,7 +2575,9 @@ impl Command {
                     // Curve comes from the type-level witness — not from
                     // `session.curve_type`, which is still the legacy
                     // "unified" literal (see Stage 5 of the plan).
-                    let curve_type_str = <C as crate::utils::curve_traits::CurveIdentifier>::curve_type().to_string();
+                    let curve_type_str =
+                        <C as crate::utils::curve_traits::CurveIdentifier>::curve_type()
+                            .to_string();
 
                     // ACCOUNT 0's addresses, not the root group-key ones that
                     // `state.blockchain_addresses` holds — see `account0_addresses`.
@@ -2398,17 +2624,17 @@ impl Command {
                 let wallet_id = match ks.create_wallet_multi_chain(
                     &wallet_name,
                     &curve_type_str,
-                    Vec::new(),          // blockchains: ignored by keystore (derived from group_pubkey)
+                    Vec::new(), // blockchains: ignored by keystore (derived from group_pubkey)
                     threshold,
                     total_participants,
                     &group_pubkey_hex,
                     &key_share_data,
                     &password,
-                    Vec::new(),          // tags (deprecated)
-                    None,                // description (deprecated)
+                    Vec::new(), // tags (deprecated)
+                    None,       // description (deprecated)
                     participant_index,
                     participants_sorted,
-                    wallet_label,        // optional user-chosen display label
+                    wallet_label, // optional user-chosen display label
                 ) {
                     Ok(id) => id,
                     Err(e) => {
@@ -2459,7 +2685,11 @@ impl Command {
                 });
             }
 
-            Command::UnlockWallet { wallet_id, password, keystore_path } => {
+            Command::UnlockWallet {
+                wallet_id,
+                password,
+                keystore_path,
+            } => {
                 // Counterpart to `FinalizeWalletFromDkg`: decrypt the
                 // keystore file, deserialize the `(KeyPackage, PubKeyPackage)`
                 // tuple, and write both onto AppState so the signing
@@ -2500,9 +2730,7 @@ impl Command {
                 // parent too, so derive + persist the child deterministically
                 // NOW instead of failing the lookup below. Non-child ids and
                 // unknown parents are a no-op (legacy path untouched).
-                if let Err(e) =
-                    materialize_child_wallet_if_needed(&mut ks, &wallet_id, &password)
-                {
+                if let Err(e) = materialize_child_wallet_if_needed(&mut ks, &wallet_id, &password) {
                     let err = format!(
                         "UnlockWallet: materializing account wallet '{}' failed: {}",
                         wallet_id, e
@@ -2545,7 +2773,8 @@ impl Command {
                 // would mean someone wrote an inconsistent blob — better
                 // to fail loudly here than during aggregate later.
                 if key_package.verifying_key() != public_key_package.verifying_key() {
-                    let err = "UnlockWallet: KeyPackage and PublicKeyPackage disagree on group key".to_string();
+                    let err = "UnlockWallet: KeyPackage and PublicKeyPackage disagree on group key"
+                        .to_string();
                     error!("{}", err);
                     let _ = tx.send(Message::WalletUnlockFailed { error: err });
                     return Ok(());
@@ -2567,7 +2796,6 @@ impl Command {
             // These are the thin bridges that let UI-layer Messages reach
             // the async FROST driver in `protocal::signing`. Nothing substantive
             // happens here — the handlers own the real work.
-
             Command::StartSigning { request } => {
                 info!(
                     "🖊️  StartSigning dispatch: wallet={} chain={} message_bytes={}",
@@ -2702,19 +2930,11 @@ impl Command {
                         <C as crate::utils::curve_traits::CurveIdentifier>::curve_type();
                     let n_participants = {
                         let state = app_state.lock().await;
-                        state
-                            .session
-                            .as_ref()
-                            .map(|s| s.total)
-                            .unwrap_or(0)
+                        state.session.as_ref().map(|s| s.total).unwrap_or(0)
                     };
                     let threshold = {
                         let state = app_state.lock().await;
-                        state
-                            .session
-                            .as_ref()
-                            .map(|s| s.threshold)
-                            .unwrap_or(0)
+                        state.session.as_ref().map(|s| s.threshold).unwrap_or(0)
                     };
                     let participants = {
                         let state = app_state.lock().await;
@@ -2766,9 +2986,8 @@ impl Command {
                         // the announce rather than requiring an extra round.
                         "signing_message_hex": hex::encode(&request.transaction_data),
                     });
-                    let announce = starlab_signal_server::ClientMsg::AnnounceSession {
-                        session_info,
-                    };
+                    let announce =
+                        starlab_signal_server::ClientMsg::AnnounceSession { session_info };
                     match serde_json::to_string(&announce) {
                         Ok(json) => {
                             info!("Announcing signing session: {}", session_id);
@@ -2832,7 +3051,10 @@ impl Command {
                 .await;
             }
 
-            Command::JoinSigning { session_id, message_bytes } => {
+            Command::JoinSigning {
+                session_id,
+                message_bytes,
+            } => {
                 // Joiner-side counterpart of `StartSigning`. The session
                 // was already recorded on AppState by the accept-path
                 // update handler (`SubmitPassword` / joiner branch).
@@ -2866,15 +3088,12 @@ impl Command {
                         // Find the wallet by its session_id-derived id.
                         // The current_wallet_id was set by UnlockWallet.
                         let (meta, keystore_path) = (
-                            state
-                                .keystore
-                                .as_ref()
-                                .and_then(|ks| {
-                                    state
-                                        .current_wallet_id
-                                        .as_ref()
-                                        .and_then(|id| ks.get_wallet(id).cloned())
-                                }),
+                            state.keystore.as_ref().and_then(|ks| {
+                                state
+                                    .current_wallet_id
+                                    .as_ref()
+                                    .and_then(|id| ks.get_wallet(id).cloned())
+                            }),
                             state.signal_server_url.clone(),
                         );
                         let _ = keystore_path; // unused; kept for clarity
@@ -2952,7 +3171,10 @@ impl Command {
                 .await;
             }
 
-            Command::ProcessSigningRound1 { from_device, commitment_bytes } => {
+            Command::ProcessSigningRound1 {
+                from_device,
+                commitment_bytes,
+            } => {
                 let self_device_id = {
                     let state = app_state.lock().await;
                     state.device_id.clone()
@@ -2967,7 +3189,10 @@ impl Command {
                 .await;
             }
 
-            Command::ProcessSigningRound2 { from_device, share_bytes } => {
+            Command::ProcessSigningRound2 {
+                from_device,
+                share_bytes,
+            } => {
                 crate::protocal::signing::process_signing_round2::<C>(
                     app_state.clone(),
                     from_device,
@@ -3047,12 +3272,12 @@ impl Command {
                     message: "✅ Reconnected to signal server".to_string(),
                 });
             }
-            
+
             Command::SendMessage(msg) => {
                 // Forward the message
                 let _ = tx.send(msg);
             }
-            
+
             Command::ScheduleMessage { delay_ms, message } => {
                 // Schedule a message to be sent after a delay
                 tokio::spawn(async move {
@@ -3072,22 +3297,22 @@ impl Command {
                 // UI refresh handled by the view layer
                 info!("UI refresh requested");
             }
-            
+
             Command::Quit => {
                 info!("Application quit requested");
                 // Send quit message to trigger app shutdown
                 let _ = tx.send(Message::Quit);
             }
-            
+
             Command::None => {
                 // No operation
             }
-            
+
             _ => {
                 info!("Command not yet implemented: {:?}", self);
             }
         }
-        
+
         Ok(())
     }
 }
@@ -3095,7 +3320,7 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_command_creation() {
         let cmd = Command::LoadWallets;
@@ -3121,29 +3346,24 @@ mod tests {
     #[test]
     fn encode_decode_keystore_blob_round_trips() {
         use frost_secp256k1::{
+            Identifier, Secp256K1Sha256,
             keys::{
-                generate_with_dealer, IdentifierList, KeyPackage as KP,
-                PublicKeyPackage as PKP,
+                IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer,
             },
             rand_core::OsRng,
-            Identifier, Secp256K1Sha256,
         };
         let rng = OsRng;
-        let (secret_shares, pubkey_package): (
-            std::collections::BTreeMap<Identifier, _>,
-            PKP,
-        ) = generate_with_dealer(3, 2, IdentifierList::Default, rng)
-            .expect("trusted-dealer keygen");
+        let (secret_shares, pubkey_package): (std::collections::BTreeMap<Identifier, _>, PKP) =
+            generate_with_dealer(3, 2, IdentifierList::Default, rng)
+                .expect("trusted-dealer keygen");
 
         let (id, secret_share) = secret_shares.iter().next().unwrap();
-        let key_package: KP =
-            secret_share.clone().try_into().expect("share → KeyPackage");
+        let key_package: KP = secret_share.clone().try_into().expect("share → KeyPackage");
 
-        let blob = encode_keystore_blob::<Secp256K1Sha256>(&key_package, &pubkey_package)
-            .expect("encode");
+        let blob =
+            encode_keystore_blob::<Secp256K1Sha256>(&key_package, &pubkey_package).expect("encode");
 
-        let (kp_back, pkp_back) =
-            decode_keystore_blob::<Secp256K1Sha256>(&blob).expect("decode");
+        let (kp_back, pkp_back) = decode_keystore_blob::<Secp256K1Sha256>(&blob).expect("decode");
 
         assert_eq!(
             kp_back.identifier(),
@@ -3235,7 +3455,11 @@ mod account_wallet_tests {
         materialize_child_wallet_if_needed(&mut ks, &child_id, PW).expect("materialize");
 
         let meta = ks.get_wallet(&child_id).expect("child must exist").clone();
-        assert_eq!(meta.label.as_deref(), Some("m/44'/60'/0'/0/7"), "label IS the path");
+        assert_eq!(
+            meta.label.as_deref(),
+            Some("m/44'/60'/0'/0/7"),
+            "label IS the path"
+        );
         assert_eq!(meta.curve_type, "secp256k1");
         assert_eq!((meta.threshold, meta.total_participants), (2, 3));
         assert_eq!(meta.participant_index, 1);
@@ -3250,7 +3474,10 @@ mod account_wallet_tests {
         )
         .unwrap();
         assert_eq!(meta.group_public_key, hex::encode(expected));
-        assert_ne!(meta.group_public_key, parent_group, "child key must differ from root");
+        assert_ne!(
+            meta.group_public_key, parent_group,
+            "child key must differ from root"
+        );
 
         // And the encrypted share actually decodes for signing.
         let blob = ks.load_wallet_file(&child_id, PW).expect("unlock child");
@@ -3264,10 +3491,10 @@ mod account_wallet_tests {
     fn unknown_and_non_child_ids_are_no_ops() {
         let (_dir, mut ks, _) = keystore_with_parent();
         for id in [
-            PARENT,                       // root id
-            "no-such-parent-ethereum-0",  // well-formed child, parent absent
-            "wallet-dogecoin-1",          // unknown chain
-            "wallet-ethereum-x",          // non-numeric account
+            PARENT,                      // root id
+            "no-such-parent-ethereum-0", // well-formed child, parent absent
+            "wallet-dogecoin-1",         // unknown chain
+            "wallet-ethereum-x",         // non-numeric account
         ] {
             materialize_child_wallet_if_needed(&mut ks, id, PW)
                 .unwrap_or_else(|e| panic!("{id} must be a no-op, got Err({e})"));

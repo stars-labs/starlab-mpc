@@ -8,11 +8,11 @@
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tokio::net::TcpListener;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
+use tokio::net::TcpListener;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The user-facing label the simulated DKG creator gives its wallet. Chosen
 /// so it can never collide with a `dkg_<uuid>` session id — that lets LIFE-3
@@ -78,10 +78,22 @@ impl SigningResult {
 #[derive(Debug, Clone)]
 enum Evt {
     Connected,
-    SessionDiscovered { id: String, signing: bool, reshare: bool },
-    DkgDone { wallet_id: String, group_key: String },
-    SignDone { signature: String, message: String },
-    ReshareDone { group_key: String },
+    SessionDiscovered {
+        id: String,
+        signing: bool,
+        reshare: bool,
+    },
+    DkgDone {
+        wallet_id: String,
+        group_key: String,
+    },
+    SignDone {
+        signature: String,
+        message: String,
+    },
+    ReshareDone {
+        group_key: String,
+    },
 }
 
 fn watcher() -> (
@@ -113,7 +125,9 @@ fn watcher() -> (
                         group_key: group_pubkey_hex.clone(),
                     });
                 }
-                Message::ReshareComplete { group_public_key, .. } => {
+                Message::ReshareComplete {
+                    group_public_key, ..
+                } => {
                     let _ = tx.send(Evt::ReshareDone {
                         group_key: group_public_key.clone(),
                     });
@@ -233,13 +247,14 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     })?;
 
     for (i, rx) in receivers.iter_mut().enumerate().skip(1) {
-        let session_id =
-            match wait_for(rx, 20, |e| matches!(e, Evt::SessionDiscovered { signing: false, .. }))
-                .await?
-            {
-                Evt::SessionDiscovered { id, .. } => id,
-                _ => unreachable!(),
-            };
+        let session_id = match wait_for(rx, 20, |e| {
+            matches!(e, Evt::SessionDiscovered { signing: false, .. })
+        })
+        .await?
+        {
+            Evt::SessionDiscovered { id, .. } => id,
+            _ => unreachable!(),
+        };
         senders[i].send(Message::HeadlessJoinSession {
             session_id,
             password: format!("sim-password-{i}"),
@@ -250,7 +265,11 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     let mut outcomes = Vec::new();
     for (i, rx) in receivers.iter_mut().enumerate() {
         let done = wait_for(rx, opts.timeout_secs, |e| matches!(e, Evt::DkgDone { .. })).await?;
-        if let Evt::DkgDone { wallet_id, group_key } = done {
+        if let Evt::DkgDone {
+            wallet_id,
+            group_key,
+        } = done
+        {
             outcomes.push(NodeOutcome {
                 device_id: device_ids[i].clone(),
                 wallet_id,
@@ -259,7 +278,10 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         }
     }
 
-    let group_key = outcomes.first().map(|o| o.group_public_key.clone()).unwrap_or_default();
+    let group_key = outcomes
+        .first()
+        .map(|o| o.group_public_key.clone())
+        .unwrap_or_default();
     let agreed = !group_key.is_empty() && outcomes.iter().all(|o| o.group_public_key == group_key);
 
     Ok(Cluster {
@@ -313,7 +335,11 @@ async fn drive_signing(
     }
 
     // Wait for the aggregated signature on the initiator.
-    match wait_for(&mut receivers[0], timeout_secs, |e| matches!(e, Evt::SignDone { .. })).await? {
+    match wait_for(&mut receivers[0], timeout_secs, |e| {
+        matches!(e, Evt::SignDone { .. })
+    })
+    .await?
+    {
         Evt::SignDone { signature, message } => Ok((signature, message)),
         _ => unreachable!(),
     }
@@ -413,7 +439,10 @@ impl ReshareE2eResult {
 /// Networked reshare end to end over the real WebRTC mesh: run DKG, then trigger
 /// a same-set reshare on every node (reusing the live mesh), confirm all nodes
 /// preserve the group key, and finally sign with the REFRESHED shares + verify.
-pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Result<ReshareE2eResult> {
+pub async fn run_reshare_e2e(
+    opts: SimulateOpts,
+    message: &str,
+) -> anyhow::Result<ReshareE2eResult> {
     let nodes = opts.nodes;
     let threshold = opts.threshold;
     let started = Instant::now();
@@ -484,7 +513,11 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
         keystore_path: keystores[0].path().to_string_lossy().to_string(),
     })?;
     for (i, rx) in receivers.iter_mut().enumerate().skip(1) {
-        let session_id = match wait_for(rx, 20, |e| matches!(e, Evt::SessionDiscovered { reshare: true, .. })).await? {
+        let session_id = match wait_for(rx, 20, |e| {
+            matches!(e, Evt::SessionDiscovered { reshare: true, .. })
+        })
+        .await?
+        {
             Evt::SessionDiscovered { id, .. } => id,
             _ => unreachable!(),
         };
@@ -498,13 +531,16 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     // Every node must report reshare completion with the unchanged group key.
     let mut reshare_keys = Vec::new();
     for rx in receivers.iter_mut() {
-        let done = wait_for(rx, opts.timeout_secs, |e| matches!(e, Evt::ReshareDone { .. })).await?;
+        let done = wait_for(rx, opts.timeout_secs, |e| {
+            matches!(e, Evt::ReshareDone { .. })
+        })
+        .await?;
         if let Evt::ReshareDone { group_key } = done {
             reshare_keys.push(group_key);
         }
     }
-    let key_preserved = reshare_keys.len() == nodes
-        && reshare_keys.iter().all(|k| *k == dkg_group_key);
+    let key_preserved =
+        reshare_keys.len() == nodes && reshare_keys.iter().all(|k| *k == dkg_group_key);
     let reshare_group_key = reshare_keys.first().cloned().unwrap_or_default();
 
     // Persistence check: node 0's refreshed share is on disk with the unchanged
@@ -513,7 +549,10 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
         use starlab_client::keystore::Keystore;
         Keystore::new(keystores[0].path(), &device_ids[0])
             .ok()
-            .and_then(|ks| ks.get_wallet(&wallet_id).map(|w| w.group_public_key.clone()))
+            .and_then(|ks| {
+                ks.get_wallet(&wallet_id)
+                    .map(|w| w.group_public_key.clone())
+            })
             .unwrap_or_default()
     };
     let share_persisted = persisted_group_key == dkg_group_key;
@@ -578,9 +617,7 @@ impl ReloadListResult {
 /// agents) alive to corrupt a new mesh. Faithful LIFE-2 needs real process
 /// death and belongs in the L3 `serve`-subprocess harness (see
 /// docs/cli-conformance-testing.md).
-pub async fn run_reload_list_simulation(
-    opts: SimulateOpts,
-) -> anyhow::Result<ReloadListResult> {
+pub async fn run_reload_list_simulation(opts: SimulateOpts) -> anyhow::Result<ReloadListResult> {
     let started = Instant::now();
 
     let c = dkg_cluster(&opts).await?;
@@ -686,16 +723,14 @@ pub async fn run_reload_unlock_simulation(
 
     // (unlocked, error) — exactly one of WalletUnlocked / WalletUnlockFailed.
     let (utx, mut urx) = unbounded_channel::<(bool, Option<String>)>();
-    let cb = move |_model: &Model, msg: Option<&Message>| {
-        match msg {
-            Some(Message::WalletUnlocked { .. }) => {
-                let _ = utx.send((true, None));
-            }
-            Some(Message::WalletUnlockFailed { error }) => {
-                let _ = utx.send((false, Some(error.clone())));
-            }
-            _ => {}
+    let cb = move |_model: &Model, msg: Option<&Message>| match msg {
+        Some(Message::WalletUnlocked { .. }) => {
+            let _ = utx.send((true, None));
         }
+        Some(Message::WalletUnlockFailed { error }) => {
+            let _ = utx.send((false, Some(error.clone())));
+        }
+        _ => {}
     };
     // No network: unlock reads the keystore directly.
     let tx = spawn_secp256k1(device_id, keystore_path, String::new(), cb);

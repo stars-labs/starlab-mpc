@@ -3,7 +3,9 @@
 //! Messages represent all user actions, system events, and state transitions
 //! that can occur in the application. They are the only way to trigger state changes.
 
-use crate::elm::model::{Screen, WalletConfig, WalletMode, WalletTemplate, Modal, NotificationKind, ComponentId};
+use crate::elm::model::{
+    ComponentId, Modal, NotificationKind, Screen, WalletConfig, WalletMode, WalletTemplate,
+};
 use crate::protocal::signal::SessionInfo;
 use crate::utils::state::PendingSigningRequest;
 
@@ -17,7 +19,7 @@ pub enum Message {
     PushScreen(Screen),
     PopScreen,
     ForceRemount,
-    
+
     // Headless control messages — used by non-TUI front-ends (e.g. the
     // native Iced app) that drive the same Elm core without the
     // multi-screen keyboard flow. Each one seeds the model state the
@@ -72,25 +74,46 @@ pub enum Message {
     /// `model.wallet_state.unified` so the subsequent `HeadlessCreateWallet`
     /// announces `curve_type: "unified"` and runs the unified ceremony. Joiners
     /// don't need this — they learn "unified" from the announce.
-    SetUnifiedMode { unified: bool },
+    SetUnifiedMode {
+        unified: bool,
+    },
 
     // Wallet management messages
-    CreateWallet { config: WalletConfig },
-    SelectWallet { wallet_id: String },
+    CreateWallet {
+        config: WalletConfig,
+    },
+    SelectWallet {
+        wallet_id: String,
+    },
     ListWallets,
-    WalletsLoaded { wallets: Vec<crate::keystore::WalletMetadata> },
-    DeleteWallet { wallet_id: String },
-    WalletDeleted { wallet_id: String },
-    ExportWallet { wallet_id: String },
-    WalletExported { wallet_id: String, path: String },
-    ImportWallet { data: Vec<u8> },
-    WalletImported { wallet_id: String },
+    WalletsLoaded {
+        wallets: Vec<crate::keystore::WalletMetadata>,
+    },
+    DeleteWallet {
+        wallet_id: String,
+    },
+    WalletDeleted {
+        wallet_id: String,
+    },
+    ExportWallet {
+        wallet_id: String,
+    },
+    WalletExported {
+        wallet_id: String,
+        path: String,
+    },
+    ImportWallet {
+        data: Vec<u8>,
+    },
+    WalletImported {
+        wallet_id: String,
+    },
     /// '+' on the WalletDetail screen — derive one more BIP-44 account
     /// row in the accounts table (`Model.ui_state.accounts_shown`).
     AccountsShowMore,
     /// '-' on the WalletDetail screen — show one fewer account (floors at 1).
     AccountsShowLess,
-    
+
     // Wallet creation flow
     SelectMode(WalletMode),
     SelectTemplate(WalletTemplate),
@@ -106,7 +129,9 @@ pub enum Message {
     /// In the normal flow this is dispatched by
     /// [`Message::PasswordSubmitDraft`] after validation; tests can call it
     /// directly to skip the typing/validation step.
-    SubmitPassword { value: String },
+    SubmitPassword {
+        value: String,
+    },
     // ----- Keystroke-level password-prompt messages -----
     // The PasswordPrompt screen's draft lives on `Model.wallet_state` rather
     // than inside the component, because tuirealm's per-component `on()` is
@@ -124,23 +149,40 @@ pub enum Message {
     /// On success: clear drafts + dispatch `SubmitPassword { value }`.
     /// On failure: set `password_error` so the view can render it.
     PasswordSubmitDraft,
-    
+
     // DKG operations
-    InitiateDKG { params: DKGParams },
-    JoinSession { session_id: String },
+    InitiateDKG {
+        params: DKGParams,
+    },
+    JoinSession {
+        session_id: String,
+    },
     /// Bulk refresh: replace `session_invites` with the caller's snapshot.
     /// Emitted by explicit discovery queries (e.g. `Command::LoadSessions`).
-    SessionsLoaded { sessions: Vec<SessionInfo> },
+    SessionsLoaded {
+        sessions: Vec<SessionInfo>,
+    },
     /// Incremental add/update: merge a single session into `session_invites`
     /// (dedupe by `session_id`). Emitted by the primary WebSocket reader when
     /// the server pushes a `SessionAvailable` broadcast.
-    SessionDiscovered { session: SessionInfo },
+    SessionDiscovered {
+        session: SessionInfo,
+    },
     /// Incremental drop: remove a session from `session_invites`. Emitted by
     /// the primary WebSocket reader when the server pushes a `SessionRemoved`.
-    RemoveSession { session_id: String },
-    UpdateDKGProgress { round: DKGRound, progress: f32 },
-    UpdateDKGSessionId { real_session_id: String },
-    UpdateParticipants { participants: Vec<String> },
+    RemoveSession {
+        session_id: String,
+    },
+    UpdateDKGProgress {
+        round: DKGRound,
+        progress: f32,
+    },
+    UpdateDKGSessionId {
+        real_session_id: String,
+    },
+    UpdateParticipants {
+        participants: Vec<String>,
+    },
     // WebRTC connection status updates for DKG
     UpdateParticipantWebRTCStatus {
         device_id: String,
@@ -152,19 +194,43 @@ pub enum Message {
         total_count: usize,
         all_connected: bool,
     },
-    DKGComplete { result: DKGResult },
-    DKGFailed { error: String },
+    DKGComplete {
+        result: DKGResult,
+    },
+    DKGFailed {
+        error: String,
+    },
     CancelDKG,
-    StartDKGProtocol,  // Trigger the actual DKG protocol when mesh is ready
-    ProcessDKGRound1 { from_device: String, package_bytes: Vec<u8> },  // Process received DKG Round 1 package
-    ProcessDKGRound2 { from_device: String, package_bytes: Vec<u8> },  // Process received DKG Round 2 package
-    ProcessReshareRound1 { from_device: String, package_bytes: Vec<u8> }, // Reshare round 1 from a peer (#45)
-    ProcessReshareRound2 { from_device: String, package_bytes: Vec<u8> }, // Reshare round 2 from a peer (#45)
+    StartDKGProtocol, // Trigger the actual DKG protocol when mesh is ready
+    ProcessDKGRound1 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    }, // Process received DKG Round 1 package
+    ProcessDKGRound2 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    }, // Process received DKG Round 2 package
+    ProcessReshareRound1 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    }, // Reshare round 1 from a peer (#45)
+    ProcessReshareRound2 {
+        from_device: String,
+        package_bytes: Vec<u8>,
+    }, // Reshare round 2 from a peer (#45)
     /// Unified-DKG round 1 from a peer (JSON `UnifiedRound1Package`).
-    ProcessUnifiedDKGRound1 { from_device: String, package_json: String },
+    ProcessUnifiedDKGRound1 {
+        from_device: String,
+        package_json: String,
+    },
     /// Unified-DKG round 2 from a peer (JSON `UnifiedRound2Message`).
-    ProcessUnifiedDKGRound2 { from_device: String, message_json: String },
-    DKGKeyGenerated { group_pubkey_hex: String },                      // Final FROST key ready
+    ProcessUnifiedDKGRound2 {
+        from_device: String,
+        message_json: String,
+    },
+    DKGKeyGenerated {
+        group_pubkey_hex: String,
+    }, // Final FROST key ready
     /// Fires after `Command::UnlockWallet` successfully decrypted the
     /// wallet file and stashed `KeyPackage` + `PublicKeyPackage` on
     /// AppState. The handler pushes the next screen in the signing
@@ -196,11 +262,22 @@ pub enum Message {
     },
 
     // Signing operations
-    InitiateSigning { request: SigningRequest },
-    SigningRequestsLoaded { requests: Vec<PendingSigningRequest> },
-    ApproveSignature { request_id: String },
-    RejectSignature { request_id: String },
-    UpdateSigningProgress { request_id: String, progress: f32 },
+    InitiateSigning {
+        request: SigningRequest,
+    },
+    SigningRequestsLoaded {
+        requests: Vec<PendingSigningRequest>,
+    },
+    ApproveSignature {
+        request_id: String,
+    },
+    RejectSignature {
+        request_id: String,
+    },
+    UpdateSigningProgress {
+        request_id: String,
+        progress: f32,
+    },
     SigningComplete {
         request_id: String,
         /// Raw bytes that were signed. Embedded here so the handler can
@@ -210,7 +287,10 @@ pub enum Message {
         message: Vec<u8>,
         signature: Vec<u8>,
     },
-    SigningFailed { request_id: String, error: String },
+    SigningFailed {
+        request_id: String,
+        error: String,
+    },
     /// Co-signer accepted a pushed-notification signing request and wants
     /// to review it. Jumps the user to `Screen::JoinSession` on the
     /// Signing tab with the matching session pre-selected so the user
@@ -221,7 +301,9 @@ pub enum Message {
     /// from pressing Enter on the session in JoinSession: this only
     /// *navigates*; no wallet is unlocked and no active_session is set
     /// yet, so the user can still back out.
-    ReviewSigningRequest { session_id: String },
+    ReviewSigningRequest {
+        session_id: String,
+    },
     /// Co-signer hit Esc / chose Cancel on the pushed-notification
     /// signing-request modal. Semantically "I will not co-sign this
     /// ceremony": drop the session from `session_invites` so the
@@ -230,16 +312,24 @@ pub enum Message {
     /// decline was registered. Wire-propagation to the creator (so
     /// their SigningProgress roster reflects the decline) is a
     /// future stage — this only covers the local-UX half.
-    DeclineSigningRequest { session_id: String },
+    DeclineSigningRequest {
+        session_id: String,
+    },
     /// Received a peer's Round 1 signing commitment over the WebRTC mesh.
     /// Dispatched by the primary data-channel reader after decoding
     /// `SIGN_COMMIT:<base64>`; the handler forwards to
     /// `Command::ProcessSigningRound1` which drives the FROST accumulator
     /// in `protocal::signing`.
-    ProcessSigningRound1 { from_device: String, commitment_bytes: Vec<u8> },
+    ProcessSigningRound1 {
+        from_device: String,
+        commitment_bytes: Vec<u8>,
+    },
     /// Received a peer's Round 2 signature share over the WebRTC mesh.
     /// Shape mirrors `ProcessSigningRound1`.
-    ProcessSigningRound2 { from_device: String, share_bytes: Vec<u8> },
+    ProcessSigningRound2 {
+        from_device: String,
+        share_bytes: Vec<u8>,
+    },
     // ----- SignTransaction screen input (Phase C.3) -----
     // Same routing pattern as the PasswordPrompt screen: keystrokes
     // don't reach the component's `on()` — they go through the app-level
@@ -268,80 +358,141 @@ pub enum Message {
     /// WalletComplete / SignatureComplete success screens so the user
     /// can grab the group pubkey / signature hex with a single keypress.
     /// `label` describes what was copied (used in the notification).
-    CopyToClipboard { text: String, label: String },
-    
+    CopyToClipboard {
+        text: String,
+        label: String,
+    },
+
     // Network events
     WebSocketConnected,
     WebSocketDisconnected,
     TriggerReconnect,
-    WebSocketError { error: String },
-    PeerDiscovered { peer_id: String },
-    PeerDisconnected { peer_id: String },
-    NetworkMessage { from: String, data: Vec<u8> },
-    InitiateWebRTCWithParticipants { participants: Vec<String> },
+    WebSocketError {
+        error: String,
+    },
+    PeerDiscovered {
+        peer_id: String,
+    },
+    PeerDisconnected {
+        peer_id: String,
+    },
+    NetworkMessage {
+        from: String,
+        data: Vec<u8>,
+    },
+    InitiateWebRTCWithParticipants {
+        participants: Vec<String>,
+    },
     CheckWebRTCConnections,
     VerifyMeshConnectivity,
-    ConnectionStatusChanged { connected: bool },
-    
+    ConnectionStatusChanged {
+        connected: bool,
+    },
+
     // Keystore events
-    KeystoreInitialized { path: String },
-    KeystoreError { error: String },
+    KeystoreInitialized {
+        path: String,
+    },
+    KeystoreError {
+        error: String,
+    },
     KeystoreLocked,
     KeystoreUnlocked,
-    
+
     // UI events
     KeyPressed(crossterm::event::KeyEvent),
-    FocusChanged { component: ComponentId },
-    InputChanged { value: String },
+    FocusChanged {
+        component: ComponentId,
+    },
+    InputChanged {
+        value: String,
+    },
     ScrollUp,
     ScrollDown,
     ScrollLeft,
     ScrollRight,
-    ScrollTo { position: u16 },
-    SelectItem { index: usize },
-    
+    ScrollTo {
+        position: u16,
+    },
+    SelectItem {
+        index: usize,
+    },
+
     // Modal management
     ShowModal(Modal),
     CloseModal,
     ConfirmModal,
     CancelModal,
-    ModalInputSubmitted { value: String },
-    
+    ModalInputSubmitted {
+        value: String,
+    },
+
     // Notifications
-    ShowNotification { text: String, kind: NotificationKind },
-    ClearNotification { id: String },
+    ShowNotification {
+        text: String,
+        kind: NotificationKind,
+    },
+    ClearNotification {
+        id: String,
+    },
     ClearAllNotifications,
-    
+
     // Progress updates
-    StartProgress { operation: String, message: String },
-    UpdateProgress { progress: f32, message: Option<String> },
+    StartProgress {
+        operation: String,
+        message: String,
+    },
+    UpdateProgress {
+        progress: f32,
+        message: Option<String>,
+    },
     CompleteProgress,
-    
+
     // Settings
-    UpdateWebSocketUrl { url: String },
-    UpdateDeviceId { device_id: String },
+    UpdateWebSocketUrl {
+        url: String,
+    },
+    UpdateDeviceId {
+        device_id: String,
+    },
     SaveSettings,
     LoadSettings,
-    SettingsLoaded { websocket_url: String, device_id: String },
-    
+    SettingsLoaded {
+        websocket_url: String,
+        device_id: String,
+    },
+
     // System messages
     Initialize,
     Shutdown,
     Quit,
     Refresh,
-    Error { message: String },
-    Success { message: String },
-    Warning { message: String },
-    Info { message: String },
-    
+    Error {
+        message: String,
+    },
+    Success {
+        message: String,
+    },
+    Warning {
+        message: String,
+    },
+    Info {
+        message: String,
+    },
+
     // Command execution results
-    CommandCompleted { command: String },
-    CommandFailed { command: String, error: String },
-    
+    CommandCompleted {
+        command: String,
+    },
+    CommandFailed {
+        command: String,
+        error: String,
+    },
+
     // Time-based events
     Tick,
     Heartbeat,
-    
+
     // No operation
     #[default]
     None,
@@ -402,45 +553,45 @@ impl Message {
     pub fn from_key_event(key: crossterm::event::KeyEvent) -> Self {
         Message::KeyPressed(key)
     }
-    
+
     /// Check if this is a navigation message
     pub fn is_navigation(&self) -> bool {
         matches!(
             self,
             Message::Navigate(_)
-            | Message::NavigateBack
-            | Message::NavigateHome
-            | Message::PushScreen(_)
-            | Message::PopScreen
+                | Message::NavigateBack
+                | Message::NavigateHome
+                | Message::PushScreen(_)
+                | Message::PopScreen
         )
     }
-    
+
     /// Check if this is an error message
     pub fn is_error(&self) -> bool {
         matches!(
             self,
             Message::Error { .. }
-            | Message::DKGFailed { .. }
-            | Message::SigningFailed { .. }
-            | Message::WebSocketError { .. }
-            | Message::KeystoreError { .. }
-            | Message::CommandFailed { .. }
+                | Message::DKGFailed { .. }
+                | Message::SigningFailed { .. }
+                | Message::WebSocketError { .. }
+                | Message::KeystoreError { .. }
+                | Message::CommandFailed { .. }
         )
     }
-    
+
     /// Check if this is a success message
     pub fn is_success(&self) -> bool {
         matches!(
             self,
             Message::Success { .. }
-            | Message::DKGComplete { .. }
-            | Message::SigningComplete { .. }
-            | Message::WalletImported { .. }
-            | Message::WalletExported { .. }
-            | Message::CommandCompleted { .. }
+                | Message::DKGComplete { .. }
+                | Message::SigningComplete { .. }
+                | Message::WalletImported { .. }
+                | Message::WalletExported { .. }
+                | Message::CommandCompleted { .. }
         )
     }
-    
+
     // Removed from_global_key - using direct key handling in app.rs instead (KISS)
 }
 
@@ -453,7 +604,7 @@ impl From<crossterm::event::KeyEvent> for Message {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_message_is_navigation() {
         assert!(Message::NavigateBack.is_navigation());
@@ -461,18 +612,38 @@ mod tests {
         assert!(!Message::Quit.is_navigation());
         println!("✅ Navigation message detection works");
     }
-    
+
     #[test]
     fn test_message_is_error() {
-        assert!(Message::Error { message: "test".to_string() }.is_error());
-        assert!(!Message::Success { message: "test".to_string() }.is_error());
+        assert!(
+            Message::Error {
+                message: "test".to_string()
+            }
+            .is_error()
+        );
+        assert!(
+            !Message::Success {
+                message: "test".to_string()
+            }
+            .is_error()
+        );
         println!("✅ Error message detection works");
     }
-    
+
     #[test]
     fn test_message_is_success() {
-        assert!(Message::Success { message: "test".to_string() }.is_success());
-        assert!(!Message::Error { message: "test".to_string() }.is_success());
+        assert!(
+            Message::Success {
+                message: "test".to_string()
+            }
+            .is_success()
+        );
+        assert!(
+            !Message::Error {
+                message: "test".to_string()
+            }
+            .is_success()
+        );
         println!("✅ Success message detection works");
     }
 }

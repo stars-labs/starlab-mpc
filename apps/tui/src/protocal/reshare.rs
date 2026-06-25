@@ -22,11 +22,11 @@
 //! (validated in frost-core `resharing.rs` + phase 1).
 
 use frost_core::keys::dkg::{round1, round2};
-use frost_core::keys::refresh::{refresh_dkg_part2, refresh_dkg_part_1, refresh_dkg_shares};
+use frost_core::keys::refresh::{refresh_dkg_part_1, refresh_dkg_part2, refresh_dkg_shares};
 // frost_ed25519 / frost_secp256k1 re-export the same rand_core 0.6; OsRng is
 // curve-agnostic and satisfies frost's RngCore + CryptoRng bound for any C.
-use frost_ed25519::rand_core::OsRng;
 use frost_core::{Ciphersuite, Identifier};
+use frost_ed25519::rand_core::OsRng;
 
 use crate::utils::appstate_compat::AppState;
 
@@ -52,9 +52,8 @@ pub fn reshare_part1<C: Ciphersuite>(
     max_signers: u16,
     min_signers: u16,
 ) -> Result<round1::Package<C>, String> {
-    let (secret, package) =
-        refresh_dkg_part_1::<C, _>(identifier, max_signers, min_signers, OsRng)
-            .map_err(|e| format!("reshare part1: {e}"))?;
+    let (secret, package) = refresh_dkg_part_1::<C, _>(identifier, max_signers, min_signers, OsRng)
+        .map_err(|e| format!("reshare part1: {e}"))?;
     state.reshare_round1_secret = Some(secret);
     state.reshare_in_progress = true;
     Ok(package)
@@ -78,9 +77,8 @@ pub fn reshare_part2<C: Ciphersuite>(
         .reshare_round1_secret
         .take()
         .ok_or("reshare part2: no round-1 secret")?;
-    let (r2_secret, r2_packages) =
-        refresh_dkg_part2::<C>(secret, &state.reshare_round1_packages)
-            .map_err(|e| format!("reshare part2: {e}"))?;
+    let (r2_secret, r2_packages) = refresh_dkg_part2::<C>(secret, &state.reshare_round1_packages)
+        .map_err(|e| format!("reshare part2: {e}"))?;
     state.reshare_round2_secret = Some(r2_secret);
     Ok(r2_packages)
 }
@@ -182,7 +180,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info};
 
 fn b64(bytes: &[u8]) -> String {
-    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     BASE64.encode(bytes)
 }
 
@@ -213,7 +211,10 @@ pub async fn handle_trigger_reshare_round1<C>(
         let my_id = match reshare_identifier::<C>(&original, &self_device_id) {
             Some(id) => id,
             None => {
-                error!("reshare round1: {} not in original participants", self_device_id);
+                error!(
+                    "reshare round1: {} not in original participants",
+                    self_device_id
+                );
                 return;
             }
         };
@@ -234,11 +235,16 @@ pub async fn handle_trigger_reshare_round1<C>(
         (session.participants.clone(), bytes)
     };
 
-    let msg = WebRTCMessage::<C>::SimpleMessage { text: format!("RESHARE_ROUND1:{}", b64(&pkg_bytes)) };
+    let msg = WebRTCMessage::<C>::SimpleMessage {
+        text: format!("RESHARE_ROUND1:{}", b64(&pkg_bytes)),
+    };
     for peer in participants.iter().filter(|p| **p != self_device_id) {
         let _ = crate::utils::device::send_webrtc_message(peer, &msg, state.clone()).await;
     }
-    info!("📡 reshare round-1 broadcast to {} peers", participants.len().saturating_sub(1));
+    info!(
+        "📡 reshare round-1 broadcast to {} peers",
+        participants.len().saturating_sub(1)
+    );
     maybe_advance_to_reshare_round2(state, self_device_id, tx).await;
 }
 
@@ -452,8 +458,10 @@ where
             match crate::elm::command::encode_keystore_blob(&new_key, &new_pub) {
                 Ok(blob) => match crate::keystore::Keystore::new(&path, &device_id) {
                     Ok(mut ks) => {
-                        let idx =
-                            ks.get_wallet(&wallet_id).map(|w| w.participant_index).unwrap_or(1);
+                        let idx = ks
+                            .get_wallet(&wallet_id)
+                            .map(|w| w.participant_index)
+                            .unwrap_or(1);
                         if let Err(e) = ks.update_wallet_share(
                             &wallet_id,
                             &blob,
@@ -474,7 +482,10 @@ where
             }
         }
         info!("✅ reshare complete; group key preserved = {}", group_hex);
-        let _ = tx.send(Message::ReshareComplete { wallet_id, group_public_key: group_hex });
+        let _ = tx.send(Message::ReshareComplete {
+            wallet_id,
+            group_public_key: group_hex,
+        });
     }
 }
 
@@ -552,14 +563,24 @@ mod tests {
     fn reshare_identifier_uses_original_set_not_reduced() {
         // Original sorted: alice=1, bob=2, carol=3.
         let original = vec!["alice".to_string(), "bob".to_string(), "carol".to_string()];
-        assert_eq!(reshare_identifier::<Secp>(&original, "alice"), Identifier::<Secp>::try_from(1).ok());
-        assert_eq!(reshare_identifier::<Secp>(&original, "carol"), Identifier::<Secp>::try_from(3).ok());
+        assert_eq!(
+            reshare_identifier::<Secp>(&original, "alice"),
+            Identifier::<Secp>::try_from(1).ok()
+        );
+        assert_eq!(
+            reshare_identifier::<Secp>(&original, "carol"),
+            Identifier::<Secp>::try_from(3).ok()
+        );
         // Removing the MIDDLE device (bob): survivors must KEEP their original ids.
         // The wrong approach (canonicalise over the reduced {alice,carol}) would
         // make carol=2 — proving why we must use the original set.
         let reduced = vec!["alice".to_string(), "carol".to_string()];
         let wrong = crate::protocal::dkg::canonical_identifier::<Secp>(&reduced, "carol");
-        assert_eq!(wrong, Identifier::<Secp>::try_from(2).ok(), "reduced-set id is 2 (wrong)");
+        assert_eq!(
+            wrong,
+            Identifier::<Secp>::try_from(2).ok(),
+            "reduced-set id is 2 (wrong)"
+        );
         assert_ne!(
             reshare_identifier::<Secp>(&original, "carol"),
             wrong,
@@ -572,7 +593,10 @@ mod tests {
         let (_, pp) = resharing::dkg_keypackages::<Secp>(3, 2, 20).unwrap();
         let before = hex::encode(pp.verifying_key().serialize().unwrap());
         let keys = run_reshare(3, 2, &[1, 2, 3]);
-        assert!(keys.iter().all(|k| *k == before), "group key preserved across all nodes");
+        assert!(
+            keys.iter().all(|k| *k == before),
+            "group key preserved across all nodes"
+        );
     }
 
     #[test]
@@ -582,6 +606,9 @@ mod tests {
         let before = hex::encode(pp.verifying_key().serialize().unwrap());
         let keys = run_reshare(3, 2, &[1, 3]);
         assert_eq!(keys.len(), 2);
-        assert!(keys.iter().all(|k| *k == before), "address preserved after middle removal");
+        assert!(
+            keys.iter().all(|k| *k == before),
+            "address preserved after middle removal"
+        );
     }
 }

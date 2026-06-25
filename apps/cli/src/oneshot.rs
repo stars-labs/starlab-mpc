@@ -12,10 +12,10 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::bridge::Bridge;
 use crate::protocol::CliEvent;
@@ -52,7 +52,11 @@ fn roster_hint(roster: &Arc<Mutex<RosterPeek>>) -> String {
     } else {
         r.participants.join(", ")
     };
-    let total = if r.total > 0 { r.total.to_string() } else { "?".to_string() };
+    let total = if r.total > 0 {
+        r.total.to_string()
+    } else {
+        "?".to_string()
+    };
     format!(
         "\n  → joined so far: [{seen}] ({}/{total}) — if that's short, a device isn't connected \
          or two used the SAME --device-id (each needs a unique one).",
@@ -139,7 +143,10 @@ fn connect_help(opts: &OneShotOpts, secs: u64) -> String {
 
 /// Wait for the signal-server connection; on timeout return [`connect_help`].
 /// A server-sent error frame (e.g. weak/missing room) surfaces immediately.
-async fn wait_connected(rx: &mut UnboundedReceiver<CliEvent>, opts: &OneShotOpts) -> anyhow::Result<()> {
+async fn wait_connected(
+    rx: &mut UnboundedReceiver<CliEvent>,
+    opts: &OneShotOpts,
+) -> anyhow::Result<()> {
     const SECS: u64 = 15;
     if opts.signal_url.starts_with("wss://") && !opts.signal_url.contains("room=") {
         eprintln!(
@@ -255,7 +262,11 @@ fn render_human(ev: &CliEvent) -> String {
             // rows (one key, many chains — a unified wallet shows all four).
             let mut rows: Vec<Vec<String>> = Vec::new();
             for w in wallets {
-                let name = if w.name == w.id { "-".to_string() } else { w.name.clone() };
+                let name = if w.name == w.id {
+                    "-".to_string()
+                } else {
+                    w.name.clone()
+                };
                 if w.addresses.is_empty() {
                     rows.push(vec![
                         w.id.clone(),
@@ -335,12 +346,19 @@ fn render_human(ev: &CliEvent) -> String {
         } => format!(
             "✔ Reshare complete — group key (and address) unchanged\n  Wallet ID:  {wallet_id}\n  Group key:  {group_public_key}"
         ),
-        CliEvent::Accounts { wallet_id, accounts } => {
+        CliEvent::Accounts {
+            wallet_id,
+            accounts,
+        } => {
             let mut rows: Vec<Vec<String>> = Vec::new();
             for a in accounts {
                 for (i, addr) in a.addresses.iter().enumerate() {
                     rows.push(vec![
-                        if i == 0 { a.account.to_string() } else { String::new() },
+                        if i == 0 {
+                            a.account.to_string()
+                        } else {
+                            String::new()
+                        },
                         addr.chain.clone(),
                         addr.address.clone(),
                         addr.path.clone().unwrap_or_else(|| "-".to_string()),
@@ -365,7 +383,11 @@ fn render_human(ev: &CliEvent) -> String {
                 .collect();
             let mut out = format!(
                 "✔ Derived {path} from {wallet_id}\n  Child wallet:  {child_id}{}\n\n",
-                if *saved { "  (saved — co-signers must run the same derive --save)" } else { "  (preview — re-run with --save to persist)" }
+                if *saved {
+                    "  (saved — co-signers must run the same derive --save)"
+                } else {
+                    "  (preview — re-run with --save to persist)"
+                }
             );
             out.push_str(&render_table(&["CHAIN", "ADDRESS"], &rows));
             out
@@ -377,11 +399,13 @@ fn render_human(ev: &CliEvent) -> String {
             curve,
         } => format!("ready (protocol v{protocol}, device {device_id}, curve {curve})"),
         CliEvent::Ack { correlates } => format!("ack #{correlates}"),
-        CliEvent::Connection { connected } => if *connected {
-            "✔ connected to the signal server".to_string()
-        } else {
-            "✖ disconnected from the signal server".to_string()
-        },
+        CliEvent::Connection { connected } => {
+            if *connected {
+                "✔ connected to the signal server".to_string()
+            } else {
+                "✖ disconnected from the signal server".to_string()
+            }
+        }
         CliEvent::Status {
             connected,
             device_id,
@@ -389,7 +413,11 @@ fn render_human(ev: &CliEvent) -> String {
         } => {
             let mut out = format!(
                 "Device:     {device_id}\nConnection: {}",
-                if *connected { "connected" } else { "disconnected" }
+                if *connected {
+                    "connected"
+                } else {
+                    "disconnected"
+                }
             );
             out.push_str("\n\n");
             out.push_str(&render_human(&CliEvent::Wallets {
@@ -445,7 +473,10 @@ pub async fn wallet_list(opts: OneShotOpts) -> anyhow::Result<bool> {
         &mut rx,
         5,
         "the wallet list",
-        &format!("\n  → Check the --keystore path is readable ({}).", opts.keystore_path),
+        &format!(
+            "\n  → Check the --keystore path is readable ({}).",
+            opts.keystore_path
+        ),
         None,
         |e| matches!(e, CliEvent::Wallets { .. }),
     )
@@ -498,15 +529,11 @@ pub async fn wallet_create(
     // to join. DKG only completes once all `total` participants join, so a lone
     // `wallet create` sits and waits — this tells the operator precisely what to
     // do next instead of leaving them guessing (the reported "how to start").
-    if let Ok(CliEvent::SessionAnnounced { session_id, .. }) = wait_outcome(
-        &mut rx,
-        20,
-        "the session announcement",
-        "",
-        None,
-        |e| matches!(e, CliEvent::SessionAnnounced { .. }),
-    )
-    .await
+    if let Ok(CliEvent::SessionAnnounced { session_id, .. }) =
+        wait_outcome(&mut rx, 20, "the session announcement", "", None, |e| {
+            matches!(e, CliEvent::SessionAnnounced { .. })
+        })
+        .await
     {
         let room = opts.signal_url.split("room=").nth(1).unwrap_or("");
         let room_flag = if room.is_empty() {
@@ -640,22 +667,27 @@ pub async fn sign(
     // implementation in `starlab_client::elm::command::ensure_account_wallet`
     // (the same one the elm co-signer unlock path uses), so the CLI and every
     // elm-driven client agree on the child id + label byte-for-byte.
-    let signing_wallet_id =
-        if starlab_core::accounts::parse_child_wallet_id(&wallet_id).is_some() {
-            wallet_id.clone()
-        } else {
-            use starlab_client::keystore::Keystore;
-            let mut ks = Keystore::new(&opts.keystore_path, &opts.device_id)
-                .map_err(|e| anyhow::anyhow!("open keystore {}: {e}", opts.keystore_path))?;
-            let (child_id, materialized) = starlab_client::elm::command::ensure_account_wallet(
-                &mut ks, &wallet_id, account, chain.as_deref(), &password,
-            )
-            .map_err(|e| anyhow::anyhow!("{e} (device {})", opts.device_id))?;
-            if materialized {
-                eprintln!("note: materialized account wallet '{child_id}' (deterministic — co-signers do the same on first use)");
-            }
-            child_id
-        };
+    let signing_wallet_id = if starlab_core::accounts::parse_child_wallet_id(&wallet_id).is_some() {
+        wallet_id.clone()
+    } else {
+        use starlab_client::keystore::Keystore;
+        let mut ks = Keystore::new(&opts.keystore_path, &opts.device_id)
+            .map_err(|e| anyhow::anyhow!("open keystore {}: {e}", opts.keystore_path))?;
+        let (child_id, materialized) = starlab_client::elm::command::ensure_account_wallet(
+            &mut ks,
+            &wallet_id,
+            account,
+            chain.as_deref(),
+            &password,
+        )
+        .map_err(|e| anyhow::anyhow!("{e} (device {})", opts.device_id))?;
+        if materialized {
+            eprintln!(
+                "note: materialized account wallet '{child_id}' (deterministic — co-signers do the same on first use)"
+            );
+        }
+        child_id
+    };
     let (tx, mut rx, roster) = start(&opts);
     tx.send(Message::TriggerReconnect)?;
     wait_connected(&mut rx, &opts).await?;
@@ -755,11 +787,17 @@ pub async fn wallet_accounts(
                 });
             }
         }
-        accounts.push(crate::protocol::AccountEntry { account: i, addresses });
+        accounts.push(crate::protocol::AccountEntry {
+            account: i,
+            addresses,
+        });
     }
 
     print(
-        &CliEvent::Accounts { wallet_id, accounts },
+        &CliEvent::Accounts {
+            wallet_id,
+            accounts,
+        },
         opts.json,
     );
     Ok(true)
@@ -915,9 +953,9 @@ pub async fn wallet_derive(
 #[cfg(test)]
 mod derive_tests {
     use super::*;
+    use frost_secp256k1::Secp256K1Sha256 as Secp;
     use starlab_client::elm::command::encode_keystore_blob;
     use starlab_core::resharing::{dkg_keypackages, threshold_sign_verify};
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
     use std::collections::BTreeMap;
 
     #[test]
@@ -940,8 +978,7 @@ mod derive_tests {
         let mut child_groups = Vec::new();
         for i in [1u16, 2, 3] {
             let blob = encode_keystore_blob::<Secp>(&kps[&i], &pp).unwrap();
-            let (child_blob, group_hex) =
-                derive_child_for_curve::<Secp>(&blob, &path).unwrap();
+            let (child_blob, group_hex) = derive_child_for_curve::<Secp>(&blob, &path).unwrap();
             let (ckp, cpp) =
                 starlab_client::elm::command::decode_keystore_blob::<Secp>(&child_blob).unwrap();
             child_kps.insert(i, ckp);

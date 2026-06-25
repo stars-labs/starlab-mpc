@@ -4,13 +4,16 @@
 //! model and a message, and returns an updated model along with optional commands
 //! to execute side effects.
 
-use crate::elm::model::{Model, Screen, Modal, Notification, NotificationKind, ConnectionStatus, Operation, ProgressInfo, WalletConfig, WalletMode, CreateWalletState, PendingSignPreview};
-use crate::elm::message::{Message, DKGRound};
 use crate::elm::command::Command;
+use crate::elm::message::{DKGRound, Message};
+use crate::elm::model::{
+    ConnectionStatus, CreateWalletState, Modal, Model, Notification, NotificationKind, Operation,
+    PendingSignPreview, ProgressInfo, Screen, WalletConfig, WalletMode,
+};
 use crate::protocal::signal::{SessionInfo, SessionType};
 use chrono::Utc;
 use crossterm::event::{KeyCode, KeyModifiers};
-use tracing::{info, debug, warn, error};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Mark the local DKG state as "Round 1 in progress" so the DKGProgress
@@ -56,25 +59,36 @@ fn frost_trigger_batch(model: &mut Model) -> Command {
 /// The main update function that handles all state transitions
 pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
     debug!("Processing message: {:?}", msg);
-    
+
     match msg {
         // ============= Navigation Messages =============
         Message::Navigate(screen) => {
             info!("Navigating to screen: {:?}", screen);
             model.push_screen(screen.clone());
-            
+
             // Update focus based on screen
             match screen {
                 Screen::CreateWallet(_) => {
                     model.ui_state.focus = crate::elm::model::ComponentId::CreateWallet;
                     // Initialize selected index for CreateWallet if not exists
-                    model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::CreateWallet).or_insert(0);
-                    debug!("🎯 CreateWallet focus set, selected index: {}", 
-                           model.ui_state.selected_indices[&crate::elm::model::ComponentId::CreateWallet]);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .entry(crate::elm::model::ComponentId::CreateWallet)
+                        .or_insert(0);
+                    debug!(
+                        "🎯 CreateWallet focus set, selected index: {}",
+                        model.ui_state.selected_indices
+                            [&crate::elm::model::ComponentId::CreateWallet]
+                    );
                 }
                 Screen::ModeSelection => {
                     model.ui_state.focus = crate::elm::model::ComponentId::ModeSelection;
-                    model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::ModeSelection).or_insert(0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .entry(crate::elm::model::ComponentId::ModeSelection)
+                        .or_insert(0);
                     debug!("🎯 ModeSelection focus set");
                 }
                 Screen::ManageWallets => {
@@ -82,7 +96,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::JoinSession => {
                     model.ui_state.focus = crate::elm::model::ComponentId::JoinSession;
-                    model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::JoinSession).or_insert(0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .entry(crate::elm::model::ComponentId::JoinSession)
+                        .or_insert(0);
                     debug!("🎯 JoinSession focus set");
                 }
                 Screen::MainMenu | Screen::Welcome => {
@@ -90,12 +108,20 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::DKGProgress { .. } => {
                     model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
-                    model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::DKGProgress).or_insert(0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .entry(crate::elm::model::ComponentId::DKGProgress)
+                        .or_insert(0);
                     debug!("🎯 DKGProgress focus set");
                 }
                 Screen::ThresholdConfig => {
                     model.ui_state.focus = crate::elm::model::ComponentId::ThresholdConfig;
-                    model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::ThresholdConfig).or_insert(0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .entry(crate::elm::model::ComponentId::ThresholdConfig)
+                        .or_insert(0);
                     debug!("🎯 ThresholdConfig focus set");
                 }
                 _ => {}
@@ -108,7 +134,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 _ => None,
             }
         }
-        
+
         Message::NavigateBack => {
             debug!("🔙 NavigateBack message received!");
             debug!("Current screen: {:?}", model.current_screen);
@@ -127,18 +153,23 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
 
             // Check if we're at the root screen (main menu with empty stack)
-            if model.navigation_stack.is_empty() && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome) {
+            if model.navigation_stack.is_empty()
+                && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
+            {
                 // At root level - Esc should quit the app
                 debug!("🚪 At root screen, Esc should quit");
                 return Some(Command::SendMessage(Message::Quit));
             }
-            
+
             // Otherwise, navigate back normally
             if !model.pop_screen() {
                 // Fallback - shouldn't happen after the check above
                 debug!("🚨 Already at root screen, staying put");
             } else {
-                debug!("✅ Successfully popped screen, new current screen: {:?}", model.current_screen);
+                debug!(
+                    "✅ Successfully popped screen, new current screen: {:?}",
+                    model.current_screen
+                );
                 // Update focus based on new current screen
                 match model.current_screen {
                     Screen::MainMenu | Screen::Welcome => {
@@ -170,13 +201,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         debug!("🎯 Focus set to JoinSession");
                     }
                     _ => {
-                        debug!("🎯 No specific focus set for screen: {:?}", model.current_screen);
+                        debug!(
+                            "🎯 No specific focus set for screen: {:?}",
+                            model.current_screen
+                        );
                     }
                 }
             }
             None
         }
-        
+
         Message::NavigateHome => {
             // Same invariant as NavigateBack: leaving PasswordPrompt must
             // wipe the draft, whichever route the user takes out.
@@ -225,14 +259,17 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.pop_screen();
             None
         }
-        
+
         Message::ForceRemount => {
             // This message forces a remount of the current screen's components
             // Used when returning from sub-screens to ensure UI updates
-            info!("ForceRemount triggered for screen: {:?}", model.current_screen);
+            info!(
+                "ForceRemount triggered for screen: {:?}",
+                model.current_screen
+            );
             None
         }
-        
+
         // ============= Wallet Management Messages =============
 
         // ----- PasswordPrompt draft input (keystroke-level) -----
@@ -306,9 +343,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     const MIN_PW_LEN: usize = 8;
                     let cf = model.wallet_state.confirm_draft.clone();
                     if pw.len() < MIN_PW_LEN {
-                        model.wallet_state.password_error = Some(format!(
-                            "Password must be at least {MIN_PW_LEN} characters"
-                        ));
+                        model.wallet_state.password_error =
+                            Some(format!("Password must be at least {MIN_PW_LEN} characters"));
                         return None;
                     }
                     if pw != cf {
@@ -371,29 +407,35 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             None
         }
 
-        Message::HeadlessCreateWallet { config, password, label } => {
-            model.wallet_state.creating_wallet =
-                Some(crate::elm::model::CreateWalletState {
-                    mode: Some(config.mode.clone()),
-                    template: None,
-                    custom_config: Some(config),
-                });
+        Message::HeadlessCreateWallet {
+            config,
+            password,
+            label,
+        } => {
+            model.wallet_state.creating_wallet = Some(crate::elm::model::CreateWalletState {
+                mode: Some(config.mode.clone()),
+                template: None,
+                custom_config: Some(config),
+            });
             model.wallet_state.wallet_name_draft = label;
-            Some(Command::SendMessage(Message::SubmitPassword { value: password }))
+            Some(Command::SendMessage(Message::SubmitPassword {
+                value: password,
+            }))
         }
 
         // Headless joiner entry: pick the discovered invite by id, mark it
         // active (the joiner signal SubmitPassword keys off), then hand off.
-        Message::HeadlessJoinSession { session_id, password, label } => {
+        Message::HeadlessJoinSession {
+            session_id,
+            password,
+            label,
+        } => {
             // Idempotent: the CLI joiner retries refresh+join on a short cadence
             // to beat the announce/connect race (the creator may announce before
             // we connect, and `announce_session` is a one-shot broadcast). Once
             // we've already joined this session, ignore repeat sends so we don't
             // re-fire SubmitPassword and clobber an in-progress DKG.
-            if model
-                .active_session
-                .as_ref()
-                .map(|s| s.session_id.as_str())
+            if model.active_session.as_ref().map(|s| s.session_id.as_str())
                 == Some(session_id.as_str())
             {
                 return None;
@@ -429,7 +471,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // compute the payload (EIP-191 hash for secp256k1, raw otherwise),
         // stash pending_sign_* (no session_id → "we're announcing one"),
         // then hand off to SubmitPassword which unlocks + InitiateSigning.
-        Message::HeadlessSign { wallet_id, message, encoding, password } => {
+        Message::HeadlessSign {
+            wallet_id,
+            message,
+            encoding,
+            password,
+        } => {
             let raw = if encoding.eq_ignore_ascii_case("hex") {
                 match hex::decode(message.trim().trim_start_matches("0x")) {
                     Ok(b) => b,
@@ -455,8 +502,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
             model.wallet_state.pending_sign_session_id = None;
-            model.wallet_state.pending_raw_message =
-                if curve == "secp256k1" { Some(raw) } else { None };
+            model.wallet_state.pending_raw_message = if curve == "secp256k1" {
+                Some(raw)
+            } else {
+                None
+            };
             // Clear any leftover DKG-creation/join state so SubmitPassword's
             // cold-start *sign* gate (creating_wallet.is_none() &&
             // active_session.is_none()) is taken — otherwise a wallet we just
@@ -465,7 +515,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.active_session = None;
             model.wallet_state.password_prompt_purpose =
                 crate::elm::model::PasswordPromptPurpose::Unlock;
-            Some(Command::SendMessage(Message::SubmitPassword { value: password }))
+            Some(Command::SendMessage(Message::SubmitPassword {
+                value: password,
+            }))
         }
 
         // Headless cold-start session replay: ask the server to resend every
@@ -545,8 +597,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         model.push_screen(Screen::DKGProgress {
                             session_id: session_id.clone(),
                         });
-                        model.ui_state.focus =
-                            crate::elm::model::ComponentId::DKGProgress;
+                        model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
                         model
                             .ui_state
                             .selected_indices
@@ -562,9 +613,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             curve_type: session.curve_type.clone(),
                         })
                     }
-                    crate::protocal::signal::SessionType::Signing {
-                        wallet_name, ..
-                    } => {
+                    crate::protocal::signal::SessionType::Signing { wallet_name, .. } => {
                         // Pull the message bytes from the announcement
                         // that came with the session. Hex decode is
                         // safe — the creator encoded it cleanly.
@@ -586,16 +635,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         let message_bytes = match hex::decode(hex_msg) {
                             Ok(b) => b,
                             Err(e) => {
-                                warn!(
-                                    "Signing announcement had invalid hex message: {}",
-                                    e
-                                );
+                                warn!("Signing announcement had invalid hex message: {}", e);
                                 model.ui_state.modal = Some(Modal::Error {
                                     title: "Corrupt signing session".to_string(),
-                                    message: format!(
-                                        "Bad message hex in announcement: {}",
-                                        e
-                                    ),
+                                    message: format!("Bad message hex in announcement: {}", e),
                                 });
                                 model.wallet_state.pending_password = None;
                                 return None;
@@ -626,10 +669,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         Some(Command::UnlockWallet {
                             wallet_id: wallet_name.clone(),
                             password,
-                            keystore_path: model
-                                .wallet_state
-                                .keystore_path
-                                .clone(),
+                            keystore_path: model.wallet_state.keystore_path.clone(),
                         })
                     }
                     crate::protocal::signal::SessionType::Reshare {
@@ -656,8 +696,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         model.push_screen(Screen::DKGProgress {
                             session_id: session_id.clone(),
                         });
-                        model.ui_state.focus =
-                            crate::elm::model::ComponentId::DKGProgress;
+                        model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
                         model
                             .ui_state
                             .selected_indices
@@ -715,16 +754,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::CreateWallet { config } => {
             info!("Creating wallet with config: {:?}", config);
-            
+
             // Don't generate session ID here - wait for StartDKG command to generate the real DKG session ID
             // Use a placeholder for now that will be updated by UpdateDKGSessionId message
             let temp_session_id = "pending".to_string();
             info!("Starting DKG process - session ID will be generated by StartDKG command");
-            
+
             // Initialize session state with current device as first participant
             let participants = vec![model.device_id.clone()];
             info!("Added current device as participant: {}", model.device_id);
-            
+
             // Create active session with placeholder session ID.
             // `curve_type` is the Model's boot-time snapshot of `C::curve_type()`,
             // UNLESS this is a unified ceremony — then it's the "unified" marker
@@ -745,21 +784,32 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 coordination_type: "online".to_string(),
                 signing_message_hex: None,
             });
-            
+
             // Navigate to DKG Progress screen with placeholder
-            model.push_screen(Screen::DKGProgress { session_id: temp_session_id });
+            model.push_screen(Screen::DKGProgress {
+                session_id: temp_session_id,
+            });
 
             // Set focus for DKGProgress screen
             model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
-            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::DKGProgress).or_insert(0);
-            
+            model
+                .ui_state
+                .selected_indices
+                .entry(crate::elm::model::ComponentId::DKGProgress)
+                .or_insert(0);
+
             // Add to pending operations
-            model.pending_operations.push(Operation::CreateWallet(config.clone()));
-            
+            model
+                .pending_operations
+                .push(Operation::CreateWallet(config.clone()));
+
             // Start DKG process - this will generate the real session ID
-            Some(Command::StartDKG { config, unified: model.wallet_state.unified })
+            Some(Command::StartDKG {
+                config,
+                unified: model.wallet_state.unified,
+            })
         }
-        
+
         Message::SelectWallet { wallet_id } => {
             info!("Selected wallet: {}", wallet_id);
             model.selected_wallet = Some(wallet_id.clone());
@@ -768,7 +818,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 crate::elm::components::wallet_detail::DEFAULT_ACCOUNTS_SHOWN;
 
             // Navigate to wallet detail
-            model.push_screen(Screen::WalletDetail { wallet_id: wallet_id.clone() });
+            model.push_screen(Screen::WalletDetail {
+                wallet_id: wallet_id.clone(),
+            });
 
             // Load wallet details
             Some(Command::LoadWalletDetails { wallet_id })
@@ -786,11 +838,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.ui_state.accounts_shown = model.ui_state.accounts_shown.saturating_sub(1).max(1);
             None
         }
-        
-        Message::ListWallets => {
-            Some(Command::LoadWallets)
-        }
-        
+
+        Message::ListWallets => Some(Command::LoadWallets),
+
         // Phase C.2/C.3 bridge: peer signing frames routed through the
         // protocol-layer Commands. Pure pass-through on purpose — the
         // update layer doesn't mutate Model state for these; all the
@@ -798,7 +848,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // directly. Keeping this thin means the UI remount logic
         // doesn't have to distinguish between "got a SIGN_COMMIT" and
         // "got a SIGN_SHARE" — both just advance the async driver.
-        Message::ProcessSigningRound1 { from_device, commitment_bytes } => {
+        Message::ProcessSigningRound1 {
+            from_device,
+            commitment_bytes,
+        } => {
             debug!(
                 "Routing SIGN_COMMIT from {} ({} bytes) to the protocol layer",
                 from_device,
@@ -819,7 +872,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             })
         }
 
-        Message::ProcessSigningRound2 { from_device, share_bytes } => {
+        Message::ProcessSigningRound2 {
+            from_device,
+            share_bytes,
+        } => {
             debug!(
                 "Routing SIGN_SHARE from {} ({} bytes) to the protocol layer",
                 from_device,
@@ -860,9 +916,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // before the new one starts recording commitments.
             model.wallet_state.signing_commitments_received.clear();
             model.wallet_state.signing_shares_received.clear();
-            model.push_screen(Screen::SigningProgress {
-                request_id,
-            });
+            model.push_screen(Screen::SigningProgress { request_id });
             Some(Command::StartSigning { request })
         }
 
@@ -874,7 +928,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // threshold-many to hear from each other in larger quorums.
         // Stash the snapshot + push SignatureComplete + clear all
         // transient signing state so the next ceremony starts clean.
-        Message::SigningComplete { request_id, message, signature } => {
+        Message::SigningComplete {
+            request_id,
+            message,
+            signature,
+        } => {
             info!(
                 "🎉 Signing complete: request_id={} signature={} bytes",
                 request_id,
@@ -893,8 +951,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         .as_ref()
                         .and_then(|s| match &s.session_type {
                             crate::protocal::signal::SessionType::Signing {
-                                wallet_name,
-                                ..
+                                wallet_name, ..
                             } => Some(wallet_name.clone()),
                             _ => None,
                         })
@@ -1084,8 +1141,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // selection exists on the accounts table yet; when it does, the
             // selected index slots in here.) The child share is materialized
             // on demand at unlock time.
-            let wallet_id =
-                account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
 
             let raw_message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
             // For secp256k1 wallets, sign the EIP-191 hash of the message
@@ -1096,8 +1152,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // signs variable-length input natively).
             let curve = model.wallet_state.curve_type;
             let (bytes_to_sign, raw_for_display) = if curve == "secp256k1" {
-                let hash =
-                    crate::utils::eth_helper::eip191_hash(&raw_message_bytes).to_vec();
+                let hash = crate::utils::eth_helper::eip191_hash(&raw_message_bytes).to_vec();
                 (hash, Some(raw_message_bytes))
             } else {
                 (raw_message_bytes, None)
@@ -1311,35 +1366,42 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .into_iter()
                 .filter(|w| !w.label.as_deref().is_some_and(|l| l.starts_with("m/")))
                 .collect();
-            
+
             // If on main menu and wallet count changed, force remount to update menu
-            if matches!(model.current_screen, Screen::MainMenu | Screen::Welcome) && 
-               old_count != model.wallet_state.wallets.len() {
-                info!("Wallet count changed from {} to {}, forcing menu update", 
-                      old_count, model.wallet_state.wallets.len());
+            if matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
+                && old_count != model.wallet_state.wallets.len()
+            {
+                info!(
+                    "Wallet count changed from {} to {}, forcing menu update",
+                    old_count,
+                    model.wallet_state.wallets.len()
+                );
                 Some(Command::SendMessage(Message::Refresh))
             } else {
                 None
             }
         }
-        
+
         Message::DeleteWallet { wallet_id } => {
             // Show confirmation modal
             model.ui_state.modal = Some(Modal::Confirm {
                 title: "Delete Wallet".to_string(),
-                message: format!("Are you sure you want to delete wallet '{}'? This action cannot be undone.", wallet_id),
+                message: format!(
+                    "Are you sure you want to delete wallet '{}'? This action cannot be undone.",
+                    wallet_id
+                ),
                 on_confirm: Box::new(Message::WalletDeleted { wallet_id }),
                 on_cancel: Box::new(Message::CloseModal),
             });
             None
         }
-        
+
         Message::WalletDeleted { wallet_id } => {
             info!("Deleting wallet: {}", wallet_id);
             model.ui_state.modal = None;
             Some(Command::DeleteWallet { wallet_id })
         }
-        
+
         // ============= Wallet Creation Flow =============
         Message::SelectMode(mode) => {
             if let Screen::CreateWallet(ref mut state) = model.current_screen {
@@ -1349,7 +1411,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         Message::SelectTemplate(template) => {
             if let Screen::CreateWallet(ref mut state) = model.current_screen {
                 let is_custom = template.name == "Custom";
@@ -1364,44 +1426,55 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         // ============= DKG Operations =============
         Message::UpdateDKGSessionId { real_session_id } => {
             info!("Updating DKG session ID to real ID: {}", real_session_id);
-            
+
             // Update the active session with the real DKG session ID
             if let Some(ref mut session) = model.active_session {
                 session.session_id = real_session_id.clone();
             }
-            
+
             // Update the screen to show the real session ID
             if let Screen::DKGProgress { ref mut session_id } = model.current_screen {
                 *session_id = real_session_id;
             }
-            
+
             // Force a remount to update the display
             Some(Command::SendMessage(Message::ForceRemount))
         }
-        
+
         Message::UpdateParticipants { participants } => {
             info!("Updating participants list: {:?}", participants);
-            
+
             // Update the active session with the current participants
             if let Some(ref mut session) = model.active_session {
                 session.participants = participants;
-                info!("Updated session participants to: {:?}", session.participants);
+                info!(
+                    "Updated session participants to: {:?}",
+                    session.participants
+                );
             }
-            
+
             // Force a remount to update the display with new participants
             Some(Command::SendMessage(Message::ForceRemount))
         }
-        
-        Message::UpdateParticipantWebRTCStatus { device_id, webrtc_connected, data_channel_open } => {
-            info!("Updating WebRTC status for {}: WebRTC={}, DataChannel={}",
-                 device_id, webrtc_connected, data_channel_open);
+
+        Message::UpdateParticipantWebRTCStatus {
+            device_id,
+            webrtc_connected,
+            data_channel_open,
+        } => {
+            info!(
+                "Updating WebRTC status for {}: WebRTC={}, DataChannel={}",
+                device_id, webrtc_connected, data_channel_open
+            );
 
             // Store the WebRTC status in the model's network state
-            model.network_state.participant_webrtc_status
+            model
+                .network_state
+                .participant_webrtc_status
                 .entry(device_id)
                 .and_modify(|status| {
                     status.0 = webrtc_connected;
@@ -1412,23 +1485,34 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Check if all participants are now connected and trigger DKG if needed
             let should_start_dkg = if let Some(ref session) = model.active_session {
                 // Count how many participants have data channels open (excluding self)
-                let connected_count = session.participants.iter()
+                let connected_count = session
+                    .participants
+                    .iter()
                     .filter(|p| **p != model.device_id)
                     .filter(|p| {
-                        model.network_state.participant_webrtc_status.get(*p)
+                        model
+                            .network_state
+                            .participant_webrtc_status
+                            .get(*p)
                             .is_some_and(|(_, data_channel_open)| *data_channel_open)
                     })
                     .count();
-                
+
                 // CRITICAL FIX: Use session.total, not current participant count!
                 // We must wait for the CONFIGURED total number of participants
                 let required_total_participants = session.total as usize;
                 let current_total_participants = session.participants.len();
                 let expected_other_participants = required_total_participants.saturating_sub(1);
-                
-                info!("🔍 DKG trigger check: connected={}/{}, current_participants={}/{}, dkg_in_progress={}", 
-                      connected_count, expected_other_participants, current_total_participants, required_total_participants, model.wallet_state.dkg_in_progress);
-                
+
+                info!(
+                    "🔍 DKG trigger check: connected={}/{}, current_participants={}/{}, dkg_in_progress={}",
+                    connected_count,
+                    expected_other_participants,
+                    current_total_participants,
+                    required_total_participants,
+                    model.wallet_state.dkg_in_progress
+                );
+
                 // ALL participants start DKG when:
                 // 1. We have the configured total number of participants in the session
                 // 2. All of them are connected via WebRTC
@@ -1440,7 +1524,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             } else {
                 false
             };
-            
+
             // Force a remount to update the display with new WebRTC status
             if matches!(model.current_screen, Screen::DKGProgress { .. }) {
                 if should_start_dkg {
@@ -1455,9 +1539,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
         }
 
-        Message::UpdateMeshStatus { ready_count, total_count, all_connected } => {
-            info!("Mesh status update: {}/{} ready, all_connected={}",
-                 ready_count, total_count, all_connected);
+        Message::UpdateMeshStatus {
+            ready_count,
+            total_count,
+            all_connected,
+        } => {
+            info!(
+                "Mesh status update: {}/{} ready, all_connected={}",
+                ready_count, total_count, all_connected
+            );
 
             // Force a remount to update the display
             if matches!(model.current_screen, Screen::DKGProgress { .. }) {
@@ -1493,13 +1583,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             let _ = progress;
             None
         }
-        
+
         Message::DKGComplete { result } => {
             info!("DKG completed successfully: {:?}", result);
-            
+
             // Clear modal
             model.ui_state.modal = None;
-            
+
             // Show success notification
             let notification = Notification {
                 id: Uuid::new_v4().to_string(),
@@ -1509,14 +1599,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 dismissible: true,
             };
             model.ui_state.notifications.push(notification);
-            
+
             // Navigate back to main menu to show updated menu with Sign Transaction
             model.go_home();
-            
+
             // Reload wallet list which will trigger menu update
             Some(Command::LoadWallets)
         }
-        
+
         Message::DKGFailed { error } => {
             error!("DKG failed: {}", error);
 
@@ -1531,7 +1621,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             None
         }
-        
+
         Message::CancelDKG => {
             info!("🛑 CancelDKG requested by user");
 
@@ -1545,7 +1635,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.navigation_stack.clear();
             model.current_screen = Screen::MainMenu;
             model.ui_state.focus = crate::elm::model::ComponentId::MainMenu;
-            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::MainMenu).or_insert(0);
+            model
+                .ui_state
+                .selected_indices
+                .entry(crate::elm::model::ComponentId::MainMenu)
+                .or_insert(0);
 
             Some(Command::CancelDKG)
         }
@@ -1574,12 +1668,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // when joiners hit that path they'd re-announce the session
             // under their own proposer_id and clobber the creator's record
             // server-side. We only want the FROST trigger here.
-            info!("Mesh is ready — dispatching FROST Round 1 trigger. params={:?}", params);
+            info!(
+                "Mesh is ready — dispatching FROST Round 1 trigger. params={:?}",
+                params
+            );
             enter_round1(model);
             Some(frost_trigger_batch(model))
         }
-        
-        Message::ProcessDKGRound1 { from_device, package_bytes } => {
+
+        Message::ProcessDKGRound1 {
+            from_device,
+            package_bytes,
+        } => {
             info!(
                 "Queueing DKG Round 1 package from {} ({} bytes) for FROST part1 processing",
                 from_device,
@@ -1591,28 +1691,53 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             })
         }
 
-        Message::ProcessReshareRound1 { from_device, package_bytes } => {
-            Some(Command::ProcessReshareRound1 { from_device, package_bytes })
-        }
-        Message::ProcessReshareRound2 { from_device, package_bytes } => {
-            Some(Command::ProcessReshareRound2 { from_device, package_bytes })
-        }
-        Message::ProcessUnifiedDKGRound1 { from_device, package_json } => {
-            Some(Command::ProcessUnifiedDKGRound1 { from_device, package_json })
-        }
-        Message::ProcessUnifiedDKGRound2 { from_device, message_json } => {
-            Some(Command::ProcessUnifiedDKGRound2 { from_device, message_json })
-        }
-        Message::HeadlessReshare { wallet_id, password, keystore_path } => {
-            Some(Command::StartReshare { wallet_id, password, keystore_path })
-        }
+        Message::ProcessReshareRound1 {
+            from_device,
+            package_bytes,
+        } => Some(Command::ProcessReshareRound1 {
+            from_device,
+            package_bytes,
+        }),
+        Message::ProcessReshareRound2 {
+            from_device,
+            package_bytes,
+        } => Some(Command::ProcessReshareRound2 {
+            from_device,
+            package_bytes,
+        }),
+        Message::ProcessUnifiedDKGRound1 {
+            from_device,
+            package_json,
+        } => Some(Command::ProcessUnifiedDKGRound1 {
+            from_device,
+            package_json,
+        }),
+        Message::ProcessUnifiedDKGRound2 {
+            from_device,
+            message_json,
+        } => Some(Command::ProcessUnifiedDKGRound2 {
+            from_device,
+            message_json,
+        }),
+        Message::HeadlessReshare {
+            wallet_id,
+            password,
+            keystore_path,
+        } => Some(Command::StartReshare {
+            wallet_id,
+            password,
+            keystore_path,
+        }),
         Message::ReshareComplete { .. } => {
             // Terminal event; tapped by the CLI bridge / simulate harness. No
             // model transition needed.
             None
         }
 
-        Message::ProcessDKGRound2 { from_device, package_bytes } => {
+        Message::ProcessDKGRound2 {
+            from_device,
+            package_bytes,
+        } => {
             // First peer Round 2 package → we've clearly advanced past Round 1.
             // Update the UI label. Idempotent: we only transition on the first
             // one and stay at Round2 until DKGKeyGenerated bumps us to Finalization.
@@ -1643,7 +1768,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         Message::DKGKeyGenerated { group_pubkey_hex } => {
-            info!("🎉 DKG finalised. Group verifying key: {}", group_pubkey_hex);
+            info!(
+                "🎉 DKG finalised. Group verifying key: {}",
+                group_pubkey_hex
+            );
             // Terminal UI state: 100% and a "done" label. Previously we set
             // `Finalization` here, which has a hardcoded 95% progress bar and
             // a "Finalizing DKG..." label — making a successful DKG look as if
@@ -1811,9 +1939,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // then push WalletComplete — this way pop_screen leaves us
             // on a fresh MainMenu.
             model.go_home();
-            model.push_screen(Screen::WalletComplete {
-                wallet_id,
-            });
+            model.push_screen(Screen::WalletComplete { wallet_id });
             model.ui_state.focus = crate::elm::model::ComponentId::WalletComplete;
 
             Some(Command::LoadWallets)
@@ -1821,15 +1947,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         // ============= Network Events =============
         Message::InitiateWebRTCWithParticipants { participants } => {
-            info!("Initiating WebRTC connections with {} participants", participants.len());
+            info!(
+                "Initiating WebRTC connections with {} participants",
+                participants.len()
+            );
             Some(Command::InitiateWebRTCConnections { participants })
         }
-        
+
         Message::CheckWebRTCConnections => {
             info!("Checking WebRTC connection status");
             Some(Command::VerifyWebRTCMesh)
         }
-        
+
         Message::VerifyMeshConnectivity => {
             info!("🔍 Verifying WebRTC mesh connectivity");
 
@@ -1838,25 +1967,37 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 let expected_connections = session.participants.len().saturating_sub(1);
 
                 // Count how many participants have data channels open (excluding self)
-                let connected_count = session.participants.iter()
+                let connected_count = session
+                    .participants
+                    .iter()
                     .filter(|p| **p != model.device_id)
                     .filter(|p| {
-                        model.network_state.participant_webrtc_status.get(*p)
+                        model
+                            .network_state
+                            .participant_webrtc_status
+                            .get(*p)
                             .is_some_and(|(_, data_channel_open)| *data_channel_open)
                     })
                     .count();
 
-                info!("📊 Mesh Status: {}/{} data channels open", connected_count, expected_connections);
+                info!(
+                    "📊 Mesh Status: {}/{} data channels open",
+                    connected_count, expected_connections
+                );
 
                 if connected_count < expected_connections {
                     info!("⚠️ Mesh incomplete, triggering re-initiation");
                     // Re-initiate with all participants
-                    let other_participants: Vec<String> = session.participants.iter()
+                    let other_participants: Vec<String> = session
+                        .participants
+                        .iter()
                         .filter(|p| **p != model.device_id)
                         .cloned()
                         .collect();
 
-                    Some(Command::InitiateWebRTCConnections { participants: other_participants })
+                    Some(Command::InitiateWebRTCConnections {
+                        participants: other_participants,
+                    })
                 } else {
                     info!("✅ Mesh complete! All participants connected");
                     // Trigger DKG start if not already in progress. StartFrostProtocol
@@ -1875,13 +2016,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 Some(Command::EnsureFullMesh)
             }
         }
-        
+
         Message::WebSocketConnected => {
             info!("WebSocket connected");
             model.network_state.connected = true;
             model.network_state.connection_status = ConnectionStatus::Connected;
             model.network_state.reconnect_attempts = 0;
-            
+
             // Show success notification
             let notification = Notification {
                 id: Uuid::new_v4().to_string(),
@@ -1891,7 +2032,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 dismissible: true,
             };
             model.ui_state.notifications.push(notification);
-            
+
             // Chain follow-up work: redraw the WS-status-aware screens, and if
             // the user is already on Join Session, re-run discovery over the
             // freshly-open primary channel (LoadSessions previously would have
@@ -1974,7 +2115,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.network_state.connection_status = ConnectionStatus::Reconnecting;
             Some(Command::ReconnectWebSocket)
         }
-        
+
         // ============= UI Events =============
         Message::KeyPressed(key) => {
             // Global key handling
@@ -2008,36 +2149,38 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
             }
         }
-        
+
         Message::FocusChanged { component } => {
             model.ui_state.focus = component;
             None
         }
-        
+
         Message::InputChanged { value } => {
             model.ui_state.input_buffer = value;
             None
         }
-        
+
         Message::ScrollUp => {
             info!("⬆️ ScrollUp: current screen = {:?}", model.current_screen);
             // Update selected index based on current screen
             match model.current_screen {
                 Screen::MainMenu | Screen::Welcome => {
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
-                    
+
                     // Get menu item count based on wallet state
                     let menu_item_count = if model.wallet_state.wallets.is_empty() {
-                        4  // Create, Join, Settings, Exit
+                        4 // Create, Join, Settings, Exit
                     } else {
-                        6  // Create, Join, Manage, Sign, Settings, Exit
+                        6 // Create, Join, Manage, Sign, Settings, Exit
                     };
-                    
+
                     // Wrap around
                     if *current_idx == 0 {
-                        *current_idx = menu_item_count - 1;  // Last item index
+                        *current_idx = menu_item_count - 1; // Last item index
                     } else {
                         *current_idx = current_idx.saturating_sub(1);
                     }
@@ -2045,21 +2188,35 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::CreateWallet(_) => {
                     // Handle CreateWallet navigation
-                    debug!("🔼 ScrollUp on CreateWallet, focus: {:?}", model.ui_state.focus);
-                    debug!("🔼 Before: selected_indices = {:?}", model.ui_state.selected_indices);
-                    
-                    let current_idx = model.ui_state.selected_indices
+                    debug!(
+                        "🔼 ScrollUp on CreateWallet, focus: {:?}",
+                        model.ui_state.focus
+                    );
+                    debug!(
+                        "🔼 Before: selected_indices = {:?}",
+                        model.ui_state.selected_indices
+                    );
+
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
-                    
+
                     let old_idx = *current_idx;
                     if *current_idx == 0 {
-                        *current_idx = 3;  // Wrap to bottom (4 items: 0-3)
+                        *current_idx = 3; // Wrap to bottom (4 items: 0-3)
                     } else {
                         *current_idx = current_idx.saturating_sub(1);
                     }
-                    info!("🔼 CreateWallet selection moved up: {} -> {}", old_idx, current_idx);
-                    debug!("🔼 After: selected_indices = {:?}", model.ui_state.selected_indices);
+                    info!(
+                        "🔼 CreateWallet selection moved up: {} -> {}",
+                        old_idx, current_idx
+                    );
+                    debug!(
+                        "🔼 After: selected_indices = {:?}",
+                        model.ui_state.selected_indices
+                    );
                 }
                 Screen::ModeSelection => {
                     // ModeSelection doesn't respond to Up - only Left/Right
@@ -2067,11 +2224,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::ThresholdConfig => {
                     // Get which field is selected (0 = participants, 1 = threshold)
-                    let selected_field = model.ui_state.selected_indices
+                    let selected_field = model
+                        .ui_state
+                        .selected_indices
                         .get(&crate::elm::model::ComponentId::ThresholdConfig)
                         .copied()
                         .unwrap_or(0);
-                    
+
                     // Ensure we have the creating_wallet state with custom_config
                     if let Some(ref mut creating_wallet) = model.wallet_state.creating_wallet {
                         // Initialize custom_config if not present
@@ -2090,14 +2249,21 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                                 if config.total_participants < 10 {
                                     config.total_participants += 1;
                                     // Ensure threshold doesn't exceed participants
-                                    config.threshold = config.threshold.min(config.total_participants);
-                                    info!("ThresholdConfig: Participants increased to {}", config.total_participants);
+                                    config.threshold =
+                                        config.threshold.min(config.total_participants);
+                                    info!(
+                                        "ThresholdConfig: Participants increased to {}",
+                                        config.total_participants
+                                    );
                                 }
                             } else {
                                 // Increase threshold (max = participants)
                                 if config.threshold < config.total_participants {
                                     config.threshold += 1;
-                                    info!("ThresholdConfig: Threshold increased to {}", config.threshold);
+                                    info!(
+                                        "ThresholdConfig: Threshold increased to {}",
+                                        config.threshold
+                                    );
                                 }
                             }
                         }
@@ -2105,7 +2271,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::JoinSession => {
                     // Handle JoinSession navigation for arrow up
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::JoinSession)
                         .or_insert(0);
 
@@ -2131,7 +2299,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     info!("WalletList selection moved up to: {}", current_idx);
                 }
                 _ => {
-                    model.ui_state.scroll_position = model.ui_state.scroll_position.saturating_sub(1);
+                    model.ui_state.scroll_position =
+                        model.ui_state.scroll_position.saturating_sub(1);
                 }
             }
             None
@@ -2142,17 +2311,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Update selected index based on current screen
             match model.current_screen {
                 Screen::MainMenu | Screen::Welcome => {
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
-                    
+
                     // Get menu item count based on wallet state
                     let menu_item_count = if model.wallet_state.wallets.is_empty() {
-                        4  // Create, Join, Settings, Exit
+                        4 // Create, Join, Settings, Exit
                     } else {
-                        6  // Create, Join, Manage, Sign, Settings, Exit
+                        6 // Create, Join, Manage, Sign, Settings, Exit
                     };
-                    
+
                     // Wrap around
                     if *current_idx >= menu_item_count - 1 {
                         *current_idx = 0; // Back to top
@@ -2163,21 +2334,35 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::CreateWallet(_) => {
                     // Handle CreateWallet navigation
-                    debug!("🔽 ScrollDown on CreateWallet, focus: {:?}", model.ui_state.focus);
-                    debug!("🔽 Before: selected_indices = {:?}", model.ui_state.selected_indices);
-                    
-                    let current_idx = model.ui_state.selected_indices
+                    debug!(
+                        "🔽 ScrollDown on CreateWallet, focus: {:?}",
+                        model.ui_state.focus
+                    );
+                    debug!(
+                        "🔽 Before: selected_indices = {:?}",
+                        model.ui_state.selected_indices
+                    );
+
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
-                    
+
                     let old_idx = *current_idx;
                     if *current_idx >= 3 {
-                        *current_idx = 0;  // Wrap to top
+                        *current_idx = 0; // Wrap to top
                     } else {
                         *current_idx += 1;
                     }
-                    info!("🔽 CreateWallet selection moved down: {} -> {}", old_idx, current_idx);
-                    debug!("🔽 After: selected_indices = {:?}", model.ui_state.selected_indices);
+                    info!(
+                        "🔽 CreateWallet selection moved down: {} -> {}",
+                        old_idx, current_idx
+                    );
+                    debug!(
+                        "🔽 After: selected_indices = {:?}",
+                        model.ui_state.selected_indices
+                    );
                 }
                 Screen::ModeSelection => {
                     // ModeSelection doesn't respond to Down - only Left/Right
@@ -2185,11 +2370,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::ThresholdConfig => {
                     // Get which field is selected (0 = participants, 1 = threshold)
-                    let selected_field = model.ui_state.selected_indices
+                    let selected_field = model
+                        .ui_state
+                        .selected_indices
                         .get(&crate::elm::model::ComponentId::ThresholdConfig)
                         .copied()
                         .unwrap_or(0);
-                    
+
                     // Ensure we have the creating_wallet state with custom_config
                     if let Some(ref mut creating_wallet) = model.wallet_state.creating_wallet {
                         // Initialize custom_config if not present
@@ -2208,14 +2395,21 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                                 if config.total_participants > 2 {
                                     config.total_participants -= 1;
                                     // Ensure threshold doesn't exceed participants
-                                    config.threshold = config.threshold.min(config.total_participants);
-                                    info!("ThresholdConfig: Participants decreased to {}", config.total_participants);
+                                    config.threshold =
+                                        config.threshold.min(config.total_participants);
+                                    info!(
+                                        "ThresholdConfig: Participants decreased to {}",
+                                        config.total_participants
+                                    );
                                 }
                             } else {
                                 // Decrease threshold (min 2)
                                 if config.threshold > 2 {
                                     config.threshold -= 1;
-                                    info!("ThresholdConfig: Threshold decreased to {}", config.threshold);
+                                    info!(
+                                        "ThresholdConfig: Threshold decreased to {}",
+                                        config.threshold
+                                    );
                                 }
                             }
                         }
@@ -2224,7 +2418,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 Screen::JoinSession => {
                     // Handle JoinSession navigation for arrow down
                     // Note: The actual session count will be handled by the component itself
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::JoinSession)
                         .or_insert(0);
 
@@ -2248,7 +2444,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     info!("WalletList selection moved down to: {}", current_idx);
                 }
                 _ => {
-                    model.ui_state.scroll_position = model.ui_state.scroll_position.saturating_add(1);
+                    model.ui_state.scroll_position =
+                        model.ui_state.scroll_position.saturating_add(1);
                 }
             }
             None
@@ -2259,7 +2456,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             match model.current_screen {
                 Screen::ModeSelection => {
                     // Switch to Online mode (left side)
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
                     *current_idx = 0;
@@ -2267,7 +2466,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::ThresholdConfig => {
                     // Switch to participants field (left side) only if we're not already there
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::ThresholdConfig)
                         .or_insert(0);
                     if *current_idx != 0 {
@@ -2279,11 +2480,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::DKGProgress { .. } => {
                     // Switch between Cancel DKG and Copy Session ID buttons
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::DKGProgress)
                         .or_insert(0);
                     if *current_idx > 0 {
-                        *current_idx = 0;  // Switch to Cancel DKG
+                        *current_idx = 0; // Switch to Cancel DKG
                         info!("DKGProgress switched to: Cancel DKG button");
                     } else {
                         debug!("Already on Cancel DKG button");
@@ -2293,7 +2496,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // Switch to DKG tab (left)
                     model.ui_state.join_session_tab = 0;
                     // Reset session selection when switching tabs
-                    model.ui_state.selected_indices.insert(crate::elm::model::ComponentId::JoinSession, 0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .insert(crate::elm::model::ComponentId::JoinSession, 0);
                     info!("JoinSession switched to DKG tab");
                 }
                 _ => {
@@ -2302,13 +2508,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         Message::ScrollRight => {
-            info!("➡️ ScrollRight: current screen = {:?}", model.current_screen);
+            info!(
+                "➡️ ScrollRight: current screen = {:?}",
+                model.current_screen
+            );
             match model.current_screen {
                 Screen::ModeSelection => {
                     // Switch to Offline mode (right side)
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(model.ui_state.focus.clone())
                         .or_insert(0);
                     *current_idx = 1;
@@ -2316,7 +2527,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::ThresholdConfig => {
                     // Switch to threshold field (right side) only if we're not already there
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::ThresholdConfig)
                         .or_insert(0);
                     if *current_idx != 1 {
@@ -2328,11 +2541,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::DKGProgress { .. } => {
                     // Switch between Cancel DKG and Copy Session ID buttons
-                    let current_idx = model.ui_state.selected_indices
+                    let current_idx = model
+                        .ui_state
+                        .selected_indices
                         .entry(crate::elm::model::ComponentId::DKGProgress)
                         .or_insert(0);
                     if *current_idx < 1 {
-                        *current_idx = 1;  // Switch to Copy Session ID
+                        *current_idx = 1; // Switch to Copy Session ID
                         info!("DKGProgress switched to: Copy Session ID button");
                     } else {
                         debug!("Already on Copy Session ID button");
@@ -2342,7 +2557,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // Switch to Signing tab (right)
                     model.ui_state.join_session_tab = 1;
                     // Reset session selection when switching tabs
-                    model.ui_state.selected_indices.insert(crate::elm::model::ComponentId::JoinSession, 0);
+                    model
+                        .ui_state
+                        .selected_indices
+                        .insert(crate::elm::model::ComponentId::JoinSession, 0);
                     info!("JoinSession switched to Signing tab");
                 }
                 _ => {
@@ -2351,23 +2569,25 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         Message::SelectItem { index: _ } => {
             info!("SelectItem on screen: {:?}", model.current_screen);
             // Handle item selection based on current screen
             match model.current_screen {
                 Screen::MainMenu | Screen::Welcome => {
                     // Get the current selected index
-                    let selected_idx = model.ui_state.selected_indices
+                    let selected_idx = model
+                        .ui_state
+                        .selected_indices
                         .get(&model.ui_state.focus)
                         .copied()
                         .unwrap_or(0);
-                    
+
                     info!("MainMenu item selected: {}", selected_idx);
-                    
+
                     // Check if we have wallets (affects menu structure)
                     let has_wallets = !model.wallet_state.wallets.is_empty();
-                    
+
                     // Navigate based on menu selection
                     // Menu structure when no wallets: Create, Join, Settings, Exit (4 items)
                     // Menu structure with wallets: Create, Join, Manage, Sign, Settings, Exit (6 items)
@@ -2381,7 +2601,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             model.push_screen(Screen::ModeSelection);
                             // Set focus to ModeSelection component
                             model.ui_state.focus = crate::elm::model::ComponentId::ModeSelection;
-                            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::ModeSelection).or_insert(0);
+                            model
+                                .ui_state
+                                .selected_indices
+                                .entry(crate::elm::model::ComponentId::ModeSelection)
+                                .or_insert(0);
                             debug!("🎯 Focus set to ModeSelection");
                             None
                         }
@@ -2391,7 +2615,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             model.push_screen(Screen::JoinSession);
                             // Set focus to JoinSession component
                             model.ui_state.focus = crate::elm::model::ComponentId::JoinSession;
-                            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::JoinSession).or_insert(0);
+                            model
+                                .ui_state
+                                .selected_indices
+                                .entry(crate::elm::model::ComponentId::JoinSession)
+                                .or_insert(0);
                             debug!("🎯 Focus set to JoinSession");
                             Some(Command::LoadSessions)
                         }
@@ -2416,7 +2644,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             // Sign Transaction (when wallets exist)
                             if let Some(ref wallet_id) = model.selected_wallet {
                                 info!("Navigating to Sign Transaction");
-                                model.push_screen(Screen::SignTransaction { wallet_id: wallet_id.clone() });
+                                model.push_screen(Screen::SignTransaction {
+                                    wallet_id: wallet_id.clone(),
+                                });
                                 None
                             } else {
                                 // Need to select a wallet first
@@ -2443,15 +2673,20 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     debug!("✅ SelectItem on CreateWallet screen");
                     debug!("Current focus: {:?}", model.ui_state.focus);
                     debug!("Selected indices: {:?}", model.ui_state.selected_indices);
-                    
+
                     // Get the current selected index
-                    let selected_idx = model.ui_state.selected_indices
+                    let selected_idx = model
+                        .ui_state
+                        .selected_indices
                         .get(&model.ui_state.focus)
                         .copied()
                         .unwrap_or(0);
-                    
-                    info!("✅ CreateWallet item selected: {} (focus: {:?})", selected_idx, model.ui_state.focus);
-                    
+
+                    info!(
+                        "✅ CreateWallet item selected: {} (focus: {:?})",
+                        selected_idx, model.ui_state.focus
+                    );
+
                     // Handle selection based on current option
                     match selected_idx {
                         0 => {
@@ -2459,15 +2694,25 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             info!("Selected: Choose Mode - navigating to mode selection");
                             model.push_screen(Screen::ModeSelection);
                             model.ui_state.focus = crate::elm::model::ComponentId::ModeSelection;
-                            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::ModeSelection).or_insert(0);
+                            model
+                                .ui_state
+                                .selected_indices
+                                .entry(crate::elm::model::ComponentId::ModeSelection)
+                                .or_insert(0);
                             None
                         }
                         1 => {
                             // Option 2: Configure Threshold
-                            info!("Selected: Configure Threshold - navigating to threshold configuration");
+                            info!(
+                                "Selected: Configure Threshold - navigating to threshold configuration"
+                            );
                             model.push_screen(Screen::ThresholdConfig);
                             model.ui_state.focus = crate::elm::model::ComponentId::ThresholdConfig;
-                            model.ui_state.selected_indices.entry(crate::elm::model::ComponentId::ThresholdConfig).or_insert(0);
+                            model
+                                .ui_state
+                                .selected_indices
+                                .entry(crate::elm::model::ComponentId::ThresholdConfig)
+                                .or_insert(0);
                             None
                         }
                         2 => {
@@ -2503,7 +2748,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::ModeSelection => {
                     // Get the current selected mode (0 = Online, 1 = Offline)
-                    let selected_mode = model.ui_state.selected_indices
+                    let selected_mode = model
+                        .ui_state
+                        .selected_indices
                         .get(&model.ui_state.focus)
                         .copied()
                         .unwrap_or(0);
@@ -2525,7 +2772,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         return None;
                     }
 
-                    info!("ModeSelection confirmed: {}", if selected_mode == 0 { "Online" } else { "Offline" });
+                    info!(
+                        "ModeSelection confirmed: {}",
+                        if selected_mode == 0 {
+                            "Online"
+                        } else {
+                            "Offline"
+                        }
+                    );
 
                     // Initialize creating_wallet if needed
                     if model.wallet_state.creating_wallet.is_none() {
@@ -2550,7 +2804,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 Screen::ThresholdConfig => {
                     // Get the threshold configuration and start DKG
                     info!("ThresholdConfig confirmed - starting DKG process");
-                    
+
                     // Ensure the chosen config is persisted on the
                     // `creating_wallet` state so `Message::SubmitPassword`
                     // can retrieve it after password capture. The UI code
@@ -2558,18 +2812,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // edits; this is a belt-and-suspenders write in case
                     // someone landed here with defaults.
                     if model.wallet_state.creating_wallet.is_none() {
-                        model.wallet_state.creating_wallet =
-                            Some(CreateWalletState::default());
+                        model.wallet_state.creating_wallet = Some(CreateWalletState::default());
                     }
                     if let Some(ref mut cw) = model.wallet_state.creating_wallet
-                        && cw.custom_config.is_none() {
-                            cw.custom_config = Some(WalletConfig {
-                                name: "MPC Wallet".to_string(),
-                                threshold: 2,
-                                total_participants: 3,
-                                mode: cw.mode.clone().unwrap_or(WalletMode::Online),
-                            });
-                        }
+                        && cw.custom_config.is_none()
+                    {
+                        cw.custom_config = Some(WalletConfig {
+                            name: "MPC Wallet".to_string(),
+                            threshold: 2,
+                            total_participants: 3,
+                            mode: cw.mode.clone().unwrap_or(WalletMode::Online),
+                        });
+                    }
 
                     // Route through the password-capture screen before
                     // starting the DKG. `Message::SubmitPassword` picks
@@ -2588,17 +2842,23 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
                 Screen::JoinSession => {
                     // Get the selected session index from the JoinSession component
-                    let selected_idx = model.ui_state.selected_indices
+                    let selected_idx = model
+                        .ui_state
+                        .selected_indices
                         .get(&crate::elm::model::ComponentId::JoinSession)
                         .copied()
                         .unwrap_or(0);
-                    
+
                     let selected_tab = model.ui_state.join_session_tab;
-                    info!("JoinSession: Selected session index: {}, tab: {}", selected_idx, 
-                          if selected_tab == 0 { "DKG" } else { "Signing" });
-                    
+                    info!(
+                        "JoinSession: Selected session index: {}, tab: {}",
+                        selected_idx,
+                        if selected_tab == 0 { "DKG" } else { "Signing" }
+                    );
+
                     // Filter sessions by tab type, just like the component does
-                    let filtered_sessions: Vec<_> = model.session_invites
+                    let filtered_sessions: Vec<_> = model
+                        .session_invites
                         .iter()
                         .filter(|s| {
                             if selected_tab == 0 {
@@ -2611,7 +2871,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         })
                         .cloned()
                         .collect();
-                    
+
                     // Get the session from the filtered list
                     if let Some(session) = filtered_sessions.get(selected_idx).cloned() {
                         info!("Joining DKG session: {}", session.session_id);
@@ -2639,7 +2899,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     }
                 }
                 Screen::DKGProgress { .. } => {
-                    let selected_action = model.ui_state.selected_indices
+                    let selected_action = model
+                        .ui_state
+                        .selected_indices
                         .get(&crate::elm::model::ComponentId::DKGProgress)
                         .copied()
                         .unwrap_or(0);
@@ -2687,11 +2949,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         );
                         model.selected_wallet = Some(wallet_id.clone());
                         model.wallet_state.clear_sign_draft();
-                        model.push_screen(Screen::SignTransaction {
-                            wallet_id,
-                        });
-                        model.ui_state.focus =
-                            crate::elm::model::ComponentId::SignTransaction;
+                        model.push_screen(Screen::SignTransaction { wallet_id });
+                        model.ui_state.focus = crate::elm::model::ComponentId::SignTransaction;
                     } else {
                         warn!(
                             "ManageWallets SelectItem[{}] but list only has {} wallets",
@@ -2710,12 +2969,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.ui_state.modal = Some(modal);
             None
         }
-        
+
         Message::CloseModal => {
             model.ui_state.modal = None;
             None
         }
-        
+
         Message::ConfirmModal => {
             if let Some(Modal::Confirm { on_confirm, .. }) = &model.ui_state.modal {
                 let msg = *on_confirm.clone();
@@ -2726,7 +2985,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 None
             }
         }
-        
+
         Message::CancelModal => {
             if let Some(Modal::Confirm { on_cancel, .. }) = &model.ui_state.modal {
                 let msg = *on_cancel.clone();
@@ -2737,7 +2996,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 None
             }
         }
-        
+
         // ============= Notifications =============
         Message::ShowNotification { text, kind } => {
             let notification = Notification {
@@ -2747,23 +3006,23 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 timestamp: Utc::now(),
                 dismissible: true,
             };
-            
+
             // Clone the id before moving notification
             let id = notification.id.clone();
             model.ui_state.notifications.push(notification);
-            
+
             // Auto-dismiss after 5 seconds
             Some(Command::ScheduleMessage {
                 delay_ms: 5000,
                 message: Box::new(Message::ClearNotification { id }),
             })
         }
-        
+
         Message::ClearNotification { id } => {
             model.ui_state.notifications.retain(|n| n.id != id);
             None
         }
-        
+
         // ============= Progress Updates =============
         Message::StartProgress { operation, message } => {
             model.ui_state.progress = Some(ProgressInfo {
@@ -2775,7 +3034,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             });
             None
         }
-        
+
         Message::UpdateProgress { progress, message } => {
             if let Some(ref mut info) = model.ui_state.progress {
                 info.progress = progress;
@@ -2785,40 +3044,42 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         Message::CompleteProgress => {
             model.ui_state.progress = None;
             None
         }
-        
+
         // ============= System Messages =============
         Message::Initialize => {
             info!("Initializing application");
-            
+
             // Initialize keystore
-            let keystore_path = format!("{}/.frost_keystore", 
-                std::env::var("HOME").unwrap_or_else(|_| ".".to_string()));
-            
-            Some(Command::InitializeKeystore { 
+            let keystore_path = format!(
+                "{}/.frost_keystore",
+                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+            );
+
+            Some(Command::InitializeKeystore {
                 path: keystore_path,
                 device_id: model.device_id.clone(),
             })
         }
-        
+
         Message::Quit => {
             info!("Quitting application");
             Some(Command::Quit)
         }
-        
+
         Message::Refresh => {
             info!("Refreshing UI");
             Some(Command::RefreshUI)
         }
-        
+
         Message::Error { message } => {
             error!("Error: {}", message);
             model.ui_state.error_message = Some(message.clone());
-            
+
             let notification = Notification {
                 id: Uuid::new_v4().to_string(),
                 text: message,
@@ -2827,14 +3088,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 dismissible: true,
             };
             model.ui_state.notifications.push(notification);
-            
+
             None
         }
-        
+
         Message::Success { message } => {
             info!("Success: {}", message);
             model.ui_state.success_message = Some(message.clone());
-            
+
             let notification = Notification {
                 id: Uuid::new_v4().to_string(),
                 text: message,
@@ -2843,27 +3104,27 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 dismissible: true,
             };
             model.ui_state.notifications.push(notification);
-            
+
             None
         }
-        
+
         // ============= Keystore Events =============
         Message::KeystoreInitialized { path } => {
             info!("Keystore initialized at: {}", path);
             model.wallet_state.keystore_initialized = true;
             model.wallet_state.keystore_path = path;
-            
+
             // Load wallets after initialization
             Some(Command::LoadWallets)
         }
-        
+
         Message::KeystoreError { error } => {
             error!("Keystore error: {}", error);
-            Some(Command::SendMessage(Message::Error { 
-                message: format!("Keystore error: {}", error) 
+            Some(Command::SendMessage(Message::Error {
+                message: format!("Keystore error: {}", error),
             }))
         }
-        
+
         // ============= Session Discovery Events =============
         Message::SessionsLoaded { sessions } => {
             info!("Loaded {} sessions from discovery", sessions.len());
@@ -2872,7 +3133,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // Log session details for debugging
             for session in &sessions {
-                info!("Session discovered: {} ({}/{})", session.session_id, session.threshold, session.total);
+                info!(
+                    "Session discovered: {} ({}/{})",
+                    session.session_id, session.threshold, session.total
+                );
             }
 
             // Force UI update if we're on the JoinSession screen
@@ -2907,8 +3171,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             let am_proposer = session.proposer_id == model.device_id;
             let can_interrupt = !matches!(model.current_screen, Screen::JoinSession)
                 && model.ui_state.modal.is_none();
-            let should_notify =
-                is_signing && am_participant && !am_proposer && can_interrupt;
+            let should_notify = is_signing && am_participant && !am_proposer && can_interrupt;
 
             if let Some(slot) = model
                 .session_invites
@@ -2949,11 +3212,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     },
                     None => "<no payload>".to_string(),
                 };
-                let wallet_name = if let SessionType::Signing { wallet_name, .. } = &session.session_type {
-                    wallet_name.clone()
-                } else {
-                    "wallet".to_string()
-                };
+                let wallet_name =
+                    if let SessionType::Signing { wallet_name, .. } = &session.session_type {
+                        wallet_name.clone()
+                    } else {
+                        "wallet".to_string()
+                    };
                 let message_body = format!(
                     "From {proposer}\nWallet: {wallet}\nThreshold: {k}-of-{n}\n\nMessage: {preview}\n\nReview and sign?",
                     proposer = session.proposer_id,
@@ -3002,13 +3266,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             );
             model.ui_state.modal = None;
             model.ui_state.join_session_tab = 1; // Signing tab
-            model
-                .ui_state
-                .selected_indices
-                .insert(
-                    crate::elm::model::ComponentId::JoinSession,
-                    signing_index.unwrap_or(0),
-                );
+            model.ui_state.selected_indices.insert(
+                crate::elm::model::ComponentId::JoinSession,
+                signing_index.unwrap_or(0),
+            );
             model.push_screen(Screen::JoinSession);
             model.ui_state.focus = crate::elm::model::ComponentId::JoinSession;
             None
@@ -3052,7 +3313,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             }
             None
         }
-        
+
         // ============= Default =============
         _ => {
             debug!("Unhandled message: {:?}", msg);
@@ -3087,7 +3348,11 @@ fn account_signing_wallet_id(wallet_id: &str, curve_type: &str) -> String {
     if starlab_core::accounts::parse_child_wallet_id(wallet_id).is_some() {
         return wallet_id.to_string();
     }
-    let chain = if curve_type == "secp256k1" { "ethereum" } else { "solana" };
+    let chain = if curve_type == "secp256k1" {
+        "ethereum"
+    } else {
+        "solana"
+    };
     format!("{wallet_id}-{chain}-0")
 }
 
@@ -3106,8 +3371,7 @@ fn preview_lines(
     let (threshold, total) = wallets
         .iter()
         .find(|w| {
-            w.session_id == wallet_id
-                || child.is_some_and(|(parent, _, _)| w.session_id == parent)
+            w.session_id == wallet_id || child.is_some_and(|(parent, _, _)| w.session_id == parent)
         })
         .map(|w| (w.threshold, w.total_participants))
         .unwrap_or((0, 0));
@@ -3136,7 +3400,11 @@ fn preview_lines(
             Ok(s) if s.chars().all(|c| !c.is_control() || c == '\n') => {
                 format!("Message: \"{}\"", s)
             }
-            _ => format!("Bytes ({}): 0x{}", bytes_to_sign.len(), hex::encode(bytes_to_sign)),
+            _ => format!(
+                "Bytes ({}): 0x{}",
+                bytes_to_sign.len(),
+                hex::encode(bytes_to_sign)
+            ),
         },
     };
 
@@ -3175,43 +3443,49 @@ fn preview_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     use crossterm::event::KeyEvent;
-    
+
     #[test]
     fn test_navigate_back() {
         let mut model = Model::new("test".to_string());
         model.current_screen = Screen::MainMenu;
-        
+
         // Navigate to wallet list
         update(&mut model, Message::Navigate(Screen::ManageWallets));
         assert_eq!(model.current_screen, Screen::ManageWallets);
         assert_eq!(model.navigation_stack.len(), 1);
-        
+
         // Navigate back
         update(&mut model, Message::NavigateBack);
         assert_eq!(model.current_screen, Screen::MainMenu);
         assert_eq!(model.navigation_stack.len(), 0);
     }
-    
+
     #[test]
     fn test_esc_key_never_exits() {
         let mut model = Model::new("test".to_string());
         model.current_screen = Screen::ManageWallets;
         model.navigation_stack.push(Screen::MainMenu);
-        
+
         // Press Esc
-        let cmd = update(&mut model, Message::KeyPressed(KeyEvent {
-            code: KeyCode::Esc,
-            modifiers: KeyModifiers::empty(),
-            kind: crossterm::event::KeyEventKind::Press,
-            state: crossterm::event::KeyEventState::empty(),
-        }));
-        
+        let cmd = update(
+            &mut model,
+            Message::KeyPressed(KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::empty(),
+                kind: crossterm::event::KeyEventKind::Press,
+                state: crossterm::event::KeyEventState::empty(),
+            }),
+        );
+
         // Should return NavigateBack command, never quit
-        assert!(matches!(cmd, Some(Command::SendMessage(Message::NavigateBack))));
+        assert!(matches!(
+            cmd,
+            Some(Command::SendMessage(Message::NavigateBack))
+        ));
     }
-    
+
     #[test]
     fn password_submit_set_new_requires_min_length() {
         let mut model = Model::new("test".to_string());
@@ -3222,7 +3496,10 @@ mod tests {
 
         let cmd = update(&mut model, Message::PasswordSubmitDraft);
 
-        assert!(cmd.is_none(), "short password must not dispatch SubmitPassword");
+        assert!(
+            cmd.is_none(),
+            "short password must not dispatch SubmitPassword"
+        );
         assert!(
             model
                 .wallet_state
@@ -3425,15 +3702,18 @@ mod tests {
             title: "Test".to_string(),
             message: "Test error".to_string(),
         });
-        
+
         // Press Esc with modal open
-        let cmd = update(&mut model, Message::KeyPressed(KeyEvent {
-            code: KeyCode::Esc,
-            modifiers: KeyModifiers::empty(),
-            kind: crossterm::event::KeyEventKind::Press,
-            state: crossterm::event::KeyEventState::empty(),
-        }));
-        
+        let cmd = update(
+            &mut model,
+            Message::KeyPressed(KeyEvent {
+                code: KeyCode::Esc,
+                modifiers: KeyModifiers::empty(),
+                kind: crossterm::event::KeyEventKind::Press,
+                state: crossterm::event::KeyEventState::empty(),
+            }),
+        );
+
         // Modal should be closed, no navigation
         assert!(model.ui_state.modal.is_none());
         assert!(cmd.is_none());
@@ -3456,7 +3736,12 @@ mod tests {
         child.session_id = "w1-child".to_string();
         child.label = Some("m/44'/60'/0'/0/0".to_string());
 
-        update(&mut model, Message::WalletsLoaded { wallets: vec![root, child] });
+        update(
+            &mut model,
+            Message::WalletsLoaded {
+                wallets: vec![root, child],
+            },
+        );
 
         assert_eq!(
             model.wallet_state.wallets.len(),
@@ -3477,7 +3762,10 @@ mod tests {
         for _ in 0..(start + 5) {
             update(&mut model, Message::AccountsShowLess);
         }
-        assert_eq!(model.ui_state.accounts_shown, 1, "must floor at one account");
+        assert_eq!(
+            model.ui_state.accounts_shown, 1,
+            "must floor at one account"
+        );
     }
 
     #[test]
@@ -3485,7 +3773,12 @@ mod tests {
         let mut model = Model::new("test".to_string());
         model.ui_state.accounts_shown = 12;
 
-        update(&mut model, Message::SelectWallet { wallet_id: "w1".to_string() });
+        update(
+            &mut model,
+            Message::SelectWallet {
+                wallet_id: "w1".to_string(),
+            },
+        );
 
         assert_eq!(
             model.ui_state.accounts_shown,
@@ -3506,11 +3799,23 @@ mod tests {
 
     #[test]
     fn account_signing_wallet_id_maps_root_to_account0_child() {
-        assert_eq!(account_signing_wallet_id("19caa3cf46d3", "secp256k1"), "19caa3cf46d3-ethereum-0");
-        assert_eq!(account_signing_wallet_id("19caa3cf46d3", "ed25519"), "19caa3cf46d3-solana-0");
+        assert_eq!(
+            account_signing_wallet_id("19caa3cf46d3", "secp256k1"),
+            "19caa3cf46d3-ethereum-0"
+        );
+        assert_eq!(
+            account_signing_wallet_id("19caa3cf46d3", "ed25519"),
+            "19caa3cf46d3-solana-0"
+        );
         // Already-a-child ids pass through untouched, any chain/account.
-        assert_eq!(account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "secp256k1"), "19caa3cf46d3-bitcoin-7");
-        assert_eq!(account_signing_wallet_id("19caa3cf46d3-sui-2", "ed25519"), "19caa3cf46d3-sui-2");
+        assert_eq!(
+            account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "secp256k1"),
+            "19caa3cf46d3-bitcoin-7"
+        );
+        assert_eq!(
+            account_signing_wallet_id("19caa3cf46d3-sui-2", "ed25519"),
+            "19caa3cf46d3-sui-2"
+        );
     }
 
     /// (c) TUI-initiated signing (SignTransaction → SignSubmit → Confirm →
@@ -3521,7 +3826,9 @@ mod tests {
     fn tui_sign_initiation_uses_account0_child_id() {
         let mut model = Model::new("test".to_string());
         model.wallet_state.curve_type = "secp256k1";
-        model.current_screen = Screen::SignTransaction { wallet_id: "19caa3cf46d3".to_string() };
+        model.current_screen = Screen::SignTransaction {
+            wallet_id: "19caa3cf46d3".to_string(),
+        };
         model.wallet_state.sign_message_draft = "hello".to_string();
 
         update(&mut model, Message::SignSubmit);
@@ -3530,7 +3837,10 @@ mod tests {
             .pending_sign_preview
             .as_ref()
             .expect("SignSubmit must stash a preview");
-        assert_eq!(preview.wallet_id, "19caa3cf46d3-ethereum-0", "preview signs as the child");
+        assert_eq!(
+            preview.wallet_id, "19caa3cf46d3-ethereum-0",
+            "preview signs as the child"
+        );
         // The "signing as" identity shown to the user is the child + path.
         match &model.ui_state.modal {
             Some(Modal::Confirm { message, .. }) => {
@@ -3547,7 +3857,12 @@ mod tests {
             "cold path must stash the child id"
         );
 
-        let cmd = update(&mut model, Message::SubmitPassword { value: "pw".to_string() });
+        let cmd = update(
+            &mut model,
+            Message::SubmitPassword {
+                value: "pw".to_string(),
+            },
+        );
         match cmd {
             Some(Command::UnlockWallet { wallet_id, .. }) => {
                 assert_eq!(wallet_id, "19caa3cf46d3-ethereum-0")
@@ -3563,12 +3878,15 @@ mod tests {
     fn headless_sign_maps_root_to_child_and_keeps_explicit_child() {
         let mut model = Model::new("test".to_string());
         model.wallet_state.curve_type = "ed25519";
-        update(&mut model, Message::HeadlessSign {
-            wallet_id: "rootabc".to_string(),
-            message: "m".to_string(),
-            encoding: "utf8".to_string(),
-            password: "pw".to_string(),
-        });
+        update(
+            &mut model,
+            Message::HeadlessSign {
+                wallet_id: "rootabc".to_string(),
+                message: "m".to_string(),
+                encoding: "utf8".to_string(),
+                password: "pw".to_string(),
+            },
+        );
         assert_eq!(
             model.wallet_state.pending_sign_wallet_id.as_deref(),
             Some("rootabc-solana-0")
@@ -3576,12 +3894,15 @@ mod tests {
 
         let mut model = Model::new("test".to_string());
         model.wallet_state.curve_type = "secp256k1";
-        update(&mut model, Message::HeadlessSign {
-            wallet_id: "rootabc-ethereum-7".to_string(),
-            message: "m".to_string(),
-            encoding: "utf8".to_string(),
-            password: "pw".to_string(),
-        });
+        update(
+            &mut model,
+            Message::HeadlessSign {
+                wallet_id: "rootabc-ethereum-7".to_string(),
+                message: "m".to_string(),
+                encoding: "utf8".to_string(),
+                password: "pw".to_string(),
+            },
+        );
         assert_eq!(
             model.wallet_state.pending_sign_wallet_id.as_deref(),
             Some("rootabc-ethereum-7")
@@ -3613,13 +3934,24 @@ mod tests {
                 signing_message_hex: Some(hex::encode(b"msg")),
             });
 
-            let cmd = update(&mut model, Message::SubmitPassword { value: "pw".to_string() });
+            let cmd = update(
+                &mut model,
+                Message::SubmitPassword {
+                    value: "pw".to_string(),
+                },
+            );
             match cmd {
                 Some(Command::UnlockWallet { wallet_id, .. }) => assert_eq!(wallet_id, announced),
                 other => panic!("expected UnlockWallet, got {:?}", other.is_some()),
             }
-            assert_eq!(model.wallet_state.pending_sign_wallet_id.as_deref(), Some(announced));
-            assert_eq!(model.wallet_state.pending_sign_session_id.as_deref(), Some("sess1"));
+            assert_eq!(
+                model.wallet_state.pending_sign_wallet_id.as_deref(),
+                Some(announced)
+            );
+            assert_eq!(
+                model.wallet_state.pending_sign_session_id.as_deref(),
+                Some("sess1")
+            );
         }
     }
 }

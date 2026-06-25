@@ -17,8 +17,8 @@
 //! FROST/networking comes from the shared `update`/`Command` path.
 
 use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tracing::{error, info};
 
 use crate::elm::message::Message;
@@ -225,10 +225,7 @@ where
 {
     use frost_ed25519::Ed25519Sha512;
     let app_state = Arc::new(Mutex::new(
-        AppState::<Ed25519Sha512>::with_device_id_and_server(
-            device_id.clone(),
-            signal_server_url,
-        ),
+        AppState::<Ed25519Sha512>::with_device_id_and_server(device_id.clone(), signal_server_url),
     ));
     let runner = HeadlessRunner::<Ed25519Sha512>::new(
         device_id,
@@ -282,11 +279,13 @@ mod tests {
 
         let seen = seen.lock().unwrap();
         // Initial sync passes None.
-        assert!(seen.iter().any(|m| m.is_none()), "expected an initial None sync");
+        assert!(
+            seen.iter().any(|m| m.is_none()),
+            "expected an initial None sync"
+        );
         // The processed NavigateHome must have been surfaced.
         assert!(
-            seen.iter()
-                .any(|m| m.as_deref() == Some("NavigateHome")),
+            seen.iter().any(|m| m.as_deref() == Some("NavigateHome")),
             "callback never saw the processed NavigateHome message: {:?}",
             *seen
         );

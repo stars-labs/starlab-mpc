@@ -11,11 +11,11 @@
 
 use std::sync::{Arc, Mutex};
 
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::bridge::{Bridge, Snapshot};
 use crate::policy::AutoApprovePolicy;
@@ -84,76 +84,79 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
     let policy = opts.auto_approve.clone();
     let approve_pw = opts.approve_password.clone();
     let cb = move |model: &Model, msg: Option<&Message>| {
-            let mut b = bridge_for_sync.lock().unwrap();
-            let events = b.on_sync(model, msg);
-            *snapshot_for_sync.lock().unwrap() = b.snapshot(model);
-            drop(b);
-            for mut ev in events {
-                // Stamp the originating command id onto terminal events.
-                match &mut ev {
-                    CliEvent::DkgComplete { correlates, .. } if correlates.is_none() => {
-                        *correlates = pending_for_sync.lock().unwrap().take();
-                    }
-                    // Announcement is mid-ceremony: correlate with the create
-                    // command but DON'T consume the id — DkgComplete still
-                    // needs it to close the loop.
-                    CliEvent::SessionAnnounced { correlates, .. } if correlates.is_none() => {
-                        *correlates = *pending_for_sync.lock().unwrap();
-                    }
-                    CliEvent::SignatureComplete { correlates, .. } if correlates.is_none() => {
-                        *correlates = pending_sign_for_sync.lock().unwrap().take();
-                    }
-                    CliEvent::ReshareComplete { correlates, .. } if correlates.is_none() => {
-                        *correlates = pending_reshare_for_sync.lock().unwrap().take();
-                    }
-                    // Policy-gated auto-approval: join the signing session to
-                    // contribute our share, only if the operator opted in AND
-                    // the request passes the policy (allowlist + budget).
-                    CliEvent::SigningRequest { session_id, wallet, .. } => {
-                        if policy.try_approve(wallet) {
-                            if let Some(tx) = approve_sender_cb.get() {
-                                let _ = tx.send(Message::HeadlessJoinSession {
-                                    session_id: session_id.clone(),
-                                    password: approve_pw.clone(),
-                                    label: String::new(),
-                                });
-                                let _ = out_for_sync.send(CliEvent::Error {
-                                    correlates: None,
-                                    code: "auto_approved".into(),
-                                    message: format!(
-                                        "auto-approved signing request for {wallet} ({session_id})"
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                    // Reshare is approved the same way a co-signer approves
-                    // signing — by joining the session to contribute a refreshed
-                    // share. Gate on the same policy (allowlist + budget).
-                    CliEvent::ReshareRequest { session_id, wallet, .. } => {
-                        if policy.try_approve(wallet) {
-                            if let Some(tx) = approve_sender_cb.get() {
-                                let _ = tx.send(Message::HeadlessJoinSession {
-                                    session_id: session_id.clone(),
-                                    password: approve_pw.clone(),
-                                    label: String::new(),
-                                });
-                                let _ = out_for_sync.send(CliEvent::Error {
-                                    correlates: None,
-                                    code: "auto_approved".into(),
-                                    message: format!(
-                                        "auto-approved reshare request for {wallet} ({session_id})"
-                                    ),
-                                });
-                            }
-                        }
-                    }
-                    _ => {}
+        let mut b = bridge_for_sync.lock().unwrap();
+        let events = b.on_sync(model, msg);
+        *snapshot_for_sync.lock().unwrap() = b.snapshot(model);
+        drop(b);
+        for mut ev in events {
+            // Stamp the originating command id onto terminal events.
+            match &mut ev {
+                CliEvent::DkgComplete { correlates, .. } if correlates.is_none() => {
+                    *correlates = pending_for_sync.lock().unwrap().take();
                 }
-                let _ = out_for_sync.send(ev);
+                // Announcement is mid-ceremony: correlate with the create
+                // command but DON'T consume the id — DkgComplete still
+                // needs it to close the loop.
+                CliEvent::SessionAnnounced { correlates, .. } if correlates.is_none() => {
+                    *correlates = *pending_for_sync.lock().unwrap();
+                }
+                CliEvent::SignatureComplete { correlates, .. } if correlates.is_none() => {
+                    *correlates = pending_sign_for_sync.lock().unwrap().take();
+                }
+                CliEvent::ReshareComplete { correlates, .. } if correlates.is_none() => {
+                    *correlates = pending_reshare_for_sync.lock().unwrap().take();
+                }
+                // Policy-gated auto-approval: join the signing session to
+                // contribute our share, only if the operator opted in AND
+                // the request passes the policy (allowlist + budget).
+                CliEvent::SigningRequest {
+                    session_id, wallet, ..
+                } => {
+                    if policy.try_approve(wallet) {
+                        if let Some(tx) = approve_sender_cb.get() {
+                            let _ = tx.send(Message::HeadlessJoinSession {
+                                session_id: session_id.clone(),
+                                password: approve_pw.clone(),
+                                label: String::new(),
+                            });
+                            let _ = out_for_sync.send(CliEvent::Error {
+                                correlates: None,
+                                code: "auto_approved".into(),
+                                message: format!(
+                                    "auto-approved signing request for {wallet} ({session_id})"
+                                ),
+                            });
+                        }
+                    }
+                }
+                // Reshare is approved the same way a co-signer approves
+                // signing — by joining the session to contribute a refreshed
+                // share. Gate on the same policy (allowlist + budget).
+                CliEvent::ReshareRequest {
+                    session_id, wallet, ..
+                } => {
+                    if policy.try_approve(wallet) {
+                        if let Some(tx) = approve_sender_cb.get() {
+                            let _ = tx.send(Message::HeadlessJoinSession {
+                                session_id: session_id.clone(),
+                                password: approve_pw.clone(),
+                                label: String::new(),
+                            });
+                            let _ = out_for_sync.send(CliEvent::Error {
+                                correlates: None,
+                                code: "auto_approved".into(),
+                                message: format!(
+                                    "auto-approved reshare request for {wallet} ({session_id})"
+                                ),
+                            });
+                        }
+                    }
+                }
+                _ => {}
             }
+            let _ = out_for_sync.send(ev);
         }
-    ;
+    };
     let runner_tx = if opts.curve == "ed25519" {
         spawn_ed25519(
             opts.device_id.clone(),
@@ -248,7 +251,9 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
                 // answer immediately from the cache for what we already know.
                 let _ = runner_tx.send(Message::HeadlessRefreshSessions);
                 let s = snapshot.lock().unwrap().clone();
-                let _ = out_tx.send(CliEvent::Sessions { sessions: s.sessions });
+                let _ = out_tx.send(CliEvent::Sessions {
+                    sessions: s.sessions,
+                });
             }
             CliCommand::CreateWallet {
                 name,

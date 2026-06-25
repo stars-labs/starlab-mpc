@@ -1,8 +1,8 @@
 //! Performance monitoring and profiling utilities
 
-use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
 /// Performance metrics for tracking operation timings
@@ -33,7 +33,7 @@ impl PerformanceMonitor {
             enabled: std::env::var("PERF_MONITORING").is_ok(),
         }
     }
-    
+
     /// Start timing an operation
     pub fn start_timer(&self) -> OperationTimer {
         OperationTimer {
@@ -41,48 +41,57 @@ impl PerformanceMonitor {
             monitor: self.clone(),
         }
     }
-    
+
     /// Record a metric
     pub async fn record_metric(&self, operation: String, duration: Duration) {
         if !self.enabled {
             return;
         }
-        
+
         let metric = PerformanceMetrics {
             operation: operation.clone(),
             duration,
             timestamp: Instant::now(),
         };
-        
+
         let mut metrics = self.metrics.lock().await;
         let op_clone = operation.clone();
         metrics
             .entry(operation)
             .or_insert_with(Vec::new)
             .push(metric);
-        
+
         // Keep only last 1000 entries per operation
         if let Some(vec) = metrics.get_mut(&op_clone)
-            && vec.len() > 1000 {
-                vec.drain(0..vec.len() - 1000);
-            }
+            && vec.len() > 1000
+        {
+            vec.drain(0..vec.len() - 1000);
+        }
     }
-    
+
     /// Get performance summary
     pub async fn get_summary(&self) -> String {
         let metrics = self.metrics.lock().await;
         let mut summary = String::from("=== Performance Summary ===\n");
-        
+
         for (operation, measurements) in metrics.iter() {
             if measurements.is_empty() {
                 continue;
             }
-            
+
             let total: Duration = measurements.iter().map(|m| m.duration).sum();
             let avg = total / measurements.len() as u32;
-            let min = measurements.iter().map(|m| m.duration).min().unwrap_or(Duration::ZERO);
-            let max = measurements.iter().map(|m| m.duration).max().unwrap_or(Duration::ZERO);
-            
+            let min = measurements
+                .iter()
+                .map(|m| m.duration)
+                .min()
+                .unwrap_or(Duration::ZERO);
+            let max = measurements
+                .iter()
+                .map(|m| m.duration)
+                .max()
+                .unwrap_or(Duration::ZERO);
+
             summary.push_str(&format!(
                 "{}: count={}, avg={:?}, min={:?}, max={:?}\n",
                 operation,
@@ -92,10 +101,10 @@ impl PerformanceMonitor {
                 max
             ));
         }
-        
+
         summary
     }
-    
+
     /// Clear all metrics
     pub async fn clear(&self) {
         let mut metrics = self.metrics.lock().await;
@@ -122,8 +131,10 @@ impl OperationTimer {
     /// Stop the timer and record the metric
     pub async fn stop(self, operation: &str) {
         let duration = self.start.elapsed();
-        self.monitor.record_metric(operation.to_string(), duration).await;
-        
+        self.monitor
+            .record_metric(operation.to_string(), duration)
+            .await;
+
         // Log slow operations
         if duration > Duration::from_millis(100) {
             tracing::warn!("Slow operation '{}': {:?}", operation, duration);
@@ -155,7 +166,8 @@ pub async fn profile_key_handling(event_type: &str, duration: Duration) {
 
 /// Profile render performance
 pub async fn profile_render(duration: Duration) {
-    if duration > Duration::from_millis(16) {  // 60 FPS = 16.67ms per frame
+    if duration > Duration::from_millis(16) {
+        // 60 FPS = 16.67ms per frame
         tracing::debug!(
             "Render took {:?}ms (target: 16ms for 60 FPS)",
             duration.as_millis()
@@ -165,11 +177,7 @@ pub async fn profile_render(duration: Duration) {
 
 /// Profile DKG operation
 pub async fn profile_dkg_operation(phase: &str, duration: Duration) {
-    tracing::info!(
-        "DKG {} completed in {:?}ms",
-        phase,
-        duration.as_millis()
-    );
+    tracing::info!("DKG {} completed in {:?}ms", phase, duration.as_millis());
 }
 
 /// Performance optimization recommendations
@@ -187,4 +195,3 @@ pub fn analyze_performance(_monitor: &PerformanceMonitor) -> Vec<String> {
         "Cache group public keys to prevent recalculation".to_string(),
     ]
 }
-

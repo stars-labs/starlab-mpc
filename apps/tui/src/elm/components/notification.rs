@@ -66,9 +66,7 @@ fn kind_style(kind: &NotificationKind) -> Style {
         NotificationKind::Warning => Style::default()
             .fg(Color::Yellow)
             .add_modifier(Modifier::BOLD),
-        NotificationKind::Error => Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD),
+        NotificationKind::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     }
 }
 
@@ -89,22 +87,15 @@ impl Component for NotificationBar {
 
         // Take the last (newest) N notifications. `Vec::push` appends,
         // so the last slice element is the most recent.
-        let mut tail: Vec<&Notification> = self
-            .notifications
-            .iter()
-            .rev()
-            .take(MAX_VISIBLE)
-            .collect();
+        let mut tail: Vec<&Notification> =
+            self.notifications.iter().rev().take(MAX_VISIBLE).collect();
         // Undo the reverse so oldest-of-the-visible renders on top and
         // newest is right above the main content — feels natural since
         // the eye lands on the bottom of the bar first.
         tail.reverse();
 
         let more_hint = if self.notifications.len() > MAX_VISIBLE {
-            format!(
-                " (+{} older)",
-                self.notifications.len() - MAX_VISIBLE
-            )
+            format!(" (+{} older)", self.notifications.len() - MAX_VISIBLE)
         } else {
             String::new()
         };
@@ -113,10 +104,7 @@ impl Component for NotificationBar {
             .into_iter()
             .map(|n| {
                 Line::from(vec![
-                    Span::styled(
-                        format!("{} ", kind_icon(&n.kind)),
-                        kind_style(&n.kind),
-                    ),
+                    Span::styled(format!("{} ", kind_icon(&n.kind)), kind_style(&n.kind)),
                     Span::styled(n.text.clone(), kind_style(&n.kind)),
                 ])
             })
@@ -201,9 +189,7 @@ mod tests {
     fn render(bar: &mut NotificationBar) -> String {
         let backend = TestBackend::new(80, 3);
         let mut terminal = Terminal::new(backend).expect("TestBackend");
-        terminal
-            .draw(|f| bar.view(f, f.area()))
-            .expect("draw");
+        terminal.draw(|f| bar.view(f, f.area())).expect("draw");
         let buf = terminal.backend().buffer();
         let area = buf.area();
         let mut out = String::new();
@@ -230,10 +216,7 @@ mod tests {
     #[test]
     fn one_notification_renders_text_and_icon() {
         let mut bar = NotificationBar::default();
-        bar.set_notifications(vec![notif(
-            NotificationKind::Success,
-            "Wallet created",
-        )]);
+        bar.set_notifications(vec![notif(NotificationKind::Success, "Wallet created")]);
         let rendered = render(&mut bar);
         assert!(
             rendered.contains("Wallet created"),

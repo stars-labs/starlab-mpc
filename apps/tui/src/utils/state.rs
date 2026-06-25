@@ -44,7 +44,7 @@ pub enum InternalCommand<C: Ciphersuite> {
         password: String,
         tags: Vec<String>,
     },
-    
+
     /// Show wallet file location for direct sharing
     LocateWallet {
         wallet_id: String,
@@ -74,7 +74,7 @@ pub enum InternalCommand<C: Ciphersuite> {
         from_device_id: String,
         response: SessionResponse,
     },
-    
+
     /// Initiate WebRTC connections with session participants
     InitiateWebRTCConnections,
 
@@ -197,36 +197,36 @@ pub enum InternalCommand<C: Ciphersuite> {
         transaction_data: String,
         selected_signers: Vec<Identifier<C>>,
     },
-    
+
     // --- Offline Mode Commands ---
     /// Toggle offline mode
     OfflineMode {
         enabled: bool,
     },
-    
+
     /// Create a signing request for offline distribution
     CreateSigningRequest {
         wallet_id: String,
         message: String,
         transaction_hex: String,
     },
-    
+
     /// Export signing request to file/SD card
     ExportSigningRequest {
         session_id: String,
         output_path: String,
     },
-    
+
     /// Import signing request from file/SD card
     ImportSigningRequest {
         input_path: String,
     },
-    
+
     /// Review a signing request
     ReviewSigningRequest {
         session_id: String,
     },
-    
+
     /// List offline sessions
     ListOfflineSessions,
     /// Set the current session (used by TUI to sync state)
@@ -240,24 +240,24 @@ pub enum InternalCommand<C: Ciphersuite> {
 
     /// Set DKG execution mode
     SetDkgMode(crate::protocal::dkg::DkgMode),
-    
+
     /// Discover available sessions
     DiscoverSessions,
-    
+
     /// Process session announcement from signaling server
     ProcessSessionAnnouncement {
         announcement: crate::protocal::signal::SessionAnnouncement,
     },
-    
+
     /// Handle wallet creation completion
     CompleteWalletCreation {
         wallet_id: String,
         addresses: Vec<crate::keystore::BlockchainInfo>,
     },
-    
+
     /// Join an existing session
     JoinSession(String),
-    
+
     /// Process a join request from another device
     ProcessJoinRequest {
         from_device: String,
@@ -265,10 +265,10 @@ pub enum InternalCommand<C: Ciphersuite> {
         device_id: String,
         is_rejoin: bool,
     },
-    
+
     /// Retry failed DKG
     RetryDkg,
-    
+
     /// Cancel ongoing DKG
     CancelDkg,
 }
@@ -290,7 +290,7 @@ pub enum DkgState {
 #[derive(Debug, PartialEq, Clone)]
 pub enum MeshStatus {
     Incomplete,
-    WebRTCInitiated,  // WebRTC connections initiated but not all ready yet
+    WebRTCInitiated, // WebRTC connections initiated but not all ready yet
     PartiallyReady {
         ready_devices: HashSet<String>,
         total_devices: usize,

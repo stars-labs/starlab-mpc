@@ -1,13 +1,13 @@
 //! Shared core logic for both TUI and native nodes
 //! This module contains all the business logic that can be reused across different UI implementations
 
-pub mod dkg_manager;
-pub mod session_manager;
-pub mod offline_manager;
-pub mod wallet_manager;
 pub mod connection_manager;
-pub mod signing_manager;
+pub mod dkg_manager;
+pub mod offline_manager;
+pub mod session_manager;
 pub mod signing_backend;
+pub mod signing_manager;
+pub mod wallet_manager;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -22,19 +22,19 @@ pub type CoreResult<T> = Result<T, CoreError>;
 pub enum CoreError {
     #[error("DKG error: {0}")]
     Dkg(String),
-    
+
     #[error("Session error: {0}")]
     Session(String),
-    
+
     #[error("Wallet error: {0}")]
     Wallet(String),
-    
+
     #[error("Network error: {0}")]
     Network(String),
-    
+
     #[error("Offline mode error: {0}")]
     Offline(String),
-    
+
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -181,21 +181,21 @@ pub struct CoreState {
     pub webrtc_connected: Arc<Mutex<bool>>,
     pub mesh_connections: Arc<Mutex<Vec<ConnectionInfo>>>,
     pub operation_mode: Arc<Mutex<OperationMode>>,
-    
+
     // Wallet state
     pub wallets: Arc<Mutex<Vec<WalletInfo>>>,
     pub active_wallet_index: Arc<Mutex<usize>>,
-    
+
     // Session state
     pub available_sessions: Arc<Mutex<Vec<SessionInfo>>>,
     pub active_session: Arc<Mutex<Option<SessionInfo>>>,
-    
+
     // DKG state
     pub dkg_active: Arc<Mutex<bool>>,
     pub dkg_round: Arc<Mutex<u8>>,
     pub dkg_progress: Arc<Mutex<f32>>,
     pub dkg_participants: Arc<Mutex<Vec<ParticipantInfo>>>,
-    
+
     // Offline state
     pub offline_enabled: Arc<Mutex<bool>>,
     pub sd_card_detected: Arc<Mutex<bool>>,
@@ -247,19 +247,19 @@ pub trait UICallback: Send + Sync {
     async fn update_connection_status(&self, websocket: bool, webrtc: bool);
     async fn update_mesh_connections(&self, connections: Vec<ConnectionInfo>);
     async fn update_operation_mode(&self, mode: OperationMode);
-    
+
     // Wallet updates
     async fn update_wallets(&self, wallets: Vec<WalletInfo>);
     async fn update_active_wallet(&self, index: usize);
-    
+
     // Session updates
     async fn update_available_sessions(&self, sessions: Vec<SessionInfo>);
     async fn update_active_session(&self, session: Option<SessionInfo>);
-    
+
     // DKG updates
     async fn update_dkg_status(&self, active: bool, round: u8, progress: f32);
     async fn update_dkg_participants(&self, participants: Vec<ParticipantInfo>);
-    
+
     // Offline mode updates
     async fn update_offline_status(&self, enabled: bool, sd_card_detected: bool);
     async fn update_sd_operations(&self, operations: Vec<SDCardOperation>);

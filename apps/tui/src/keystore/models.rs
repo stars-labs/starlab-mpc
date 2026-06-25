@@ -5,7 +5,6 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 /// Gets the current Unix timestamp in seconds
 fn current_timestamp() -> u64 {
     SystemTime::now()
@@ -14,34 +13,33 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
-
 /// Information about a blockchain supported by a wallet
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockchainInfo {
     /// Blockchain identifier (e.g., "ethereum", "bsc", "polygon", "solana")
     pub blockchain: String,
-    
+
     /// Network type (e.g., "mainnet", "testnet", "devnet")
     pub network: String,
-    
+
     /// Chain ID for EVM-compatible chains
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain_id: Option<u64>,
-    
+
     /// Address on this blockchain
     pub address: String,
-    
+
     /// Address format/encoding (e.g., "EIP-55", "base58", "bech32")
     pub address_format: String,
-    
+
     /// Whether this blockchain is actively used
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    
+
     /// Optional custom RPC endpoint
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rpc_endpoint: Option<String>,
-    
+
     /// Additional metadata specific to this blockchain
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<serde_json::Value>,
@@ -141,9 +139,17 @@ impl WalletInfo {
         let blockchain_info = BlockchainInfo {
             blockchain: blockchain.clone(),
             network: "mainnet".to_string(),
-            chain_id: if blockchain == "ethereum" { Some(1) } else { None },
+            chain_id: if blockchain == "ethereum" {
+                Some(1)
+            } else {
+                None
+            },
             address: public_address,
-            address_format: if blockchain == "ethereum" { "EIP-55".to_string() } else { "base58".to_string() },
+            address_format: if blockchain == "ethereum" {
+                "EIP-55".to_string()
+            } else {
+                "base58".to_string()
+            },
             enabled: true,
             rpc_endpoint: None,
             metadata: None,
@@ -213,7 +219,6 @@ impl DeviceInfo {
             last_seen: current_timestamp(),
         }
     }
-
 }
 
 /// Simplified wallet metadata - KISS and Orthogonal
@@ -223,22 +228,22 @@ pub struct WalletMetadata {
     /// Wallet identifier (usually the session name from DKG)
     #[serde(alias = "wallet_id")] // For backward compatibility
     pub session_id: String,
-    
+
     /// Device ID that owns this key share
     pub device_id: String,
-    
+
     /// Type of cryptographic curve used ("secp256k1" or "ed25519")
     pub curve_type: String,
-    
+
     /// Minimum number of participants required to sign (K in K-of-N)
     pub threshold: u16,
-    
+
     /// Total number of participants (N in K-of-N)
     pub total_participants: u16,
-    
+
     /// This device's participant index (1-based: 1, 2, 3, etc.)
     pub participant_index: u16,
-    
+
     /// Serialized FROST group public key (source of truth for addresses)
     pub group_public_key: String,
 
@@ -254,7 +259,7 @@ pub struct WalletMetadata {
 
     /// ISO 8601 timestamp when created
     pub created_at: String,
-    
+
     /// ISO 8601 timestamp when last modified
     pub last_modified: String,
 
@@ -268,31 +273,30 @@ pub struct WalletMetadata {
     pub label: Option<String>,
 
     // === Legacy fields for backward compatibility (will be removed in v3.0) ===
-    
     /// User-friendly device name (deprecated, use device_id)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
-    
+
     /// List of blockchains (deprecated, derive from group_public_key)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockchains: Vec<BlockchainInfo>,
-    
+
     /// Legacy blockchain field
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blockchain: Option<String>,
-    
+
     /// Legacy address field
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_address: Option<String>,
-    
+
     /// This device's identifier (deprecated, use device_id)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
-    
+
     /// User-defined tags (deprecated)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
-    
+
     /// Optional description (deprecated)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -368,7 +372,6 @@ impl WalletMetadata {
     pub fn display_name(&self) -> &str {
         self.label.as_deref().unwrap_or(&self.session_id)
     }
-
 }
 
 /// Self-contained wallet file format
@@ -376,16 +379,16 @@ impl WalletMetadata {
 pub struct WalletFile {
     /// Format version
     pub version: String,
-    
+
     /// Whether the data is encrypted
     pub encrypted: bool,
-    
+
     /// Encryption algorithm used (e.g., "AES-256-GCM-Argon2id" or "AES-256-GCM-PBKDF2")
     pub algorithm: String,
-    
+
     /// Base64-encoded encrypted data
     pub data: String,
-    
+
     /// Embedded metadata
     pub metadata: WalletMetadata,
 }
@@ -402,4 +405,3 @@ pub struct KeystoreIndex {
     /// List of all devices
     pub devices: Vec<DeviceInfo>,
 }
-

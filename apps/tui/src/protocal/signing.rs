@@ -30,7 +30,7 @@ use crate::protocal::dkg::canonical_identifier;
 use crate::protocal::signal::WebRTCMessage;
 use crate::utils::appstate_compat::AppState;
 use crate::utils::state::SigningState;
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use frost_core::Ciphersuite;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -87,8 +87,7 @@ pub async fn handle_start_signing<C>(
         let mut guard = state.lock().await;
 
         let Some(kp) = guard.key_package.clone() else {
-            let err = "handle_start_signing: no key_package — unlock the wallet first"
-                .to_string();
+            let err = "handle_start_signing: no key_package — unlock the wallet first".to_string();
             fail_and_notify(&mut guard, &ui_tx, err);
             return;
         };
@@ -210,8 +209,14 @@ pub async fn drain_pre_session_commitments<C>(
         buffered.len()
     );
     for (from, bytes) in buffered {
-        process_signing_round1(state.clone(), self_device_id.clone(), from, bytes, ui_tx.clone())
-            .await;
+        process_signing_round1(
+            state.clone(),
+            self_device_id.clone(),
+            from,
+            bytes,
+            ui_tx.clone(),
+        )
+        .await;
     }
 }
 
@@ -283,7 +288,9 @@ pub async fn process_signing_round1<C>(
     // Insert into the accumulator.
     {
         let mut guard = state.lock().await;
-        guard.frost_commitments.insert(decode_result.0, decode_result.1);
+        guard
+            .frost_commitments
+            .insert(decode_result.0, decode_result.1);
     }
 
     try_advance_to_round2::<C>(&state, &ui_tx, &self_device_id).await;
@@ -417,7 +424,10 @@ pub async fn process_signing_round2<C>(
     let (sender_id, share) = {
         let guard = state.lock().await;
         let Some(session) = guard.session.as_ref() else {
-            warn!("SIGN_SHARE from {} but no active session; dropping", from_device_id);
+            warn!(
+                "SIGN_SHARE from {} but no active session; dropping",
+                from_device_id
+            );
             return;
         };
         let sender_id = match canonical_identifier::<C>(&session.participants, &from_device_id) {
@@ -516,7 +526,11 @@ where
     // A failure here means some share was malformed and the aggregate
     // silently combined garbage — fail loudly before the UI claims
     // success.
-    if pubkey_package.verifying_key().verify(&message, &signature).is_err() {
+    if pubkey_package
+        .verifying_key()
+        .verify(&message, &signature)
+        .is_err()
+    {
         let err = "aggregated signature failed verification under group_verifying_key".to_string();
         let mut g = state.lock().await;
         fail_and_notify(&mut g, ui_tx, err);
@@ -656,9 +670,9 @@ async fn broadcast_signing_frame<C>(
 #[cfg(test)]
 mod tests {
     use frost_secp256k1::{
-        keys::{generate_with_dealer, IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP},
-        rand_core::OsRng,
         Identifier, Secp256K1Sha256,
+        keys::{IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer},
+        rand_core::OsRng,
     };
     use std::collections::BTreeMap;
 
@@ -708,8 +722,9 @@ mod tests {
         }
 
         // Aggregate
-        let signature = frost_core::aggregate::<Secp256K1Sha256>(&signing_package, &shares_map, &pkp)
-            .expect("aggregate");
+        let signature =
+            frost_core::aggregate::<Secp256K1Sha256>(&signing_package, &shares_map, &pkp)
+                .expect("aggregate");
 
         pkp.verifying_key()
             .verify(message, &signature)

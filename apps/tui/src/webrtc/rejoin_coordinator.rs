@@ -1,9 +1,9 @@
 //! Coordinator for handling participant rejoin and state recovery
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use serde::{Serialize, Deserialize};
 
 use super::mesh_manager::PeerId;
 
@@ -92,7 +92,8 @@ impl MessageBuffer {
     }
 
     pub fn get_messages_since(&self, round: u8) -> Vec<MissedMessage> {
-        self.messages.iter()
+        self.messages
+            .iter()
             .filter(|m| m.round >= round)
             .cloned()
             .collect()
@@ -145,8 +146,11 @@ impl RejoinCoordinator {
 
     /// Handles a rejoin request
     pub async fn handle_rejoin_request(&self, request: RejoinRequest) -> RejoinResponse {
-        println!("  🔄 Processing rejoin request from peer {}", request.peer_id);
-        
+        println!(
+            "  🔄 Processing rejoin request from peer {}",
+            request.peer_id
+        );
+
         // Validate the request
         if !self.validate_rejoin(&request).await {
             self.record_rejoin_event(request.peer_id, false, "Validation failed");
@@ -170,7 +174,10 @@ impl RejoinCoordinator {
         }
 
         // Store the rejoin request
-        self.pending_rejoins.lock().unwrap().insert(request.peer_id, request.clone());
+        self.pending_rejoins
+            .lock()
+            .unwrap()
+            .insert(request.peer_id, request.clone());
 
         // Get current session state
         let session_state = self.session_state.lock().unwrap().clone();
@@ -195,7 +202,7 @@ impl RejoinCoordinator {
     /// Validates a rejoin request
     pub async fn validate_rejoin(&self, request: &RejoinRequest) -> bool {
         let session = self.session_state.lock().unwrap();
-        
+
         // Check session ID matches
         if request.session_id != session.session_id {
             println!("  ❌ Invalid session ID");
@@ -210,7 +217,8 @@ impl RejoinCoordinator {
 
         // Check if rejoin is within reasonable time
         let elapsed = Instant::now().elapsed().as_secs() - session.started_at;
-        if elapsed > 3600 { // 1 hour limit
+        if elapsed > 3600 {
+            // 1 hour limit
             println!("  ❌ Session too old for rejoin");
             return false;
         }
@@ -227,19 +235,22 @@ impl RejoinCoordinator {
         }
 
         // Store authentication
-        self.authenticated_peers.lock().unwrap().insert(peer_id, auth_token.to_string());
+        self.authenticated_peers
+            .lock()
+            .unwrap()
+            .insert(peer_id, auth_token.to_string());
         true
     }
 
     /// Syncs a participant with current state
     pub async fn sync_participant(&self, peer_id: PeerId) {
         println!("  📥 Syncing participant {} with current state", peer_id);
-        
+
         let session = self.session_state.lock().unwrap();
         println!("    • Session: {}", session.session_id);
         println!("    • Round: {}", session.current_round);
         println!("    • Messages: {}", session.message_count);
-        
+
         // Remove from pending
         self.pending_rejoins.lock().unwrap().remove(&peer_id);
     }
@@ -255,12 +266,13 @@ impl RejoinCoordinator {
         };
 
         let mut buffers = self.message_buffers.lock().unwrap();
-        
+
         // Add to all peer buffers except sender
         let session = self.session_state.lock().unwrap();
         for peer in &session.participants {
             if *peer != from {
-                buffers.entry(*peer)
+                buffers
+                    .entry(*peer)
                     .or_insert_with(|| MessageBuffer::new(100))
                     .add_message(message.clone());
             }
@@ -274,7 +286,7 @@ impl RejoinCoordinator {
     /// Gets missed messages for a peer
     fn get_missed_messages(&self, peer_id: PeerId, since_round: u8) -> Vec<MissedMessage> {
         let buffers = self.message_buffers.lock().unwrap();
-        
+
         if let Some(buffer) = buffers.get(&peer_id) {
             buffer.get_messages_since(since_round)
         } else {
@@ -304,13 +316,13 @@ impl RejoinCoordinator {
     /// Gets rejoin statistics
     pub fn get_rejoin_stats(&self) -> RejoinStats {
         let history = self.rejoin_history.lock().unwrap();
-        
+
         let total_attempts = history.len();
         let successful = history.iter().filter(|e| e.success).count();
         let failed = total_attempts - successful;
-        
-        let peer_attempts: HashMap<PeerId, usize> = history.iter()
-            .fold(HashMap::new(), |mut acc, event| {
+
+        let peer_attempts: HashMap<PeerId, usize> =
+            history.iter().fold(HashMap::new(), |mut acc, event| {
                 *acc.entry(event.peer_id).or_insert(0) += 1;
                 acc
             });
@@ -339,11 +351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rejoin_request_handling() {
-        let coordinator = RejoinCoordinator::new(
-            "test-session".to_string(),
-            vec![1, 2, 3],
-            2,
-        );
+        let coordinator = RejoinCoordinator::new("test-session".to_string(), vec![1, 2, 3], 2);
 
         let request = RejoinRequest {
             peer_id: 2,
@@ -360,11 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_invalid_rejoin() {
-        let coordinator = RejoinCoordinator::new(
-            "test-session".to_string(),
-            vec![1, 2, 3],
-            2,
-        );
+        let coordinator = RejoinCoordinator::new("test-session".to_string(), vec![1, 2, 3], 2);
 
         let request = RejoinRequest {
             peer_id: 4, // Not in participant list
@@ -378,5 +382,4 @@ mod tests {
         assert!(!response.accepted);
         assert!(response.rejection_reason.is_some());
     }
-
 }

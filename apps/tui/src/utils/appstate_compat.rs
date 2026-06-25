@@ -1,11 +1,11 @@
 // AppState Compatibility Layer
 // Temporary wrapper to help migrate from AppState to StateMachine
 
+use super::state::{DkgState, MeshStatus, SigningState};
+use crate::protocal::signal::SessionInfo;
+use frost_core::Ciphersuite;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use frost_core::Ciphersuite;
-use crate::protocal::signal::SessionInfo;
-use super::state::{DkgState, MeshStatus, SigningState};
 
 /// Application state management
 /// Central state container for the MPC wallet application
@@ -25,10 +25,20 @@ pub struct AppState<C: Ciphersuite> {
     pub available_sessions: Vec<crate::protocal::signal::SessionAnnouncement>,
     pub joining_session_id: Option<String>,
     pub current_wallet_id: Option<String>,
-    pub device_connections: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<webrtc::peer_connection::RTCPeerConnection>>>>,
+    pub device_connections: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<String, Arc<webrtc::peer_connection::RTCPeerConnection>>,
+        >,
+    >,
     pub data_channels: std::collections::HashMap<String, Arc<webrtc::data_channel::RTCDataChannel>>,
-    pub device_statuses: std::collections::HashMap<String, webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState>,
-    pub pending_ice_candidates: std::collections::HashMap<String, Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>>,
+    pub device_statuses: std::collections::HashMap<
+        String,
+        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState,
+    >,
+    pub pending_ice_candidates: std::collections::HashMap<
+        String,
+        Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>,
+    >,
     pub making_offer: std::collections::HashMap<String, bool>,
     pub mesh_status: MeshStatus,
     pub dkg_state: DkgState,
@@ -51,13 +61,25 @@ pub struct AppState<C: Ciphersuite> {
     pub dkg_part1_public_package: Option<Vec<u8>>,
     pub dkg_part1_secret_package: Option<Vec<u8>>,
     pub dkg_part2_secret_package: Option<Vec<u8>>,
-    pub dkg_round1_packages: std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round1::Package<C>>,
-    pub dkg_round2_packages: std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round2::Package<C>>,
+    pub dkg_round1_packages: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::keys::dkg::round1::Package<C>,
+    >,
+    pub dkg_round2_packages: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::keys::dkg::round2::Package<C>,
+    >,
     pub key_package: Option<frost_core::keys::KeyPackage<C>>,
     pub group_public_key: Option<frost_core::VerifyingKey<C>>,
     pub public_key_package: Option<frost_core::keys::PublicKeyPackage<C>>,
-    pub frost_commitments: std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::round1::SigningCommitments<C>>,
-    pub frost_signature_shares: std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::round2::SignatureShare<C>>,
+    pub frost_commitments: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::round1::SigningCommitments<C>,
+    >,
+    pub frost_signature_shares: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::round2::SignatureShare<C>,
+    >,
     pub frost_nonces: Option<frost_core::round1::SigningNonces<C>>,
     /// Raw bytes being signed in the current signing ceremony. Written by
     /// the coordinator-side `handle_start_signing` call, then referenced
@@ -80,10 +102,14 @@ pub struct AppState<C: Ciphersuite> {
     pub reshare_in_progress: bool,
     pub reshare_round1_secret: Option<frost_core::keys::dkg::round1::SecretPackage<C>>,
     pub reshare_round2_secret: Option<frost_core::keys::dkg::round2::SecretPackage<C>>,
-    pub reshare_round1_packages:
-        std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round1::Package<C>>,
-    pub reshare_round2_packages:
-        std::collections::BTreeMap<frost_core::Identifier<C>, frost_core::keys::dkg::round2::Package<C>>,
+    pub reshare_round1_packages: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::keys::dkg::round1::Package<C>,
+    >,
+    pub reshare_round2_packages: std::collections::BTreeMap<
+        frost_core::Identifier<C>,
+        frost_core::keys::dkg::round2::Package<C>,
+    >,
     /// The wallet's ORIGINAL participant list (from keystore metadata), used to
     /// map device_id → original FROST id during a reshare (design §3 — must NOT
     /// recompute over the retained set). Set when the reshare loads the wallet.
@@ -100,7 +126,7 @@ pub struct AppState<C: Ciphersuite> {
     pub websocket_connecting: bool,
     pub websocket_reconnecting: bool,
     pub websocket_listener_active: bool, // Track if listener task is running
-    pub dkg_in_progress: bool, // Prevents duplicate DKG sessions
+    pub dkg_in_progress: bool,           // Prevents duplicate DKG sessions
     pub selected_wallet: Option<String>,
     pub own_mesh_ready_sent: bool,
     pub dkg_mode: Option<crate::protocal::dkg::DkgMode>,
@@ -108,7 +134,8 @@ pub struct AppState<C: Ciphersuite> {
     pub session_start_time: Option<std::time::Instant>,
     pub webrtc_pending_participants: Vec<String>,
     pub websocket_error: Option<String>,
-    pub websocket_internal_cmd_tx: Option<tokio::sync::mpsc::UnboundedSender<super::state::InternalCommand<C>>>,
+    pub websocket_internal_cmd_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<super::state::InternalCommand<C>>>,
     // Primary outbound WebSocket channel — every subsystem that needs to send
     // over the signal WebSocket (`AnnounceSession`, `RequestActiveSessions`,
     // relay frames, …) enqueues a serialized JSON string here. A single sender
@@ -123,7 +150,14 @@ pub struct AppState<C: Ciphersuite> {
     pub server_msg_broadcast_tx:
         Option<tokio::sync::broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>>,
     // ICE candidate queue for handling race conditions
-    pub ice_candidate_queue: Arc<tokio::sync::Mutex<std::collections::HashMap<String, Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>>>>,
+    pub ice_candidate_queue: Arc<
+        tokio::sync::Mutex<
+            std::collections::HashMap<
+                String,
+                Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>,
+            >,
+        >,
+    >,
 
     // --- Unified DKG (ed25519 + secp256k1 from one ceremony) ---
     /// True when this node is running a UNIFIED ceremony (curve_type == "unified").
@@ -143,17 +177,19 @@ pub struct AppState<C: Ciphersuite> {
 impl<C: Ciphersuite + Send + Sync + 'static> Default for AppState<C>
 where
     <<C as Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
-    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
- {
+    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar:
+        Send + Sync,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<C: Ciphersuite + Send + Sync + 'static> AppState<C> 
+impl<C: Ciphersuite + Send + Sync + 'static> AppState<C>
 where
     <<C as Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
-    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
+    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar:
+        Send + Sync,
 {
     pub fn new() -> Self {
         Self {
@@ -228,17 +264,19 @@ where
             websocket_internal_cmd_tx: None,
             websocket_msg_tx: None,
             server_msg_broadcast_tx: None,
-            ice_candidate_queue: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            ice_candidate_queue: Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
         }
     }
-    
+
     pub fn with_device_id(device_id: String) -> Self {
         Self::with_device_id_and_server(device_id, String::new())
     }
-    
+
     pub fn with_device_id_and_server(device_id: String, signal_server_url: String) -> Self {
         Self {
             device_id,
@@ -312,25 +350,27 @@ where
             websocket_internal_cmd_tx: None,
             websocket_msg_tx: None,
             server_msg_broadcast_tx: None,
-            ice_candidate_queue: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            ice_candidate_queue: Arc::new(
+                tokio::sync::Mutex::new(std::collections::HashMap::new()),
+            ),
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
         }
     }
-    
+
     /// Get DKG state from composite state
     pub async fn get_dkg_state(&self) -> DkgState {
         // Simplified implementation - just return the stored dkg_state
         self.dkg_state.clone()
     }
-    
+
     /// Get mesh status from composite state
     pub async fn get_mesh_status(&self) -> MeshStatus {
         // Simplified implementation - just return the stored mesh_status
         self.mesh_status.clone()
     }
-    
+
     /// Check if can start DKG
     pub async fn can_start_dkg(&self) -> bool {
         // Simple check based on mesh status
@@ -339,10 +379,13 @@ where
 }
 
 /// Create a Mutex-wrapped AppState for compatibility
-pub fn create_legacy_appstate<C: Ciphersuite + Send + Sync + 'static>(device_id: String) -> Arc<Mutex<AppState<C>>> 
+pub fn create_legacy_appstate<C: Ciphersuite + Send + Sync + 'static>(
+    device_id: String,
+) -> Arc<Mutex<AppState<C>>>
 where
     <<C as Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
-    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
+    <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar:
+        Send + Sync,
 {
     Arc::new(Mutex::new(AppState::with_device_id(device_id)))
 }

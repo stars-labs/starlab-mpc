@@ -1,16 +1,16 @@
 //! Main menu screen — root navigation into wallet creation, join, sign, settings.
 
-use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
+use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;
 
-use tuirealm::command::{Cmd, CmdResult, Direction};
-use tuirealm::event::Event;
-use ratatui::layout::{Rect, Constraint, Direction as LayoutDirection, Layout, Alignment};
-use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph};
+use ratatui::layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph};
+use tuirealm::command::{Cmd, CmdResult, Direction};
 use tuirealm::component::{AppComponent, Component};
-use tuirealm::ratatui::Frame;
+use tuirealm::event::Event;
 use tuirealm::props::Props;
+use tuirealm::ratatui::Frame;
 use tuirealm::state::{State, StateValue};
 
 /// Professional main menu with enhanced styling
@@ -35,9 +35,9 @@ struct MenuItem {
 
 #[derive(Debug, Clone)]
 enum Priority {
-    High,      // Primary actions - bright colors
-    Medium,    // Secondary actions - normal colors  
-    Low,       // Tertiary actions - muted colors
+    High,   // Primary actions - bright colors
+    Medium, // Secondary actions - normal colors
+    Low,    // Tertiary actions - muted colors
 }
 
 impl Default for MainMenu {
@@ -50,7 +50,7 @@ impl MainMenu {
     pub fn new() -> Self {
         Self::with_wallet_count(0)
     }
-    
+
     pub fn with_wallet_count(wallet_count: usize) -> Self {
         let mut items = vec![
             MenuItem {
@@ -70,14 +70,18 @@ impl MainMenu {
                 priority: Priority::High,
             },
         ];
-        
+
         // Add wallet-dependent options
         if wallet_count > 0 {
             items.extend(vec![
                 MenuItem {
                     icon: "💼",
                     label: "Manage Wallets".to_string(),
-                    description: format!("View and manage {} wallet{}", wallet_count, if wallet_count == 1 { "" } else { "s" }),
+                    description: format!(
+                        "View and manage {} wallet{}",
+                        wallet_count,
+                        if wallet_count == 1 { "" } else { "s" }
+                    ),
                     enabled: true,
                     badge: Some(format!("{}", wallet_count)),
                     priority: Priority::Medium,
@@ -92,7 +96,7 @@ impl MainMenu {
                 },
             ]);
         }
-        
+
         // Always available options
         items.extend(vec![
             MenuItem {
@@ -112,9 +116,9 @@ impl MainMenu {
                 priority: Priority::Low,
             },
         ]);
-        
+
         let props = Props::default();
-        
+
         Self {
             props,
             items,
@@ -123,12 +127,12 @@ impl MainMenu {
             wallet_count,
         }
     }
-    
+
     /// Set the selected index
     pub fn set_selected(&mut self, index: usize) {
         self.selected = index.min(self.items.len().saturating_sub(1));
     }
-    
+
     fn get_priority_color(&self, priority: &Priority) -> Color {
         match priority {
             Priority::High => Color::Cyan,
@@ -136,14 +140,17 @@ impl MainMenu {
             Priority::Low => Color::Gray,
         }
     }
-    
+
     fn get_status_summary(&self) -> String {
         if self.wallet_count == 0 {
             "🔒 No wallets configured - Create your first MPC wallet".to_string()
         } else if self.wallet_count == 1 {
             "✅ 1 wallet configured and ready for operations".to_string()
         } else {
-            format!("✅ {} wallets configured - Multi-wallet environment", self.wallet_count)
+            format!(
+                "✅ {} wallets configured - Multi-wallet environment",
+                self.wallet_count
+            )
         }
     }
 }
@@ -154,35 +161,38 @@ impl Component for MainMenu {
         let chunks = Layout::default()
             .direction(LayoutDirection::Vertical)
             .constraints([
-                Constraint::Length(6),    // Header with title and branding
-                Constraint::Min(0),       // Main menu content
-                Constraint::Length(5),    // Status footer with system info
+                Constraint::Length(6), // Header with title and branding
+                Constraint::Min(0),    // Main menu content
+                Constraint::Length(5), // Status footer with system info
             ])
             .margin(1)
             .split(area);
-        
+
         // Enhanced header section
         self.render_header(frame, chunks[0]);
-        
+
         // Professional menu content
         self.render_menu(frame, chunks[1]);
-        
+
         // Status footer with system information
         self.render_footer(frame, chunks[2]);
     }
-    
-    fn query<'a>(&'a self, attr: tuirealm::props::Attribute) -> Option<tuirealm::props::QueryResult<'a>> {
+
+    fn query<'a>(
+        &'a self,
+        attr: tuirealm::props::Attribute,
+    ) -> Option<tuirealm::props::QueryResult<'a>> {
         self.props.get_for_query(attr)
     }
-    
+
     fn attr(&mut self, attr: tuirealm::props::Attribute, value: tuirealm::props::AttrValue) {
         self.props.set(attr, value);
     }
-    
+
     fn state(&self) -> tuirealm::state::State {
         State::Single(StateValue::Usize(self.selected))
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Move(Direction::Up) => {
@@ -224,13 +234,13 @@ impl MainMenu {
                 Constraint::Length(1),
             ])
             .split(area);
-        
+
         // Main title with professional branding
         let title = Paragraph::new("🏦 MPC Wallet Terminal Interface")
             .style(
                 Style::default()
                     .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .alignment(Alignment::Center)
             .block(
@@ -239,25 +249,33 @@ impl MainMenu {
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Color::Cyan))
                     .title(" MPC Wallet — Threshold FROST Signer ")
-                    .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
             );
         frame.render_widget(title, header_chunks[0]);
-        
+
         // Subtitle with version info
         let subtitle = Paragraph::new(concat!(
             "Threshold Signature System v",
             env!("CARGO_PKG_VERSION"),
         ))
-            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
-            .alignment(Alignment::Center);
+        .style(
+            Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::ITALIC),
+        )
+        .alignment(Alignment::Center);
         frame.render_widget(subtitle, header_chunks[1]);
-        
+
         // Security notice
         let security = Paragraph::new("🔐 FROST Protocol • Online & Offline (SD-card) Modes")
             .style(Style::default().fg(Color::Green))
             .alignment(Alignment::Center);
         frame.render_widget(security, header_chunks[2]);
-        
+
         // Connection status line. Placeholder: the real live
         // connection state lives on AppState and would need to
         // thread through MainMenu props to surface here. For now,
@@ -265,34 +283,33 @@ impl MainMenu {
         // hardcoded "Network: Ready • WebRTC: Available • Signal
         // Server: Connected" text, which was wrong whenever the
         // signal server was not yet reached.
-        let connection = Paragraph::new("🌐 Signal-server + WebRTC state shown per-screen during active ceremonies")
-            .style(Style::default().fg(Color::DarkGray))
-            .alignment(Alignment::Center);
+        let connection = Paragraph::new(
+            "🌐 Signal-server + WebRTC state shown per-screen during active ceremonies",
+        )
+        .style(Style::default().fg(Color::DarkGray))
+        .alignment(Alignment::Center);
         frame.render_widget(connection, header_chunks[3]);
     }
-    
+
     fn render_menu(&self, frame: &mut Frame, area: Rect) {
-        let items: Vec<ListItem> = self.items
+        let items: Vec<ListItem> = self
+            .items
             .iter()
             .enumerate()
             .map(|(i, item)| {
                 let is_selected = i == self.selected;
                 let priority_color = self.get_priority_color(&item.priority);
-                
+
                 // Create selection indicator
-                let indicator = if is_selected {
-                    "▶ "
-                } else {
-                    "  "
-                };
-                
+                let indicator = if is_selected { "▶ " } else { "  " };
+
                 // Create badge display
                 let badge_display = if let Some(ref badge) = item.badge {
                     format!(" [{}]", badge)
                 } else {
                     String::new()
                 };
-                
+
                 // Main content with enhanced formatting
                 let content = if is_selected {
                     // Expanded view for selected item
@@ -316,7 +333,7 @@ impl MainMenu {
                         if item.enabled { "" } else { "(Disabled)" }
                     )
                 };
-                
+
                 let style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
@@ -326,37 +343,41 @@ impl MainMenu {
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                
+
                 ListItem::new(content).style(style)
             })
             .collect();
-        
+
         let list = List::new(items)
             .block(
                 Block::default()
                     .title(" Main Menu ")
-                    .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(if self.focused {
                         Style::default().fg(Color::Yellow)
                     } else {
                         Style::default().fg(Color::Gray)
-                    })
+                    }),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::Yellow)
                     .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             );
-        
+
         let mut list_state = ListState::default();
         list_state.select(Some(self.selected));
-        
+
         frame.render_stateful_widget(list, area, &mut list_state);
     }
-    
+
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let footer_chunks = Layout::default()
             .direction(LayoutDirection::Vertical)
@@ -366,26 +387,30 @@ impl MainMenu {
                 Constraint::Length(2),
             ])
             .split(area);
-        
+
         // System status
         let status = self.get_status_summary();
         let status_widget = Paragraph::new(status)
             .style(Style::default().fg(Color::Green))
             .alignment(Alignment::Center);
         frame.render_widget(status_widget, footer_chunks[0]);
-        
+
         // Controls
         let controls = if self.focused {
             "🎮 Navigation: ↑↓ Select Options • Enter: Execute • Esc: Exit Application"
         } else {
             "💡 Press any key to begin • Professional MPC Wallet Management System"
         };
-        
+
         let controls_widget = Paragraph::new(controls)
             .style(
                 Style::default()
-                    .fg(if self.focused { Color::Green } else { Color::Gray })
-                    .add_modifier(Modifier::ITALIC)
+                    .fg(if self.focused {
+                        Color::Green
+                    } else {
+                        Color::Gray
+                    })
+                    .add_modifier(Modifier::ITALIC),
             )
             .alignment(Alignment::Center)
             .block(
@@ -393,10 +418,10 @@ impl MainMenu {
                     .borders(Borders::TOP | Borders::BOTTOM)
                     .border_style(Style::default().fg(Color::DarkGray))
                     .title(" Controls ")
-                    .title_style(Style::default().fg(Color::Gray))
+                    .title_style(Style::default().fg(Color::Gray)),
             );
         frame.render_widget(controls_widget, footer_chunks[1]);
-        
+
         // Footer info
         let footer_info = "© 2025 MPC Wallet • FROST Protocol • BitGo-Compatible Interface";
         let footer_widget = Paragraph::new(footer_info)
@@ -429,11 +454,11 @@ impl MpcWalletComponent for MainMenu {
     fn id(&self) -> Id {
         Id::MainMenu
     }
-    
+
     fn is_visible(&self) -> bool {
         true
     }
-    
+
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
     }

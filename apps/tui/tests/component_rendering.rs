@@ -89,7 +89,11 @@ fn renders_initialization_round_label() {
 #[test]
 fn renders_round1_label_and_progress() {
     let rendered = render_dkg_progress_with_round(DKGRound::Round1);
-    assert_contains(&rendered, "Round1", "Round 1 header label (enum Debug form)");
+    assert_contains(
+        &rendered,
+        "Round1",
+        "Round 1 header label (enum Debug form)",
+    );
     // Progress bar uses a different label style (`Generating commitments...`).
     assert_contains(
         &rendered,
@@ -116,7 +120,11 @@ fn renders_complete_at_100_percent() {
     // "done" caption so the user knows the protocol actually finished.
     let rendered = render_dkg_progress_with_round(DKGRound::Complete);
     assert_contains(&rendered, "Complete", "terminal round label");
-    assert_contains(&rendered, "100%", "Complete must render 100% in the progress bar");
+    assert_contains(
+        &rendered,
+        "100%",
+        "Complete must render 100% in the progress bar",
+    );
     assert_contains(
         &rendered,
         "DKG complete",
@@ -148,7 +156,11 @@ fn dkg_progress_renders_signing_label_after_override() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).expect("TestBackend");
     let mut c = DKGProgressComponent::new("sign-01".to_string(), 3, 2);
-    c.set_ceremony(starlab_client::elm::components::dkg_progress::Ceremony::Signing { chain: Some("secp256k1".into()) });
+    c.set_ceremony(
+        starlab_client::elm::components::dkg_progress::Ceremony::Signing {
+            chain: Some("secp256k1".into()),
+        },
+    );
     c.set_round(DKGRound::Round1);
     c.set_websocket_connected(true);
     terminal
@@ -253,8 +265,8 @@ fn wallet_complete_renders_wallet_id_and_group_key() {
     use starlab_client::elm::model::CompletedWalletInfo;
     let info = CompletedWalletInfo {
         wallet_id: "wallet-dkg_abcd".to_string(),
-        group_pubkey_hex:
-            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        group_pubkey_hex: "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143"
+            .to_string(),
         curve_type: "secp256k1".to_string(),
         addresses: vec![
             ("ethereum".to_string(), "0xDEADBEEF".to_string()),
@@ -273,7 +285,11 @@ fn wallet_complete_renders_wallet_id_and_group_key() {
         "021de2d69979f0a03ea413e7ed6a32ad",
         "group verifying key must be rendered in full (first 32 hex chars here)",
     );
-    assert_contains(&rendered, "secp256k1", "curve type must be shown in the header");
+    assert_contains(
+        &rendered,
+        "secp256k1",
+        "curve type must be shown in the header",
+    );
     assert_contains(&rendered, "ethereum", "ethereum row must render");
     assert_contains(&rendered, "0xDEADBEEF", "ethereum address must render");
     assert_contains(&rendered, "bitcoin", "bitcoin row must render");

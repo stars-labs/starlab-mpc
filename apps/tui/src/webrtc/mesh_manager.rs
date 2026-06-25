@@ -1,9 +1,9 @@
 //! WebRTC mesh network manager for establishing and maintaining P2P connections
 
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use serde::{Serialize, Deserialize};
 
 /// Peer identifier
 pub type PeerId = u16;
@@ -58,7 +58,12 @@ impl RTCPeerConnection {
         }
     }
 
-    pub fn create_data_channel(&mut self, label: &str, ordered: bool, reliable: bool) -> RTCDataChannel {
+    pub fn create_data_channel(
+        &mut self,
+        label: &str,
+        ordered: bool,
+        reliable: bool,
+    ) -> RTCDataChannel {
         let channel = RTCDataChannel {
             id: format!("{}_{}", self.remote_peer, label),
             label: label.to_string(),
@@ -109,7 +114,7 @@ impl MeshTopology {
         if self.connections.len() != self.total_peers {
             return false;
         }
-        
+
         for connections in self.connections.values() {
             if connections.len() != self.total_peers - 1 {
                 return false;
@@ -119,13 +124,16 @@ impl MeshTopology {
     }
 
     pub fn get_connected_peers(&self, peer: PeerId) -> Vec<PeerId> {
-        self.connections.get(&peer)
+        self.connections
+            .get(&peer)
             .map(|set| set.iter().copied().collect())
             .unwrap_or_default()
     }
 
     pub fn meets_threshold(&self) -> bool {
-        let connected_count = self.connections.iter()
+        let connected_count = self
+            .connections
+            .iter()
             .filter(|(_, conns)| !conns.is_empty())
             .count();
         connected_count >= self.threshold
@@ -164,16 +172,16 @@ impl WebRTCMeshManager {
     /// Establishes the mesh network
     pub async fn establish_mesh(&mut self, peers: Vec<PeerId>) -> Result<(), String> {
         println!("🌐 Establishing WebRTC mesh for peer {}", self.local_peer);
-        
+
         for peer in peers {
             if peer != self.local_peer {
                 self.connect_to_peer(peer).await?;
             }
         }
-        
+
         // Wait for all connections to establish
         tokio::time::sleep(Duration::from_millis(500)).await;
-        
+
         let topology = self.mesh_topology.lock().unwrap();
         if topology.is_fully_connected() {
             println!("✅ Full mesh established!");
@@ -187,39 +195,48 @@ impl WebRTCMeshManager {
     /// Connects to a specific peer
     async fn connect_to_peer(&mut self, peer: PeerId) -> Result<(), String> {
         println!("  📡 Connecting {} → {}", self.local_peer, peer);
-        
+
         // Create peer connection
         let mut connection = RTCPeerConnection::new(peer);
         connection.state = ConnectionState::Connecting;
-        
+
         // Simulate SDP exchange
         connection.signaling_state = "have-local-offer".to_string();
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         connection.signaling_state = "have-remote-answer".to_string();
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         // Simulate ICE gathering
         connection.ice_connection_state = "checking".to_string();
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         connection.ice_connection_state = "connected".to_string();
         connection.state = ConnectionState::Connected;
-        
+
         // Create data channels
         let _reliable = connection.create_data_channel("reliable", true, true);
         let _unreliable = connection.create_data_channel("unreliable", false, false);
-        
+
         // Update connection state
         connection.last_activity = Instant::now();
-        
+
         // Store connection
-        self.connections.lock().unwrap().insert(peer, connection.clone());
-        self.connection_states.lock().unwrap().insert(peer, ConnectionState::Connected);
-        
+        self.connections
+            .lock()
+            .unwrap()
+            .insert(peer, connection.clone());
+        self.connection_states
+            .lock()
+            .unwrap()
+            .insert(peer, ConnectionState::Connected);
+
         // Update topology
-        self.mesh_topology.lock().unwrap().add_connection(self.local_peer, peer);
-        
+        self.mesh_topology
+            .lock()
+            .unwrap()
+            .add_connection(self.local_peer, peer);
+
         println!("  ✅ Connected {} ↔ {}", self.local_peer, peer);
         Ok(())
     }
@@ -227,13 +244,19 @@ impl WebRTCMeshManager {
     /// Handles peer disconnection
     pub async fn handle_peer_disconnect(&mut self, peer: PeerId) {
         println!("  🔌 Peer {} disconnected from {}", peer, self.local_peer);
-        
+
         // Update connection state
-        self.connection_states.lock().unwrap().insert(peer, ConnectionState::Disconnected);
-        
+        self.connection_states
+            .lock()
+            .unwrap()
+            .insert(peer, ConnectionState::Disconnected);
+
         // Remove from topology
-        self.mesh_topology.lock().unwrap().remove_connection(self.local_peer, peer);
-        
+        self.mesh_topology
+            .lock()
+            .unwrap()
+            .remove_connection(self.local_peer, peer);
+
         // Buffer messages for this peer
         self.message_buffer.lock().unwrap().entry(peer).or_default();
     }
@@ -241,26 +264,35 @@ impl WebRTCMeshManager {
     /// Handles peer rejoin
     pub async fn handle_peer_rejoin(&mut self, peer: PeerId) -> Result<(), String> {
         println!("  🔄 Peer {} rejoining mesh with {}", peer, self.local_peer);
-        
+
         // Mark as reconnecting
-        self.connection_states.lock().unwrap().insert(peer, ConnectionState::Reconnecting);
-        
+        self.connection_states
+            .lock()
+            .unwrap()
+            .insert(peer, ConnectionState::Reconnecting);
+
         // Re-establish connection
         self.connect_to_peer(peer).await?;
-        
+
         // Send buffered messages
         let mut buffer = self.message_buffer.lock().unwrap();
         if let Some(messages) = buffer.remove(&peer) {
-            println!("  📤 Sending {} buffered messages to {}", messages.len(), peer);
+            println!(
+                "  📤 Sending {} buffered messages to {}",
+                messages.len(),
+                peer
+            );
             // In real implementation, would send these messages
         }
-        
+
         Ok(())
     }
 
     /// Gets list of connected peers
     pub fn get_connected_peers(&self) -> Vec<PeerId> {
-        self.connection_states.lock().unwrap()
+        self.connection_states
+            .lock()
+            .unwrap()
             .iter()
             .filter(|(_, state)| **state == ConnectionState::Connected)
             .map(|(peer, _)| *peer)
@@ -275,7 +307,7 @@ impl WebRTCMeshManager {
     /// Sends a message to a peer
     pub fn send_message(&self, to: PeerId, message: Vec<u8>) -> Result<(), String> {
         let states = self.connection_states.lock().unwrap();
-        
+
         match states.get(&to) {
             Some(ConnectionState::Connected) => {
                 println!("  📨 Sending message from {} to {}", self.local_peer, to);
@@ -288,15 +320,19 @@ impl WebRTCMeshManager {
                 println!("  💾 Buffered message for offline peer {}", to);
                 Ok(())
             }
-            _ => Err(format!("Peer {} not found or connecting", to))
+            _ => Err(format!("Peer {} not found or connecting", to)),
         }
     }
 
     /// Broadcasts a message to all connected peers
     pub fn broadcast_message(&self, message: Vec<u8>) -> Result<(), String> {
         let peers = self.get_connected_peers();
-        println!("  📢 Broadcasting from {} to {} peers", self.local_peer, peers.len());
-        
+        println!(
+            "  📢 Broadcasting from {} to {} peers",
+            self.local_peer,
+            peers.len()
+        );
+
         for peer in peers {
             self.send_message(peer, message.clone())?;
         }
@@ -306,12 +342,18 @@ impl WebRTCMeshManager {
     /// Simulates network failure for this peer
     pub fn simulate_network_failure(&mut self) {
         println!("  ⚠️ Network failure for peer {}", self.local_peer);
-        
+
         let peers: Vec<PeerId> = self.connections.lock().unwrap().keys().copied().collect();
-        
+
         for peer in peers {
-            self.connection_states.lock().unwrap().insert(peer, ConnectionState::Failed("Network failure".to_string()));
-            self.mesh_topology.lock().unwrap().remove_connection(self.local_peer, peer);
+            self.connection_states
+                .lock()
+                .unwrap()
+                .insert(peer, ConnectionState::Failed("Network failure".to_string()));
+            self.mesh_topology
+                .lock()
+                .unwrap()
+                .remove_connection(self.local_peer, peer);
         }
     }
 
@@ -319,12 +361,21 @@ impl WebRTCMeshManager {
     pub fn get_mesh_stats(&self) -> MeshStats {
         let states = self.connection_states.lock().unwrap();
         let topology = self.mesh_topology.lock().unwrap();
-        
+
         MeshStats {
             total_peers: topology.total_peers,
-            connected_peers: states.iter().filter(|(_, s)| **s == ConnectionState::Connected).count(),
-            disconnected_peers: states.iter().filter(|(_, s)| **s == ConnectionState::Disconnected).count(),
-            failed_peers: states.iter().filter(|(_, s)| matches!(s, ConnectionState::Failed(_))).count(),
+            connected_peers: states
+                .iter()
+                .filter(|(_, s)| **s == ConnectionState::Connected)
+                .count(),
+            disconnected_peers: states
+                .iter()
+                .filter(|(_, s)| **s == ConnectionState::Disconnected)
+                .count(),
+            failed_peers: states
+                .iter()
+                .filter(|(_, s)| matches!(s, ConnectionState::Failed(_)))
+                .count(),
             is_fully_connected: topology.is_fully_connected(),
             meets_threshold: topology.meets_threshold(),
         }
@@ -352,7 +403,7 @@ mod tests {
         let mut manager = WebRTCMeshManager::new(1, 3, 2);
         let result = manager.establish_mesh(vec![1, 2, 3]).await;
         assert!(result.is_ok());
-        
+
         let peers = manager.get_connected_peers();
         assert_eq!(peers.len(), 2);
     }
@@ -361,11 +412,11 @@ mod tests {
     async fn test_peer_disconnect_and_rejoin() {
         let mut manager = WebRTCMeshManager::new(1, 3, 2);
         manager.establish_mesh(vec![1, 2, 3]).await.unwrap();
-        
+
         // Disconnect peer 2
         manager.handle_peer_disconnect(2).await;
         assert_eq!(manager.get_connected_peers().len(), 1);
-        
+
         // Rejoin peer 2
         manager.handle_peer_rejoin(2).await.unwrap();
         assert_eq!(manager.get_connected_peers().len(), 2);

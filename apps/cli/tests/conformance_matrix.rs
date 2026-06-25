@@ -13,16 +13,17 @@
 //!   cargo test -p starlab-cli --test conformance_matrix -- --ignored --nocapture
 
 use starlab_cli::simulate::{
-    run_late_join_discovery_simulation, run_reload_list_simulation, run_reload_unlock_simulation,
-    run_signing_simulation, run_signing_simulation_enc, run_simulation, SimulateOpts,
-    SIM_WALLET_LABEL,
+    SIM_WALLET_LABEL, SimulateOpts, run_late_join_discovery_simulation, run_reload_list_simulation,
+    run_reload_unlock_simulation, run_signing_simulation, run_signing_simulation_enc,
+    run_simulation,
 };
 
 fn init_logs() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("starlab_client=warn,webrtc=warn")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("starlab_client=warn,webrtc=warn")
+            }),
         )
         .with_test_writer()
         .try_init();
@@ -65,9 +66,8 @@ async fn dkg_matrix() {
         let label = format!("DKG {t}-of-{n}");
         match run_simulation(opts(n as usize, t)).await {
             Ok(r) => {
-                let ok = r.agreed
-                    && r.outcomes.len() == n as usize
-                    && !r.group_public_key.is_empty();
+                let ok =
+                    r.agreed && r.outcomes.len() == n as usize && !r.group_public_key.is_empty();
                 rows.push(Row {
                     detail: format!(
                         "agreed={} outcomes={} {}ms group={}…",
@@ -80,7 +80,11 @@ async fn dkg_matrix() {
                     label,
                 });
             }
-            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+            Err(e) => rows.push(Row {
+                label,
+                ok: false,
+                detail: format!("error: {e}"),
+            }),
         }
     }
 
@@ -101,9 +105,8 @@ async fn dkg_ed25519_matrix() {
         let label = format!("DKG-ed25519 {t}-of-{n}");
         match run_simulation(opts_curve(n as usize, t, "ed25519")).await {
             Ok(r) => {
-                let ok = r.agreed
-                    && r.outcomes.len() == n as usize
-                    && !r.group_public_key.is_empty();
+                let ok =
+                    r.agreed && r.outcomes.len() == n as usize && !r.group_public_key.is_empty();
                 rows.push(Row {
                     detail: format!(
                         "agreed={} outcomes={} {}ms group={}…",
@@ -116,7 +119,11 @@ async fn dkg_ed25519_matrix() {
                     label,
                 });
             }
-            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+            Err(e) => rows.push(Row {
+                label,
+                ok: false,
+                detail: format!("error: {e}"),
+            }),
         }
     }
 
@@ -152,7 +159,11 @@ async fn sign_matrix() {
                     label,
                 });
             }
-            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+            Err(e) => rows.push(Row {
+                label,
+                ok: false,
+                detail: format!("error: {e}"),
+            }),
         }
     }
 
@@ -178,7 +189,11 @@ async fn sign_ed25519_verifies() {
                 detail: format!("verified={} {}ms", r.verified, r.elapsed_ms),
                 label,
             }),
-            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+            Err(e) => rows.push(Row {
+                label,
+                ok: false,
+                detail: format!("error: {e}"),
+            }),
         }
     }
 
@@ -199,7 +214,10 @@ async fn sign_hex_encoded_message_verifies() {
     match run_signing_simulation_enc(opts(2, 2), hex_msg, "hex").await {
         Ok(r) => rows.push(Row {
             ok: r.verified && !r.signature.is_empty(),
-            detail: format!("verified={} {}ms (hex-encoded message)", r.verified, r.elapsed_ms),
+            detail: format!(
+                "verified={} {}ms (hex-encoded message)",
+                r.verified, r.elapsed_ms
+            ),
             label: "SIG-6 hex message 2-of-2".to_string(),
         }),
         Err(e) => rows.push(Row {
@@ -240,7 +258,11 @@ async fn reload_lists_persisted_wallet() {
                 ),
                 label,
             }),
-            Err(e) => rows.push(Row { label, ok: false, detail: format!("error: {e}") }),
+            Err(e) => rows.push(Row {
+                label,
+                ok: false,
+                detail: format!("error: {e}"),
+            }),
         }
     }
 
@@ -264,13 +286,15 @@ async fn reload_preserves_wallet_label() {
             let ok = name == SIM_WALLET_LABEL;
             rows.push(Row {
                 ok,
-                detail: format!(
-                    "reloaded name={name:?} (expected label {SIM_WALLET_LABEL:?})"
-                ),
+                detail: format!("reloaded name={name:?} (expected label {SIM_WALLET_LABEL:?})"),
                 label: label.to_string(),
             });
         }
-        Err(e) => rows.push(Row { label: label.to_string(), ok: false, detail: format!("error: {e}") }),
+        Err(e) => rows.push(Row {
+            label: label.to_string(),
+            ok: false,
+            detail: format!("error: {e}"),
+        }),
     }
 
     report_and_assert("RELOAD-LABEL", &rows);
@@ -290,7 +314,10 @@ async fn wrong_password_rejected_cleanly() {
     match run_reload_unlock_simulation(opts(2, 2), "definitely-not-the-password").await {
         Ok(r) => rows.push(Row {
             ok: r.failed && !r.unlocked,
-            detail: format!("failed={} unlocked={} error={:?}", r.failed, r.unlocked, r.error),
+            detail: format!(
+                "failed={} unlocked={} error={:?}",
+                r.failed, r.unlocked, r.error
+            ),
             label: "ERR-1 wrong password rejected".to_string(),
         }),
         Err(e) => rows.push(Row {
@@ -350,8 +377,17 @@ async fn late_joiner_discovers_via_replay() {
 fn report_and_assert(group: &str, rows: &[Row]) {
     eprintln!("\n=== {group} conformance matrix ===");
     for r in rows {
-        eprintln!("  [{}] {} — {}", if r.ok { "ok" } else { "FAIL" }, r.label, r.detail);
+        eprintln!(
+            "  [{}] {} — {}",
+            if r.ok { "ok" } else { "FAIL" },
+            r.label,
+            r.detail
+        );
     }
-    let failed: Vec<&str> = rows.iter().filter(|r| !r.ok).map(|r| r.label.as_str()).collect();
+    let failed: Vec<&str> = rows
+        .iter()
+        .filter(|r| !r.ok)
+        .map(|r| r.label.as_str())
+        .collect();
     assert!(failed.is_empty(), "{group} matrix had failures: {failed:?}");
 }

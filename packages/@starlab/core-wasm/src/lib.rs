@@ -1,12 +1,12 @@
-use wasm_bindgen::prelude::*;
 use starlab_core::{
     FrostCurve, FrostError,
     ed25519::Ed25519Curve,
-    secp256k1::Secp256k1Curve,
     keystore::{Keystore, KeystoreData},
     root_secret::RootSecret,
+    secp256k1::Secp256k1Curve,
     unified_dkg::{UnifiedDkg, UnifiedRound1Package},
 };
+use wasm_bindgen::prelude::*;
 // In rand 0.9+ `rngs::OsRng` moved to `rand_core` (it's the same type;
 // the `rand` crate's re-export was dropped). Match frost-core's usage
 // for consistency.
@@ -17,14 +17,18 @@ use std::collections::BTreeMap;
 use frost_ed25519::{
     Identifier as Ed25519Identifier,
     keys::{KeyPackage as Ed25519KeyPackage, PublicKeyPackage as Ed25519PublicKeyPackage},
-    round1::{SigningCommitments as Ed25519SigningCommitments, SigningNonces as Ed25519SigningNonces},
+    round1::{
+        SigningCommitments as Ed25519SigningCommitments, SigningNonces as Ed25519SigningNonces,
+    },
     round2::SignatureShare as Ed25519SignatureShare,
 };
 
 use frost_secp256k1::{
     Identifier as Secp256k1Identifier,
     keys::{KeyPackage as Secp256k1KeyPackage, PublicKeyPackage as Secp256k1PublicKeyPackage},
-    round1::{SigningCommitments as Secp256k1SigningCommitments, SigningNonces as Secp256k1SigningNonces},
+    round1::{
+        SigningCommitments as Secp256k1SigningCommitments, SigningNonces as Secp256k1SigningNonces,
+    },
     round2::SignatureShare as Secp256k1SignatureShare,
 };
 
@@ -87,8 +91,8 @@ impl From<FrostError> for WasmError {
 //     signing_commitments. `sign` inserts the own share into
 //     self.signature_shares for the same reason.
 //
-// Regression tests covering all four contracts live in
-// apps/browser-extension/tests/wasm-frost-contracts.test.ts.
+// Regression tests covering all four contracts live in the extension repo:
+// stars-labs/starlab-wallet, apps/extension/tests/wasm-frost-contracts.test.ts.
 
 // Ed25519 WASM wrapper
 #[wasm_bindgen]
@@ -135,7 +139,12 @@ impl FrostDkgEd25519 {
         }
     }
 
-    pub fn init_dkg(&mut self, participant_index: u16, total: u16, threshold: u16) -> Result<(), WasmError> {
+    pub fn init_dkg(
+        &mut self,
+        participant_index: u16,
+        total: u16,
+        threshold: u16,
+    ) -> Result<(), WasmError> {
         self.participant_index = participant_index;
         self.total = total;
         self.threshold = threshold;
@@ -146,27 +155,26 @@ impl FrostDkgEd25519 {
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Ed25519Curve::identifier_from_u16(self.participant_index)?;
         let mut rng = OsRng;
-        
-        let (round1_secret, round1_package) = Ed25519Curve::dkg_part1(
-            identifier,
-            self.total,
-            self.threshold,
-            &mut rng,
-        )?;
-        
+
+        let (round1_secret, round1_package) =
+            Ed25519Curve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;
+
         self.round1_secret = Some(round1_secret);
-        let package_json = serde_json::to_string(&round1_package)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+        let package_json =
+            serde_json::to_string(&round1_package).map_err(|e| WasmError::new(&e.to_string()))?;
+
         Ok(hex::encode(package_json))
     }
 
-    pub fn add_round1_package(&mut self, participant_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_ed25519::keys::dkg::round1::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_round1_package(
+        &mut self,
+        participant_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_ed25519::keys::dkg::round1::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
         Ok(())
@@ -183,13 +191,13 @@ impl FrostDkgEd25519 {
     }
 
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
-        let round1_secret = self.round1_secret.clone()
+        let round1_secret = self
+            .round1_secret
+            .clone()
             .ok_or_else(|| WasmError::new("Round 1 secret not available"))?;
 
-        let (round2_secret, round2_packages) = Ed25519Curve::dkg_part2(
-            round1_secret,
-            &self.round1_packages,
-        )?;
+        let (round2_secret, round2_packages) =
+            Ed25519Curve::dkg_part2(round1_secret, &self.round1_packages)?;
 
         self.round2_secret = Some(round2_secret);
 
@@ -201,7 +209,10 @@ impl FrostDkgEd25519 {
             // from [31] (low) | [30]<<8 (high) recovers the index.
             let ser = id.serialize();
             let id_value = ser[31] as u16 | ((ser[30] as u16) << 8);
-            packages_map.insert(id_value, hex::encode(serde_json::to_string(&package).unwrap()));
+            packages_map.insert(
+                id_value,
+                hex::encode(serde_json::to_string(&package).unwrap()),
+            );
         }
 
         // Wrap the outer JSON in hex::encode so the wire format matches
@@ -212,11 +223,14 @@ impl FrostDkgEd25519 {
         Ok(hex::encode(serde_json::to_string(&packages_map).unwrap()))
     }
 
-    pub fn add_round2_package(&mut self, sender_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_ed25519::keys::dkg::round2::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+    pub fn add_round2_package(
+        &mut self,
+        sender_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_ed25519::keys::dkg::round2::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
 
         let identifier = Ed25519Curve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
@@ -228,18 +242,17 @@ impl FrostDkgEd25519 {
     }
 
     pub fn finalize_dkg(&mut self) -> Result<String, WasmError> {
-        let round2_secret = self.round2_secret.as_ref()
+        let round2_secret = self
+            .round2_secret
+            .as_ref()
             .ok_or_else(|| WasmError::new("Round 2 secret not available"))?;
-        
-        let (key_package, public_key_package) = Ed25519Curve::dkg_part3(
-            round2_secret,
-            &self.round1_packages,
-            &self.round2_packages,
-        )?;
-        
+
+        let (key_package, public_key_package) =
+            Ed25519Curve::dkg_part3(round2_secret, &self.round1_packages, &self.round2_packages)?;
+
         self.key_package = Some(key_package.clone());
         self.public_key_package = Some(public_key_package.clone());
-        
+
         let keystore_data = Keystore::export_keystore::<Ed25519Curve>(
             &key_package,
             &public_key_package,
@@ -249,23 +262,27 @@ impl FrostDkgEd25519 {
             self.participant_indices.clone(),
             "ed25519",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 
     pub fn get_group_public_key(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Ed25519Curve::verifying_key(public_key_package);
         let key_bytes = Ed25519Curve::serialize_verifying_key(&verifying_key)?;
         Ok(hex::encode(key_bytes))
     }
 
     pub fn get_address(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Ed25519Curve::verifying_key(public_key_package);
         Ok(Ed25519Curve::get_address(&verifying_key))
     }
@@ -275,7 +292,9 @@ impl FrostDkgEd25519 {
     }
 
     pub fn signing_commit(&mut self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
         let (nonces, commitments) = Ed25519Curve::generate_signing_commitment(key_package)?;
@@ -293,11 +312,15 @@ impl FrostDkgEd25519 {
         Ok(commitment_hex)
     }
 
-    pub fn add_signing_commitment(&mut self, participant_index: u16, commitment_hex: &str) -> Result<(), WasmError> {
-        let commitment_json = hex::decode(commitment_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let commitment: Ed25519SigningCommitments = serde_json::from_slice(&commitment_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+    pub fn add_signing_commitment(
+        &mut self,
+        participant_index: u16,
+        commitment_hex: &str,
+    ) -> Result<(), WasmError> {
+        let commitment_json =
+            hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let commitment: Ed25519SigningCommitments =
+            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
 
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
@@ -305,17 +328,22 @@ impl FrostDkgEd25519 {
     }
 
     pub fn sign(&mut self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
 
-        let signing_package = Ed25519Curve::create_signing_package(&self.signing_commitments, &message)?;
+        let signing_package =
+            Ed25519Curve::create_signing_package(&self.signing_commitments, &message)?;
 
-        let nonces = self.signing_nonces.as_ref()
+        let nonces = self
+            .signing_nonces
+            .as_ref()
             .ok_or_else(|| WasmError::new("Signing nonces not available"))?;
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
-        let signature_share = Ed25519Curve::generate_signature_share(&signing_package, nonces, key_package)?;
+        let signature_share =
+            Ed25519Curve::generate_signature_share(&signing_package, nonces, key_package)?;
 
         // Register our own share so aggregate_signature() sees it in
         // self.signature_shares alongside peers'. frost-core's aggregate
@@ -323,33 +351,45 @@ impl FrostDkgEd25519 {
         // every identifier present in signing_commitments, so omitting
         // self would immediately fail with UnknownIdentifier.
         let own_identifier = Ed25519Curve::identifier_from_u16(self.participant_index)?;
-        self.signature_shares.insert(own_identifier, signature_share);
+        self.signature_shares
+            .insert(own_identifier, signature_share);
 
-        Ok(hex::encode(serde_json::to_string(&signature_share).unwrap()))
+        Ok(hex::encode(
+            serde_json::to_string(&signature_share).unwrap(),
+        ))
     }
 
-    pub fn add_signature_share(&mut self, participant_index: u16, share_hex: &str) -> Result<(), WasmError> {
-        let share_json = hex::decode(share_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let share: Ed25519SignatureShare = serde_json::from_slice(&share_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_signature_share(
+        &mut self,
+        participant_index: u16,
+        share_hex: &str,
+    ) -> Result<(), WasmError> {
+        let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let share: Ed25519SignatureShare =
+            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
         Ok(())
     }
 
     pub fn aggregate_signature(&self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let signing_package = Ed25519Curve::create_signing_package(&self.signing_commitments, &message)?;
-        let public_key_package = self.public_key_package.as_ref()
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let signing_package =
+            Ed25519Curve::create_signing_package(&self.signing_commitments, &message)?;
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
-        let signature = Ed25519Curve::aggregate_signature(&signing_package, &self.signature_shares, public_key_package)?;
+
+        let signature = Ed25519Curve::aggregate_signature(
+            &signing_package,
+            &self.signature_shares,
+            public_key_package,
+        )?;
         let sig_bytes = Ed25519Curve::serialize_signature(&signature)?;
-        
+
         Ok(hex::encode(sig_bytes))
     }
 
@@ -364,27 +404,32 @@ impl FrostDkgEd25519 {
     }
 
     pub fn import_keystore(&mut self, keystore_json: &str) -> Result<(), WasmError> {
-        let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let (key_package, public_key_package) = Keystore::import_keystore::<Ed25519Curve>(&keystore_data)?;
-        
+        let keystore_data: KeystoreData =
+            serde_json::from_str(keystore_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let (key_package, public_key_package) =
+            Keystore::import_keystore::<Ed25519Curve>(&keystore_data)?;
+
         self.key_package = Some(key_package);
         self.public_key_package = Some(public_key_package);
         self.threshold = keystore_data.min_signers;
         self.total = keystore_data.max_signers;
         self.participant_index = keystore_data.participant_index;
         self.participant_indices = keystore_data.participant_indices;
-        
+
         Ok(())
     }
 
     pub fn export_keystore(&self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
+
         let keystore_data = Keystore::export_keystore::<Ed25519Curve>(
             key_package,
             public_key_package,
@@ -394,7 +439,7 @@ impl FrostDkgEd25519 {
             self.participant_indices.clone(),
             "ed25519",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 }
@@ -444,7 +489,12 @@ impl FrostDkgSecp256k1 {
         }
     }
 
-    pub fn init_dkg(&mut self, participant_index: u16, total: u16, threshold: u16) -> Result<(), WasmError> {
+    pub fn init_dkg(
+        &mut self,
+        participant_index: u16,
+        total: u16,
+        threshold: u16,
+    ) -> Result<(), WasmError> {
         self.participant_index = participant_index;
         self.total = total;
         self.threshold = threshold;
@@ -455,27 +505,26 @@ impl FrostDkgSecp256k1 {
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
         let mut rng = OsRng;
-        
-        let (round1_secret, round1_package) = Secp256k1Curve::dkg_part1(
-            identifier,
-            self.total,
-            self.threshold,
-            &mut rng,
-        )?;
-        
+
+        let (round1_secret, round1_package) =
+            Secp256k1Curve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;
+
         self.round1_secret = Some(round1_secret);
-        let package_json = serde_json::to_string(&round1_package)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+        let package_json =
+            serde_json::to_string(&round1_package).map_err(|e| WasmError::new(&e.to_string()))?;
+
         Ok(hex::encode(package_json))
     }
 
-    pub fn add_round1_package(&mut self, participant_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1::keys::dkg::round1::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_round1_package(
+        &mut self,
+        participant_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1::keys::dkg::round1::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
         Ok(())
@@ -492,13 +541,13 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
-        let round1_secret = self.round1_secret.clone()
+        let round1_secret = self
+            .round1_secret
+            .clone()
             .ok_or_else(|| WasmError::new("Round 1 secret not available"))?;
 
-        let (round2_secret, round2_packages) = Secp256k1Curve::dkg_part2(
-            round1_secret,
-            &self.round1_packages,
-        )?;
+        let (round2_secret, round2_packages) =
+            Secp256k1Curve::dkg_part2(round1_secret, &self.round1_packages)?;
 
         self.round2_secret = Some(round2_secret);
 
@@ -509,19 +558,25 @@ impl FrostDkgSecp256k1 {
             // helper's writeUInt32BE(index, 28).
             let ser = id.serialize();
             let id_value = ser[31] as u16 | ((ser[30] as u16) << 8);
-            packages_map.insert(id_value, hex::encode(serde_json::to_string(&package).unwrap()));
+            packages_map.insert(
+                id_value,
+                hex::encode(serde_json::to_string(&package).unwrap()),
+            );
         }
 
         // Wrap outer JSON in hex::encode — see Ed25519 note above.
         Ok(hex::encode(serde_json::to_string(&packages_map).unwrap()))
     }
 
-    pub fn add_round2_package(&mut self, sender_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1::keys::dkg::round2::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_round2_package(
+        &mut self,
+        sender_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1::keys::dkg::round2::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1Curve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
         Ok(())
@@ -532,18 +587,17 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn finalize_dkg(&mut self) -> Result<String, WasmError> {
-        let round2_secret = self.round2_secret.as_ref()
+        let round2_secret = self
+            .round2_secret
+            .as_ref()
             .ok_or_else(|| WasmError::new("Round 2 secret not available"))?;
-        
-        let (key_package, public_key_package) = Secp256k1Curve::dkg_part3(
-            round2_secret,
-            &self.round1_packages,
-            &self.round2_packages,
-        )?;
-        
+
+        let (key_package, public_key_package) =
+            Secp256k1Curve::dkg_part3(round2_secret, &self.round1_packages, &self.round2_packages)?;
+
         self.key_package = Some(key_package.clone());
         self.public_key_package = Some(public_key_package.clone());
-        
+
         let keystore_data = Keystore::export_keystore::<Secp256k1Curve>(
             &key_package,
             &public_key_package,
@@ -553,31 +607,37 @@ impl FrostDkgSecp256k1 {
             self.participant_indices.clone(),
             "secp256k1",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 
     pub fn get_group_public_key(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Secp256k1Curve::verifying_key(public_key_package);
         let key_bytes = Secp256k1Curve::serialize_verifying_key(&verifying_key)?;
         Ok(hex::encode(key_bytes))
     }
 
     pub fn get_address(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Secp256k1Curve::verifying_key(public_key_package);
         Ok(Secp256k1Curve::get_address(&verifying_key))
     }
 
     pub fn get_eth_address(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Secp256k1Curve::verifying_key(public_key_package);
         Ok(Secp256k1Curve::get_eth_address(&verifying_key)?)
     }
@@ -587,7 +647,9 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn signing_commit(&mut self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
         let (nonces, commitments) = Secp256k1Curve::generate_signing_commitment(key_package)?;
@@ -602,43 +664,58 @@ impl FrostDkgSecp256k1 {
         Ok(commitment_hex)
     }
 
-    pub fn add_signing_commitment(&mut self, participant_index: u16, commitment_hex: &str) -> Result<(), WasmError> {
-        let commitment_json = hex::decode(commitment_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let commitment: Secp256k1SigningCommitments = serde_json::from_slice(&commitment_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_signing_commitment(
+        &mut self,
+        participant_index: u16,
+        commitment_hex: &str,
+    ) -> Result<(), WasmError> {
+        let commitment_json =
+            hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let commitment: Secp256k1SigningCommitments =
+            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
         Ok(())
     }
 
     pub fn sign(&mut self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
 
-        let signing_package = Secp256k1Curve::create_signing_package(&self.signing_commitments, &message)?;
+        let signing_package =
+            Secp256k1Curve::create_signing_package(&self.signing_commitments, &message)?;
 
-        let nonces = self.signing_nonces.as_ref()
+        let nonces = self
+            .signing_nonces
+            .as_ref()
             .ok_or_else(|| WasmError::new("Signing nonces not available"))?;
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
-        let signature_share = Secp256k1Curve::generate_signature_share(&signing_package, nonces, key_package)?;
+        let signature_share =
+            Secp256k1Curve::generate_signature_share(&signing_package, nonces, key_package)?;
 
         // See Ed25519 sign() for context — register own share so
         // aggregate_signature() covers all identifiers.
         let own_identifier = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
-        self.signature_shares.insert(own_identifier, signature_share);
+        self.signature_shares
+            .insert(own_identifier, signature_share);
 
-        Ok(hex::encode(serde_json::to_string(&signature_share).unwrap()))
+        Ok(hex::encode(
+            serde_json::to_string(&signature_share).unwrap(),
+        ))
     }
 
-    pub fn add_signature_share(&mut self, participant_index: u16, share_hex: &str) -> Result<(), WasmError> {
-        let share_json = hex::decode(share_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let share: Secp256k1SignatureShare = serde_json::from_slice(&share_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+    pub fn add_signature_share(
+        &mut self,
+        participant_index: u16,
+        share_hex: &str,
+    ) -> Result<(), WasmError> {
+        let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let share: Secp256k1SignatureShare =
+            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
 
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
@@ -646,16 +723,22 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn aggregate_signature(&self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let signing_package = Secp256k1Curve::create_signing_package(&self.signing_commitments, &message)?;
-        let public_key_package = self.public_key_package.as_ref()
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let signing_package =
+            Secp256k1Curve::create_signing_package(&self.signing_commitments, &message)?;
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
-        let signature = Secp256k1Curve::aggregate_signature(&signing_package, &self.signature_shares, public_key_package)?;
+
+        let signature = Secp256k1Curve::aggregate_signature(
+            &signing_package,
+            &self.signature_shares,
+            public_key_package,
+        )?;
         let sig_bytes = Secp256k1Curve::serialize_signature(&signature)?;
-        
+
         Ok(hex::encode(sig_bytes))
     }
 
@@ -670,27 +753,32 @@ impl FrostDkgSecp256k1 {
     }
 
     pub fn import_keystore(&mut self, keystore_json: &str) -> Result<(), WasmError> {
-        let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let (key_package, public_key_package) = Keystore::import_keystore::<Secp256k1Curve>(&keystore_data)?;
-        
+        let keystore_data: KeystoreData =
+            serde_json::from_str(keystore_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let (key_package, public_key_package) =
+            Keystore::import_keystore::<Secp256k1Curve>(&keystore_data)?;
+
         self.key_package = Some(key_package);
         self.public_key_package = Some(public_key_package);
         self.threshold = keystore_data.min_signers;
         self.total = keystore_data.max_signers;
         self.participant_index = keystore_data.participant_index;
         self.participant_indices = keystore_data.participant_indices;
-        
+
         Ok(())
     }
 
     pub fn export_keystore(&self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
+
         let keystore_data = Keystore::export_keystore::<Secp256k1Curve>(
             key_package,
             public_key_package,
@@ -700,7 +788,7 @@ impl FrostDkgSecp256k1 {
             self.participant_indices.clone(),
             "secp256k1",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 }
@@ -709,7 +797,7 @@ impl FrostDkgSecp256k1 {
 pub fn main() {
     #[cfg(feature = "console_error_panic_hook")]
     console_error_panic_hook::set_once();
-    
+
     console_log!("MPC Wallet WASM initialized");
 }
 
@@ -746,8 +834,7 @@ impl FrostDkgUnified {
 
     /// Create a unified DKG from an existing root secret (hex-encoded 32 bytes).
     pub fn from_root_secret(root_secret_hex: &str) -> Result<FrostDkgUnified, WasmError> {
-        let bytes = hex::decode(root_secret_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let bytes = hex::decode(root_secret_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         if bytes.len() != 32 {
             return Err(WasmError::new("Root secret must be exactly 32 bytes"));
         }
@@ -772,15 +859,18 @@ impl FrostDkgUnified {
     /// Returns JSON: `{ "ed25519": "<hex>", "secp256k1": "<hex>" }`
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let package = self.dkg.generate_round1()?;
-        serde_json::to_string(&package)
-            .map_err(|e| WasmError::new(&e.to_string()))
+        serde_json::to_string(&package).map_err(|e| WasmError::new(&e.to_string()))
     }
 
     /// Add a round 1 package from another participant.
     /// package_json is the JSON output from another participant's generate_round1().
-    pub fn add_round1_package(&mut self, participant_index: u16, package_json: &str) -> Result<(), WasmError> {
-        let package: UnifiedRound1Package = serde_json::from_str(package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+    pub fn add_round1_package(
+        &mut self,
+        participant_index: u16,
+        package_json: &str,
+    ) -> Result<(), WasmError> {
+        let package: UnifiedRound1Package =
+            serde_json::from_str(package_json).map_err(|e| WasmError::new(&e.to_string()))?;
         self.dkg.add_round1_package(participant_index, &package)?;
         Ok(())
     }
@@ -794,13 +884,18 @@ impl FrostDkgUnified {
     /// Returns JSON: `{ "ed25519": { <participant_index>: "<hex>", ... }, "secp256k1": { ... } }`
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
         let packages = self.dkg.generate_round2()?;
-        serde_json::to_string(&packages)
-            .map_err(|e| WasmError::new(&e.to_string()))
+        serde_json::to_string(&packages).map_err(|e| WasmError::new(&e.to_string()))
     }
 
     /// Add round 2 packages from another participant for both curves.
-    pub fn add_round2_package(&mut self, sender_index: u16, ed_hex: &str, secp_hex: &str) -> Result<(), WasmError> {
-        self.dkg.add_round2_package(sender_index, ed_hex, secp_hex)?;
+    pub fn add_round2_package(
+        &mut self,
+        sender_index: u16,
+        ed_hex: &str,
+        secp_hex: &str,
+    ) -> Result<(), WasmError> {
+        self.dkg
+            .add_round2_package(sender_index, ed_hex, secp_hex)?;
         Ok(())
     }
 
@@ -813,8 +908,7 @@ impl FrostDkgUnified {
     /// Returns JSON with both ed25519 and secp256k1 keystore data.
     pub fn finalize_dkg(&mut self) -> Result<String, WasmError> {
         let keystore = self.dkg.finalize_dkg()?;
-        serde_json::to_string(&keystore)
-            .map_err(|e| WasmError::new(&e.to_string()))
+        serde_json::to_string(&keystore).map_err(|e| WasmError::new(&e.to_string()))
     }
 
     /// Check if DKG is complete for both curves.
@@ -834,28 +928,30 @@ impl FrostDkgUnified {
 
     /// Get ed25519 group public key (hex).
     pub fn get_ed25519_public_key(&self) -> Result<String, WasmError> {
-        self.dkg.get_ed25519_group_public_key().map_err(|e| e.into())
+        self.dkg
+            .get_ed25519_group_public_key()
+            .map_err(|e| e.into())
     }
 
     /// Get secp256k1 group public key (hex).
     pub fn get_secp256k1_public_key(&self) -> Result<String, WasmError> {
-        self.dkg.get_secp256k1_group_public_key().map_err(|e| e.into())
+        self.dkg
+            .get_secp256k1_group_public_key()
+            .map_err(|e| e.into())
     }
 
     /// Export the ed25519 keystore data (for use with FrostDkgEd25519 signing).
     /// Must be called after finalize_dkg().
     pub fn export_ed25519_keystore(&mut self) -> Result<String, WasmError> {
         let keystore = self.dkg.finalize_dkg()?;
-        serde_json::to_string(&keystore.ed25519)
-            .map_err(|e| WasmError::new(&e.to_string()))
+        serde_json::to_string(&keystore.ed25519).map_err(|e| WasmError::new(&e.to_string()))
     }
 
     /// Export the secp256k1 keystore data (for use with FrostDkgSecp256k1 signing).
     /// Must be called after finalize_dkg().
     pub fn export_secp256k1_keystore(&mut self) -> Result<String, WasmError> {
         let keystore = self.dkg.finalize_dkg()?;
-        serde_json::to_string(&keystore.secp256k1)
-            .map_err(|e| WasmError::new(&e.to_string()))
+        serde_json::to_string(&keystore.secp256k1).map_err(|e| WasmError::new(&e.to_string()))
     }
 }
 // ===========================================================================
@@ -948,8 +1044,8 @@ macro_rules! frost_reshare_impl {
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
                 let pkg = session.round1(&mut OsRng).map_err(WasmError::from)?;
-                let json = serde_json::to_string(&pkg)
-                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let json =
+                    serde_json::to_string(&pkg).map_err(|e| WasmError::new(&e.to_string()))?;
                 Ok(hex::encode(json))
             }
 
@@ -962,16 +1058,17 @@ macro_rules! frost_reshare_impl {
                     .session
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
-                let bytes = hex::decode(package_hex)
-                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let bytes = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
                 let pkg: frost_core::keys::dkg::round1::Package<$suite> =
-                    serde_json::from_slice(&bytes)
-                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                    serde_json::from_slice(&bytes).map_err(|e| WasmError::new(&e.to_string()))?;
                 session.add_round1(from, pkg).map_err(WasmError::from)
             }
 
             pub fn can_reshare_round2(&self) -> bool {
-                self.session.as_ref().map(|s| s.can_round2()).unwrap_or(false)
+                self.session
+                    .as_ref()
+                    .map(|s| s.can_round2())
+                    .unwrap_or(false)
             }
 
             /// Generate the per-recipient round-2 packages as a JSON object
@@ -985,8 +1082,8 @@ macro_rules! frost_reshare_impl {
                 let sent = session.round2().map_err(WasmError::from)?;
                 let mut out: BTreeMap<String, String> = BTreeMap::new();
                 for (rcpt, pkg) in sent {
-                    let json = serde_json::to_string(&pkg)
-                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                    let json =
+                        serde_json::to_string(&pkg).map_err(|e| WasmError::new(&e.to_string()))?;
                     out.insert(rcpt.to_string(), hex::encode(json));
                 }
                 serde_json::to_string(&out).map_err(|e| WasmError::new(&e.to_string()))
@@ -1001,16 +1098,17 @@ macro_rules! frost_reshare_impl {
                     .session
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
-                let bytes = hex::decode(package_hex)
-                    .map_err(|e| WasmError::new(&e.to_string()))?;
+                let bytes = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
                 let pkg: frost_core::keys::dkg::round2::Package<$suite> =
-                    serde_json::from_slice(&bytes)
-                        .map_err(|e| WasmError::new(&e.to_string()))?;
+                    serde_json::from_slice(&bytes).map_err(|e| WasmError::new(&e.to_string()))?;
                 session.add_round2(from, pkg).map_err(WasmError::from)
             }
 
             pub fn can_finalize_reshare(&self) -> bool {
-                self.session.as_ref().map(|s| s.can_finalize()).unwrap_or(false)
+                self.session
+                    .as_ref()
+                    .map(|s| s.can_finalize())
+                    .unwrap_or(false)
             }
 
             /// Finalize and return the NEW keystore JSON (same format as
@@ -1031,8 +1129,7 @@ macro_rules! frost_reshare_impl {
                     $curve_str,
                 )?;
                 self.result = Some((kp, pp));
-                serde_json::to_string(&keystore_data)
-                    .map_err(|e| WasmError::new(&e.to_string()))
+                serde_json::to_string(&keystore_data).map_err(|e| WasmError::new(&e.to_string()))
             }
 
             /// Group public key hex after finalize — callers verify it equals
@@ -1051,7 +1148,12 @@ macro_rules! frost_reshare_impl {
     };
 }
 
-frost_reshare_impl!(FrostReshareEd25519, Ed25519Curve, frost_ed25519::Ed25519Sha512, "ed25519");
+frost_reshare_impl!(
+    FrostReshareEd25519,
+    Ed25519Curve,
+    frost_ed25519::Ed25519Sha512,
+    "ed25519"
+);
 frost_reshare_impl!(
     FrostReshareSecp256k1,
     Secp256k1Curve,
@@ -1077,8 +1179,8 @@ macro_rules! derive_keystore_impl {
         /// with the derived account like any other.
         #[wasm_bindgen]
         pub fn $fn_name(keystore_json: &str, path: &str) -> Result<String, WasmError> {
-            let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
-                .map_err(|e| WasmError::new(&e.to_string()))?;
+            let keystore_data: KeystoreData =
+                serde_json::from_str(keystore_json).map_err(|e| WasmError::new(&e.to_string()))?;
             let (kp, pp) = Keystore::import_keystore::<$curve>(&keystore_data)?;
 
             let parsed = starlab_core::DerivationPath::parse(path).map_err(WasmError::from)?;
@@ -1118,11 +1220,13 @@ derive_keystore_impl!(
     "secp256k1"
 );
 
-
 use frost_secp256k1_tr::{
     Identifier as Secp256k1TrIdentifier,
     keys::{KeyPackage as Secp256k1TrKeyPackage, PublicKeyPackage as Secp256k1TrPublicKeyPackage},
-    round1::{SigningCommitments as Secp256k1TrSigningCommitments, SigningNonces as Secp256k1TrSigningNonces},
+    round1::{
+        SigningCommitments as Secp256k1TrSigningCommitments,
+        SigningNonces as Secp256k1TrSigningNonces,
+    },
     round2::SignatureShare as Secp256k1TrSignatureShare,
 };
 use starlab_core::secp256k1_tr::Secp256k1TrCurve;
@@ -1138,8 +1242,10 @@ pub struct FrostDkgSecp256k1Tr {
     round2_secret: Option<frost_secp256k1_tr::keys::dkg::round2::SecretPackage>,
     key_package: Option<Secp256k1TrKeyPackage>,
     public_key_package: Option<Secp256k1TrPublicKeyPackage>,
-    round1_packages: BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round1::Package>,
-    round2_packages: BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round2::Package>,
+    round1_packages:
+        BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round1::Package>,
+    round2_packages:
+        BTreeMap<Secp256k1TrIdentifier, frost_secp256k1_tr::keys::dkg::round2::Package>,
     signing_nonces: Option<Secp256k1TrSigningNonces>,
     signing_commitments: BTreeMap<Secp256k1TrIdentifier, Secp256k1TrSigningCommitments>,
     signature_shares: BTreeMap<Secp256k1TrIdentifier, Secp256k1TrSignatureShare>,
@@ -1176,7 +1282,12 @@ impl FrostDkgSecp256k1Tr {
         }
     }
 
-    pub fn init_dkg(&mut self, participant_index: u16, total: u16, threshold: u16) -> Result<(), WasmError> {
+    pub fn init_dkg(
+        &mut self,
+        participant_index: u16,
+        total: u16,
+        threshold: u16,
+    ) -> Result<(), WasmError> {
         self.participant_index = participant_index;
         self.total = total;
         self.threshold = threshold;
@@ -1187,27 +1298,26 @@ impl FrostDkgSecp256k1Tr {
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
         let mut rng = OsRng;
-        
-        let (round1_secret, round1_package) = Secp256k1TrCurve::dkg_part1(
-            identifier,
-            self.total,
-            self.threshold,
-            &mut rng,
-        )?;
-        
+
+        let (round1_secret, round1_package) =
+            Secp256k1TrCurve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;
+
         self.round1_secret = Some(round1_secret);
-        let package_json = serde_json::to_string(&round1_package)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+        let package_json =
+            serde_json::to_string(&round1_package).map_err(|e| WasmError::new(&e.to_string()))?;
+
         Ok(hex::encode(package_json))
     }
 
-    pub fn add_round1_package(&mut self, participant_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1_tr::keys::dkg::round1::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_round1_package(
+        &mut self,
+        participant_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round1::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
         Ok(())
@@ -1224,13 +1334,13 @@ impl FrostDkgSecp256k1Tr {
     }
 
     pub fn generate_round2(&mut self) -> Result<String, WasmError> {
-        let round1_secret = self.round1_secret.clone()
+        let round1_secret = self
+            .round1_secret
+            .clone()
             .ok_or_else(|| WasmError::new("Round 1 secret not available"))?;
 
-        let (round2_secret, round2_packages) = Secp256k1TrCurve::dkg_part2(
-            round1_secret,
-            &self.round1_packages,
-        )?;
+        let (round2_secret, round2_packages) =
+            Secp256k1TrCurve::dkg_part2(round1_secret, &self.round1_packages)?;
 
         self.round2_secret = Some(round2_secret);
 
@@ -1241,19 +1351,25 @@ impl FrostDkgSecp256k1Tr {
             // helper's writeUInt32BE(index, 28).
             let ser = id.serialize();
             let id_value = ser[31] as u16 | ((ser[30] as u16) << 8);
-            packages_map.insert(id_value, hex::encode(serde_json::to_string(&package).unwrap()));
+            packages_map.insert(
+                id_value,
+                hex::encode(serde_json::to_string(&package).unwrap()),
+            );
         }
 
         // Wrap outer JSON in hex::encode — see Ed25519 note above.
         Ok(hex::encode(serde_json::to_string(&packages_map).unwrap()))
     }
 
-    pub fn add_round2_package(&mut self, sender_index: u16, package_hex: &str) -> Result<(), WasmError> {
-        let package_json = hex::decode(package_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1_tr::keys::dkg::round2::Package = serde_json::from_slice(&package_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_round2_package(
+        &mut self,
+        sender_index: u16,
+        package_hex: &str,
+    ) -> Result<(), WasmError> {
+        let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round2::Package =
+            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1TrCurve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
         Ok(())
@@ -1264,18 +1380,20 @@ impl FrostDkgSecp256k1Tr {
     }
 
     pub fn finalize_dkg(&mut self) -> Result<String, WasmError> {
-        let round2_secret = self.round2_secret.as_ref()
+        let round2_secret = self
+            .round2_secret
+            .as_ref()
             .ok_or_else(|| WasmError::new("Round 2 secret not available"))?;
-        
+
         let (key_package, public_key_package) = Secp256k1TrCurve::dkg_part3(
             round2_secret,
             &self.round1_packages,
             &self.round2_packages,
         )?;
-        
+
         self.key_package = Some(key_package.clone());
         self.public_key_package = Some(public_key_package.clone());
-        
+
         let keystore_data = Keystore::export_keystore::<Secp256k1TrCurve>(
             &key_package,
             &public_key_package,
@@ -1285,34 +1403,41 @@ impl FrostDkgSecp256k1Tr {
             self.participant_indices.clone(),
             "secp256k1-tr",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 
     pub fn get_group_public_key(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Secp256k1TrCurve::verifying_key(public_key_package);
         let key_bytes = Secp256k1TrCurve::serialize_verifying_key(&verifying_key)?;
         Ok(hex::encode(key_bytes))
     }
 
     pub fn get_address(&self) -> Result<String, WasmError> {
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        
+
         let verifying_key = Secp256k1TrCurve::verifying_key(public_key_package);
         Ok(Secp256k1TrCurve::get_address(&verifying_key))
     }
 
-
     /// BIP-340 x-only Taproot output key (32 bytes hex): the SEC1 key minus
     /// its parity prefix. This is what P2TR addresses / verifiers consume.
     pub fn get_taproot_xonly_key(&self) -> Result<String, WasmError> {
-        let pp = self.public_key_package.as_ref()
+        let pp = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("DKG not complete"))?;
-        let sec1 = pp.verifying_key().serialize()
+        let sec1 = pp
+            .verifying_key()
+            .serialize()
             .map_err(|e| WasmError::new(&e.to_string()))?;
         if sec1.len() != 33 {
             return Err(WasmError::new("unexpected verifying key length"));
@@ -1325,7 +1450,9 @@ impl FrostDkgSecp256k1Tr {
     }
 
     pub fn signing_commit(&mut self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
         let (nonces, commitments) = Secp256k1TrCurve::generate_signing_commitment(key_package)?;
@@ -1340,43 +1467,58 @@ impl FrostDkgSecp256k1Tr {
         Ok(commitment_hex)
     }
 
-    pub fn add_signing_commitment(&mut self, participant_index: u16, commitment_hex: &str) -> Result<(), WasmError> {
-        let commitment_json = hex::decode(commitment_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let commitment: Secp256k1TrSigningCommitments = serde_json::from_slice(&commitment_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
+    pub fn add_signing_commitment(
+        &mut self,
+        participant_index: u16,
+        commitment_hex: &str,
+    ) -> Result<(), WasmError> {
+        let commitment_json =
+            hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let commitment: Secp256k1TrSigningCommitments =
+            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
         Ok(())
     }
 
     pub fn sign(&mut self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
 
-        let signing_package = Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
+        let signing_package =
+            Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
 
-        let nonces = self.signing_nonces.as_ref()
+        let nonces = self
+            .signing_nonces
+            .as_ref()
             .ok_or_else(|| WasmError::new("Signing nonces not available"))?;
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
 
-        let signature_share = Secp256k1TrCurve::generate_signature_share(&signing_package, nonces, key_package)?;
+        let signature_share =
+            Secp256k1TrCurve::generate_signature_share(&signing_package, nonces, key_package)?;
 
         // See Ed25519 sign() for context — register own share so
         // aggregate_signature() covers all identifiers.
         let own_identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
-        self.signature_shares.insert(own_identifier, signature_share);
+        self.signature_shares
+            .insert(own_identifier, signature_share);
 
-        Ok(hex::encode(serde_json::to_string(&signature_share).unwrap()))
+        Ok(hex::encode(
+            serde_json::to_string(&signature_share).unwrap(),
+        ))
     }
 
-    pub fn add_signature_share(&mut self, participant_index: u16, share_hex: &str) -> Result<(), WasmError> {
-        let share_json = hex::decode(share_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        let share: Secp256k1TrSignatureShare = serde_json::from_slice(&share_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
+    pub fn add_signature_share(
+        &mut self,
+        participant_index: u16,
+        share_hex: &str,
+    ) -> Result<(), WasmError> {
+        let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+        let share: Secp256k1TrSignatureShare =
+            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
 
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
@@ -1384,16 +1526,22 @@ impl FrostDkgSecp256k1Tr {
     }
 
     pub fn aggregate_signature(&self, message_hex: &str) -> Result<String, WasmError> {
-        let message = hex::decode(message_hex)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let signing_package = Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
-        let public_key_package = self.public_key_package.as_ref()
+        let message = hex::decode(message_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let signing_package =
+            Secp256k1TrCurve::create_signing_package(&self.signing_commitments, &message)?;
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
-        let signature = Secp256k1TrCurve::aggregate_signature(&signing_package, &self.signature_shares, public_key_package)?;
+
+        let signature = Secp256k1TrCurve::aggregate_signature(
+            &signing_package,
+            &self.signature_shares,
+            public_key_package,
+        )?;
         let sig_bytes = Secp256k1TrCurve::serialize_signature(&signature)?;
-        
+
         Ok(hex::encode(sig_bytes))
     }
 
@@ -1408,27 +1556,32 @@ impl FrostDkgSecp256k1Tr {
     }
 
     pub fn import_keystore(&mut self, keystore_json: &str) -> Result<(), WasmError> {
-        let keystore_data: KeystoreData = serde_json::from_str(keystore_json)
-            .map_err(|e| WasmError::new(&e.to_string()))?;
-        
-        let (key_package, public_key_package) = Keystore::import_keystore::<Secp256k1TrCurve>(&keystore_data)?;
-        
+        let keystore_data: KeystoreData =
+            serde_json::from_str(keystore_json).map_err(|e| WasmError::new(&e.to_string()))?;
+
+        let (key_package, public_key_package) =
+            Keystore::import_keystore::<Secp256k1TrCurve>(&keystore_data)?;
+
         self.key_package = Some(key_package);
         self.public_key_package = Some(public_key_package);
         self.threshold = keystore_data.min_signers;
         self.total = keystore_data.max_signers;
         self.participant_index = keystore_data.participant_index;
         self.participant_indices = keystore_data.participant_indices;
-        
+
         Ok(())
     }
 
     pub fn export_keystore(&self) -> Result<String, WasmError> {
-        let key_package = self.key_package.as_ref()
+        let key_package = self
+            .key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Key package not available"))?;
-        let public_key_package = self.public_key_package.as_ref()
+        let public_key_package = self
+            .public_key_package
+            .as_ref()
             .ok_or_else(|| WasmError::new("Public key package not available"))?;
-        
+
         let keystore_data = Keystore::export_keystore::<Secp256k1TrCurve>(
             key_package,
             public_key_package,
@@ -1438,11 +1591,10 @@ impl FrostDkgSecp256k1Tr {
             self.participant_indices.clone(),
             "secp256k1-tr",
         )?;
-        
+
         Ok(serde_json::to_string(&keystore_data).unwrap())
     }
 }
-
 
 // ============================================================================
 

@@ -1,14 +1,14 @@
 // WebRTC connection management for P2P mesh networking
 // This implementation avoids Ciphersuite bounds for better modularity
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use std::collections::HashMap;
-use webrtc::peer_connection::RTCPeerConnection;
-use tracing::{info, error, warn};
-use crate::protocal::signal::{WebRTCSignal, SDPInfo, WebSocketMessage};
-use starlab_signal_server::ClientMsg as SharedClientMsg;
+use crate::protocal::signal::{SDPInfo, WebRTCSignal, WebSocketMessage};
 use crate::utils::appstate_compat::AppState;
 use serde_json;
+use starlab_signal_server::ClientMsg as SharedClientMsg;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{error, info, warn};
+use webrtc::peer_connection::RTCPeerConnection;
 
 /// Parse and react to a single frame received on a WebRTC data channel.
 ///
@@ -26,6 +26,8 @@ pub async fn dispatch_data_channel_msg<C>(
     ui_msg_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::elm::message::Message>>,
 ) where
     C: frost_core::Ciphersuite + Send + Sync + 'static,
+    frost_core::keys::dkg::round1::Package<C>: serde::de::DeserializeOwned,
+    frost_core::keys::dkg::round2::Package<C>: serde::de::DeserializeOwned,
     <<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
     <<<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
 {
@@ -80,166 +82,229 @@ pub async fn dispatch_data_channel_msg<C>(
     // NOT `{"SimpleMessage":{"text":"..."}}`. The previous externally-tagged parser
     // silently dropped every DKG Round 1/2 package.
     let webrtc_tag = json_msg.get("webrtc_msg_type").and_then(|v| v.as_str());
+    if webrtc_tag == Some("DkgRound1Package") {
+        info!(
+            "🔑 Received structured DKG Round 1 package from {}",
+            device_id_recv
+        );
+        match json_msg
+            .get("package")
+            .cloned()
+            .ok_or_else(|| "missing package".to_string())
+            .and_then(|value| {
+                serde_json::from_value::<frost_core::keys::dkg::round1::Package<C>>(value)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|package| package.serialize().map_err(|e| format!("{e:?}")))
+        {
+            Ok(package_bytes) => {
+                if let Some(tx) = &ui_msg_tx {
+                    let _ = tx.send(crate::elm::message::Message::ProcessDKGRound1 {
+                        from_device: device_id_recv.clone(),
+                        package_bytes,
+                    });
+                }
+            }
+            Err(e) => error!(
+                "Failed to parse structured DKG Round 1 package from {}: {}",
+                device_id_recv, e
+            ),
+        }
+        return;
+    }
+    if webrtc_tag == Some("DkgRound2Package") {
+        info!(
+            "🔐 Received structured DKG Round 2 package from {}",
+            device_id_recv
+        );
+        match json_msg
+            .get("package")
+            .cloned()
+            .ok_or_else(|| "missing package".to_string())
+            .and_then(|value| {
+                serde_json::from_value::<frost_core::keys::dkg::round2::Package<C>>(value)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|package| package.serialize().map_err(|e| format!("{e:?}")))
+        {
+            Ok(package_bytes) => {
+                if let Some(tx) = &ui_msg_tx {
+                    let _ = tx.send(crate::elm::message::Message::ProcessDKGRound2 {
+                        from_device: device_id_recv.clone(),
+                        package_bytes,
+                    });
+                }
+            }
+            Err(e) => error!(
+                "Failed to parse structured DKG Round 2 package from {}: {}",
+                device_id_recv, e
+            ),
+        }
+        return;
+    }
     if webrtc_tag == Some("SimpleMessage")
-        && let Some(msg_text) = json_msg.get("text").and_then(|v| v.as_str()) {
-            use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-            // Unified-DKG frames (ed25519 + secp256k1 in one ceremony). Same
-            // SimpleMessage transport as the single-curve DKG rounds, but the
-            // payload is JSON (not base64) and routes to the unified driver.
-            if let Some(package_json) =
-                msg_text.strip_prefix(crate::elm::command::UNIFIED_DKG_ROUND1_PREFIX)
-            {
-                info!("🔑 Received UNIFIED DKG Round 1 from {}", device_id_recv);
-                if let Some(tx) = &ui_msg_tx {
-                    let _ = tx.send(crate::elm::message::Message::ProcessUnifiedDKGRound1 {
-                        from_device: device_id_recv.clone(),
-                        package_json: package_json.to_string(),
-                    });
-                }
-                return;
+        && let Some(msg_text) = json_msg.get("text").and_then(|v| v.as_str())
+    {
+        use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+        // Unified-DKG frames (ed25519 + secp256k1 in one ceremony). Same
+        // SimpleMessage transport as the single-curve DKG rounds, but the
+        // payload is JSON (not base64) and routes to the unified driver.
+        if let Some(package_json) =
+            msg_text.strip_prefix(crate::elm::command::UNIFIED_DKG_ROUND1_PREFIX)
+        {
+            info!("🔑 Received UNIFIED DKG Round 1 from {}", device_id_recv);
+            if let Some(tx) = &ui_msg_tx {
+                let _ = tx.send(crate::elm::message::Message::ProcessUnifiedDKGRound1 {
+                    from_device: device_id_recv.clone(),
+                    package_json: package_json.to_string(),
+                });
             }
-            if let Some(message_json) =
-                msg_text.strip_prefix(crate::elm::command::UNIFIED_DKG_ROUND2_PREFIX)
-            {
-                info!("🔐 Received UNIFIED DKG Round 2 from {}", device_id_recv);
-                if let Some(tx) = &ui_msg_tx {
-                    let _ = tx.send(crate::elm::message::Message::ProcessUnifiedDKGRound2 {
-                        from_device: device_id_recv.clone(),
-                        message_json: message_json.to_string(),
-                    });
-                }
-                return;
-            }
-            if let Some(package_data) = msg_text.strip_prefix("DKG_ROUND1:") {
-                info!("🔑 Received DKG Round 1 package from {}", device_id_recv);
-                match BASE64.decode(package_data) {
-                    Ok(package_bytes) => {
-                        info!(
-                            "📦 Processing DKG Round 1 package from {} ({} bytes)",
-                            device_id_recv,
-                            package_bytes.len()
-                        );
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(crate::elm::message::Message::ProcessDKGRound1 {
-                                from_device: device_id_recv.clone(),
-                                package_bytes,
-                            });
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode DKG Round 1 package from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            if let Some(package_data) = msg_text.strip_prefix("DKG_ROUND2:") {
-                info!("🔐 Received DKG Round 2 package from {}", device_id_recv);
-                match BASE64.decode(package_data) {
-                    Ok(package_bytes) => {
-                        info!(
-                            "📦 Processing DKG Round 2 package from {} ({} bytes)",
-                            device_id_recv,
-                            package_bytes.len()
-                        );
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(crate::elm::message::Message::ProcessDKGRound2 {
-                                from_device: device_id_recv.clone(),
-                                package_bytes,
-                            });
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode DKG Round 2 package from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            // Reshare-round frames (#45): same shape as DKG rounds, different
-            // prefix. Routed to the reshare driver via Message::ProcessReshareRound*.
-            if let Some(package_data) = msg_text.strip_prefix("RESHARE_ROUND1:") {
-                info!("🔄 Received RESHARE Round 1 package from {}", device_id_recv);
-                match BASE64.decode(package_data) {
-                    Ok(package_bytes) => {
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(crate::elm::message::Message::ProcessReshareRound1 {
-                                from_device: device_id_recv.clone(),
-                                package_bytes,
-                            });
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode RESHARE Round 1 package from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            if let Some(package_data) = msg_text.strip_prefix("RESHARE_ROUND2:") {
-                info!("🔄 Received RESHARE Round 2 package from {}", device_id_recv);
-                match BASE64.decode(package_data) {
-                    Ok(package_bytes) => {
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(crate::elm::message::Message::ProcessReshareRound2 {
-                                from_device: device_id_recv.clone(),
-                                package_bytes,
-                            });
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode RESHARE Round 2 package from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            // Phase C: signing-round frames. Same shape as DKG rounds,
-            // different prefix. Constants in `protocal::signing` keep the
-            // string literals single-sourced.
-            if let Some(b64) = msg_text.strip_prefix(crate::protocal::signing::SIGN_COMMIT_PREFIX) {
-                info!("🖊️  Received SIGN_COMMIT from {}", device_id_recv);
-                match BASE64.decode(b64) {
-                    Ok(commitment_bytes) => {
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(
-                                crate::elm::message::Message::ProcessSigningRound1 {
-                                    from_device: device_id_recv.clone(),
-                                    commitment_bytes,
-                                },
-                            );
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode SIGN_COMMIT from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            if let Some(b64) = msg_text.strip_prefix(crate::protocal::signing::SIGN_SHARE_PREFIX) {
-                info!("🖊️  Received SIGN_SHARE from {}", device_id_recv);
-                match BASE64.decode(b64) {
-                    Ok(share_bytes) => {
-                        if let Some(tx) = &ui_msg_tx {
-                            let _ = tx.send(
-                                crate::elm::message::Message::ProcessSigningRound2 {
-                                    from_device: device_id_recv.clone(),
-                                    share_bytes,
-                                },
-                            );
-                        }
-                    }
-                    Err(e) => error!(
-                        "Failed to base64-decode SIGN_SHARE from {}: {}",
-                        device_id_recv, e
-                    ),
-                }
-                return;
-            }
-            info!("📨 SimpleMessage from {}: {}", device_id_recv, msg_text);
             return;
         }
+        if let Some(message_json) =
+            msg_text.strip_prefix(crate::elm::command::UNIFIED_DKG_ROUND2_PREFIX)
+        {
+            info!("🔐 Received UNIFIED DKG Round 2 from {}", device_id_recv);
+            if let Some(tx) = &ui_msg_tx {
+                let _ = tx.send(crate::elm::message::Message::ProcessUnifiedDKGRound2 {
+                    from_device: device_id_recv.clone(),
+                    message_json: message_json.to_string(),
+                });
+            }
+            return;
+        }
+        if let Some(package_data) = msg_text.strip_prefix("DKG_ROUND1:") {
+            info!("🔑 Received DKG Round 1 package from {}", device_id_recv);
+            match BASE64.decode(package_data) {
+                Ok(package_bytes) => {
+                    info!(
+                        "📦 Processing DKG Round 1 package from {} ({} bytes)",
+                        device_id_recv,
+                        package_bytes.len()
+                    );
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessDKGRound1 {
+                            from_device: device_id_recv.clone(),
+                            package_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode DKG Round 1 package from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        if let Some(package_data) = msg_text.strip_prefix("DKG_ROUND2:") {
+            info!("🔐 Received DKG Round 2 package from {}", device_id_recv);
+            match BASE64.decode(package_data) {
+                Ok(package_bytes) => {
+                    info!(
+                        "📦 Processing DKG Round 2 package from {} ({} bytes)",
+                        device_id_recv,
+                        package_bytes.len()
+                    );
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessDKGRound2 {
+                            from_device: device_id_recv.clone(),
+                            package_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode DKG Round 2 package from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        // Reshare-round frames (#45): same shape as DKG rounds, different
+        // prefix. Routed to the reshare driver via Message::ProcessReshareRound*.
+        if let Some(package_data) = msg_text.strip_prefix("RESHARE_ROUND1:") {
+            info!(
+                "🔄 Received RESHARE Round 1 package from {}",
+                device_id_recv
+            );
+            match BASE64.decode(package_data) {
+                Ok(package_bytes) => {
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessReshareRound1 {
+                            from_device: device_id_recv.clone(),
+                            package_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode RESHARE Round 1 package from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        if let Some(package_data) = msg_text.strip_prefix("RESHARE_ROUND2:") {
+            info!(
+                "🔄 Received RESHARE Round 2 package from {}",
+                device_id_recv
+            );
+            match BASE64.decode(package_data) {
+                Ok(package_bytes) => {
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessReshareRound2 {
+                            from_device: device_id_recv.clone(),
+                            package_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode RESHARE Round 2 package from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        // Phase C: signing-round frames. Same shape as DKG rounds,
+        // different prefix. Constants in `protocal::signing` keep the
+        // string literals single-sourced.
+        if let Some(b64) = msg_text.strip_prefix(crate::protocal::signing::SIGN_COMMIT_PREFIX) {
+            info!("🖊️  Received SIGN_COMMIT from {}", device_id_recv);
+            match BASE64.decode(b64) {
+                Ok(commitment_bytes) => {
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessSigningRound1 {
+                            from_device: device_id_recv.clone(),
+                            commitment_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode SIGN_COMMIT from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        if let Some(b64) = msg_text.strip_prefix(crate::protocal::signing::SIGN_SHARE_PREFIX) {
+            info!("🖊️  Received SIGN_SHARE from {}", device_id_recv);
+            match BASE64.decode(b64) {
+                Ok(share_bytes) => {
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessSigningRound2 {
+                            from_device: device_id_recv.clone(),
+                            share_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode SIGN_SHARE from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
+        info!("📨 SimpleMessage from {}: {}", device_id_recv, msg_text);
+        return;
+    }
 
     // Control frames: `channel_open`, `mesh_ready`.
     if let Some(msg_type) = json_msg.get("type").and_then(|v| v.as_str()) {
@@ -266,7 +331,10 @@ pub async fn dispatch_data_channel_msg<C>(
                     }
                 }
             }
-            other => info!("📨 Unknown JSON message type {} from {}", other, device_id_recv),
+            other => info!(
+                "📨 Unknown JSON message type {} from {}",
+                other, device_id_recv
+            ),
         }
     }
 }
@@ -283,7 +351,10 @@ pub async fn initiate_webrtc_with_channel<C>(
     <<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
     <<<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
 {
-    info!("🚀 Simple WebRTC initiation for {} participants", participants.len());
+    info!(
+        "🚀 Simple WebRTC initiation for {} participants",
+        participants.len()
+    );
 
     // Get the WebSocket message channel from AppState (string-based for Send compatibility)
     let ws_msg_tx = {
@@ -294,7 +365,9 @@ pub async fn initiate_webrtc_with_channel<C>(
                 tx.clone()
             }
             None => {
-                error!("❌ No WebSocket message channel found in AppState - WebRTC offers cannot be sent!");
+                error!(
+                    "❌ No WebSocket message channel found in AppState - WebRTC offers cannot be sent!"
+                );
                 return;
             }
         }
@@ -304,9 +377,13 @@ pub async fn initiate_webrtc_with_channel<C>(
     let debug_msg = format!(
         "[{}] 🚀 simple_initiate_webrtc called: self={}, participants={:?}",
         chrono::Local::now().format("%H:%M:%S%.3f"),
-        self_device_id, participants
+        self_device_id,
+        participants
     );
-    let _ = std::fs::write(format!("/tmp/{}-webrtc-simple.log", self_device_id), &debug_msg);
+    let _ = std::fs::write(
+        format!("/tmp/{}-webrtc-simple.log", self_device_id),
+        &debug_msg,
+    );
 
     // Filter out self
     let other_participants: Vec<String> = participants
@@ -328,8 +405,10 @@ pub async fn initiate_webrtc_with_channel<C>(
     // in `state.data_channels`, and the DKG Round 1 broadcast fails with
     // "Data channel not ready". Letting `ensure_peer_connection` create the PC
     // for answerers guarantees the handler set is installed exactly once.
-    info!("🔧 [{}] Creating peer connections for peers we initiate to (perfect negotiation)",
-         self_device_id);
+    info!(
+        "🔧 [{}] Creating peer connections for peers we initiate to (perfect negotiation)",
+        self_device_id
+    );
 
     for participant in other_participants.iter() {
         if self_device_id >= *participant {
@@ -343,7 +422,10 @@ pub async fn initiate_webrtc_with_channel<C>(
         };
 
         if needs_creation {
-            info!("📱 [{}] Creating NEW peer connection for {}", self_device_id, participant);
+            info!(
+                "📱 [{}] Creating NEW peer connection for {}",
+                self_device_id, participant
+            );
 
             // Create a simple peer connection using webrtc crate directly
             let config = webrtc::peer_connection::configuration::RTCConfiguration {
@@ -359,40 +441,64 @@ pub async fn initiate_webrtc_with_channel<C>(
                 Ok(pc) => {
                     let mut conns = device_connections.lock().await;
                     conns.insert(participant.clone(), Arc::new(pc));
-                    info!("✅ [{}] Successfully created peer connection for {}", self_device_id, participant);
+                    info!(
+                        "✅ [{}] Successfully created peer connection for {}",
+                        self_device_id, participant
+                    );
                 }
                 Err(e) => {
-                    error!("❌ [{}] Failed to create peer connection for {}: {}", self_device_id, participant, e);
+                    error!(
+                        "❌ [{}] Failed to create peer connection for {}: {}",
+                        self_device_id, participant, e
+                    );
                 }
             }
         } else {
-            info!("✓ [{}] Peer connection already exists for {}, will reuse", self_device_id, participant);
+            info!(
+                "✓ [{}] Peer connection already exists for {}, will reuse",
+                self_device_id, participant
+            );
         }
     }
 
     // Now create offers for participants where we have lower ID (perfect negotiation)
-    let devices_to_offer: Vec<String> = other_participants.clone()
+    let devices_to_offer: Vec<String> = other_participants
+        .clone()
         .into_iter()
         .filter(|p| self_device_id < *p)
         .collect();
 
-    info!("📤 [{}] Will send offers to {} devices: {:?}", self_device_id, devices_to_offer.len(), devices_to_offer);
-    
+    info!(
+        "📤 [{}] Will send offers to {} devices: {:?}",
+        self_device_id,
+        devices_to_offer.len(),
+        devices_to_offer
+    );
+
     // IMPORTANT: Log what connections we expect to receive offers for
-    let devices_expecting_offers: Vec<String> = other_participants.clone()
+    let devices_expecting_offers: Vec<String> = other_participants
+        .clone()
         .into_iter()
         .filter(|p| self_device_id > *p)
         .collect();
-    
+
     if !devices_expecting_offers.is_empty() {
-        info!("📥 [{}] Expecting to receive offers from {} devices: {:?}", 
-               self_device_id, devices_expecting_offers.len(), devices_expecting_offers);
+        info!(
+            "📥 [{}] Expecting to receive offers from {} devices: {:?}",
+            self_device_id,
+            devices_expecting_offers.len(),
+            devices_expecting_offers
+        );
     }
 
     // Check current connections state before creating offers
     {
         let conns = device_connections.lock().await;
-        info!("📊 [{}] Current peer connections: {:?}", self_device_id, conns.keys().collect::<Vec<_>>());
+        info!(
+            "📊 [{}] Current peer connections: {:?}",
+            self_device_id,
+            conns.keys().collect::<Vec<_>>()
+        );
     }
 
     for device_id in devices_to_offer {
@@ -403,7 +509,10 @@ pub async fn initiate_webrtc_with_channel<C>(
         };
 
         if has_data_channel {
-            info!("✓ [{}] Data channel already exists for {}, skipping offer creation", self_device_id, device_id);
+            info!(
+                "✓ [{}] Data channel already exists for {}, skipping offer creation",
+                self_device_id, device_id
+            );
             continue;
         }
 
@@ -455,41 +564,47 @@ pub async fn initiate_webrtc_with_channel<C>(
             let ws_msg_tx_ice = ws_msg_tx.clone();
             let _pc_weak = Arc::downgrade(pc);
 
-            pc.on_ice_candidate(Box::new(move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
-                let device_id_ice = device_id_ice.clone();
-                let ws_msg_tx_ice = ws_msg_tx_ice.clone();
-                let _pc_weak = _pc_weak.clone();
+            pc.on_ice_candidate(Box::new(
+                move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
+                    let device_id_ice = device_id_ice.clone();
+                    let ws_msg_tx_ice = ws_msg_tx_ice.clone();
+                    let _pc_weak = _pc_weak.clone();
 
-                Box::pin(async move {
-                    if let Some(candidate) = candidate {
-                        info!("🧊 Generated ICE candidate for {}", device_id_ice);
+                    Box::pin(async move {
+                        if let Some(candidate) = candidate {
+                            info!("🧊 Generated ICE candidate for {}", device_id_ice);
 
-                        // Send ICE candidate to peer
-                        let candidate_json = candidate.to_json().unwrap();
-                        let ice_signal = crate::protocal::signal::WebRTCSignal::Candidate(
-                            crate::protocal::signal::CandidateInfo {
-                                candidate: candidate_json.candidate,
-                                sdp_mid: candidate_json.sdp_mid,
-                                sdp_mline_index: candidate_json.sdp_mline_index,
-                            }
-                        );
+                            // Send ICE candidate to peer
+                            let candidate_json = candidate.to_json().unwrap();
+                            let ice_signal = crate::protocal::signal::WebRTCSignal::Candidate(
+                                crate::protocal::signal::CandidateInfo {
+                                    candidate: candidate_json.candidate,
+                                    sdp_mid: candidate_json.sdp_mid,
+                                    sdp_mline_index: candidate_json.sdp_mline_index,
+                                },
+                            );
 
-                        let websocket_message = crate::protocal::signal::WebSocketMessage::WebRTCSignal(ice_signal);
+                            let websocket_message =
+                                crate::protocal::signal::WebSocketMessage::WebRTCSignal(ice_signal);
 
-                        if let Ok(json_val) = serde_json::to_value(websocket_message) {
-                            let relay_msg = starlab_signal_server::ClientMsg::Relay {
-                                to: device_id_ice.clone(),
-                                data: json_val,
-                            };
+                            if let Ok(json_val) = serde_json::to_value(websocket_message) {
+                                let relay_msg = starlab_signal_server::ClientMsg::Relay {
+                                    to: device_id_ice.clone(),
+                                    data: json_val,
+                                };
 
-                            if let Ok(json) = serde_json::to_string(&relay_msg) {
-                                info!("📤 Sending ICE candidate to {} via WebSocket", device_id_ice);
-                                let _ = ws_msg_tx_ice.send(json);
+                                if let Ok(json) = serde_json::to_string(&relay_msg) {
+                                    info!(
+                                        "📤 Sending ICE candidate to {} via WebSocket",
+                                        device_id_ice
+                                    );
+                                    let _ = ws_msg_tx_ice.send(json);
+                                }
                             }
                         }
-                    }
-                })
-            }));
+                    })
+                },
+            ));
 
             match pc.create_data_channel("data", None).await {
                 Ok(dc) => {
@@ -500,7 +615,7 @@ pub async fn initiate_webrtc_with_channel<C>(
                     let self_device_id_dc = self_device_id.clone();
                     let dc_for_open = dc.clone();
                     let app_state_for_mesh = app_state.clone();
-                    
+
                     let ui_msg_tx_open = ui_msg_tx.clone();
                     dc.on_open(Box::new(move || {
                         let device_id_open = device_id_dc.clone();
@@ -646,20 +761,35 @@ pub async fn initiate_webrtc_with_channel<C>(
                                         // Serialize the message immediately to avoid Send issues
                                         match serde_json::to_string(&relay_msg) {
                                             Ok(json) => {
-                                                info!("📤 Sending WebRTC offer to {} via WebSocket", device_id);
+                                                info!(
+                                                    "📤 Sending WebRTC offer to {} via WebSocket",
+                                                    device_id
+                                                );
                                                 if let Err(e) = ws_msg_tx.send(json) {
-                                                    error!("❌ Failed to send offer to {}: {}", device_id, e);
+                                                    error!(
+                                                        "❌ Failed to send offer to {}: {}",
+                                                        device_id, e
+                                                    );
                                                 } else {
-                                                    info!("✅ WebRTC offer sent to {} via WebSocket", device_id);
+                                                    info!(
+                                                        "✅ WebRTC offer sent to {} via WebSocket",
+                                                        device_id
+                                                    );
                                                 }
                                             }
                                             Err(e) => {
-                                                error!("❌ Failed to serialize relay message for {}: {}", device_id, e);
+                                                error!(
+                                                    "❌ Failed to serialize relay message for {}: {}",
+                                                    device_id, e
+                                                );
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        error!("❌ Failed to serialize offer for {}: {}", device_id, e);
+                                        error!(
+                                            "❌ Failed to serialize offer for {}: {}",
+                                            device_id, e
+                                        );
                                     }
                                 }
                             }

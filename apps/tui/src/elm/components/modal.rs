@@ -283,9 +283,7 @@ mod tests {
     fn render(comp: &mut ModalComponent) -> String {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).expect("TestBackend");
-        terminal
-            .draw(|f| comp.view(f, f.area()))
-            .expect("draw");
+        terminal.draw(|f| comp.view(f, f.area())).expect("draw");
         let buf = terminal.backend().buffer();
         let a = buf.area();
         let mut out = String::new();

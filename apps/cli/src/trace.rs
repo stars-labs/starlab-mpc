@@ -123,7 +123,10 @@ mod tests {
         let v = normalize_event(&ev);
         assert_eq!(v["session"]["session_id"], "<session_id>");
         assert_eq!(v["session"]["proposer"], "<proposer>");
-        assert_eq!(v["session"]["participants"], serde_json::json!(["<device>"]));
+        assert_eq!(
+            v["session"]["participants"],
+            serde_json::json!(["<device>"])
+        );
         // Structural fields kept.
         assert_eq!(v["session"]["type"], "dkg");
         assert_eq!(v["session"]["threshold"], 2);

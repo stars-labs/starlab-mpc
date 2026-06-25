@@ -55,9 +55,7 @@ impl AutoApprovePolicy {
         if !self.enabled {
             return false;
         }
-        if !self.wallet_allowlist.is_empty()
-            && !self.wallet_allowlist.iter().any(|w| w == wallet)
-        {
+        if !self.wallet_allowlist.is_empty() && !self.wallet_allowlist.iter().any(|w| w == wallet) {
             return false;
         }
         match self.max_approvals {
@@ -99,8 +97,8 @@ pub fn resolve_password(
         return Ok(s.trim_end_matches(['\n', '\r']).to_string());
     }
     if let Some(var) = env_var {
-        let s = std::env::var(var)
-            .map_err(|_| anyhow::anyhow!("password env var {var} not set"))?;
+        let s =
+            std::env::var(var).map_err(|_| anyhow::anyhow!("password env var {var} not set"))?;
         return Ok(s);
     }
     if let Some(p) = flag {

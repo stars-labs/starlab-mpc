@@ -164,8 +164,11 @@ impl Component for SignatureCompleteComponent {
             )
         };
         frame.render_widget(
-            Paragraph::new(verify_text)
-                .style(Style::default().fg(verify_color).add_modifier(Modifier::BOLD)),
+            Paragraph::new(verify_text).style(
+                Style::default()
+                    .fg(verify_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
             rows[6],
         );
 
@@ -278,9 +281,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).expect("TestBackend");
         let mut c = SignatureCompleteComponent::new();
         c.set_from_model(&ws);
-        terminal
-            .draw(|f| c.view(f, f.area()))
-            .expect("draw");
+        terminal.draw(|f| c.view(f, f.area())).expect("draw");
         let buf = terminal.backend().buffer();
         let area = buf.area();
         let mut rendered = String::new();

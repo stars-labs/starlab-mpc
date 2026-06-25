@@ -195,12 +195,12 @@ impl Component for PasswordPromptComponent {
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3),                    // explainer
-                Constraint::Length(name_row_height),      // wallet name (or 0)
-                Constraint::Length(3),                    // password field
-                Constraint::Length(confirm_row_height),   // confirm field (or 0)
-                Constraint::Length(2),                    // error line (if any)
-                Constraint::Min(1),                       // hints (bottom)
+                Constraint::Length(3),                  // explainer
+                Constraint::Length(name_row_height),    // wallet name (or 0)
+                Constraint::Length(3),                  // password field
+                Constraint::Length(confirm_row_height), // confirm field (or 0)
+                Constraint::Length(2),                  // error line (if any)
+                Constraint::Min(1),                     // hints (bottom)
             ])
             .split(inner);
 
@@ -228,13 +228,7 @@ impl Component for PasswordPromptComponent {
         } else {
             !self.wallet_name_focus && !self.focus_confirm
         };
-        self.render_field_row(
-            frame,
-            rows[2],
-            " Password ",
-            self.password_len,
-            pw_focused,
-        );
+        self.render_field_row(frame, rows[2], " Password ", self.password_len, pw_focused);
         if !is_unlock {
             self.render_field_row(
                 frame,
@@ -330,7 +324,10 @@ mod tests {
         // output. This is a weak property test but catches the "I
         // accidentally re-added a String field" regression.
         let dbg = format!("{:?}", c);
-        assert!(!dbg.contains("secretpw"), "component Debug leaked cleartext: {dbg}");
+        assert!(
+            !dbg.contains("secretpw"),
+            "component Debug leaked cleartext: {dbg}"
+        );
     }
 
     #[test]
@@ -338,7 +335,10 @@ mod tests {
         let c = PasswordPromptComponent::new();
         assert_eq!(c.password_len, 0);
         assert_eq!(c.confirm_len, 0);
-        assert!(!c.focus_confirm, "fresh mount focuses the password field first");
+        assert!(
+            !c.focus_confirm,
+            "fresh mount focuses the password field first"
+        );
         assert!(c.error.is_none());
         assert_eq!(
             c.purpose,

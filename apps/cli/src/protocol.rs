@@ -74,10 +74,7 @@ pub enum CliCommand {
     /// group address is preserved and the refreshed share replaces the old one
     /// on disk (#56). Co-signers approve with `join_session` on the announced
     /// reshare session.
-    Reshare {
-        wallet_id: String,
-        password: String,
-    },
+    Reshare { wallet_id: String, password: String },
     /// Stop the runner and exit.
     Quit,
 }
@@ -374,7 +371,9 @@ mod tests {
             serde_json::from_str(r#"{"cmd":"join_session","session_id":"s","password":"p"}"#)
                 .unwrap();
         match r.command {
-            CliCommand::JoinSession { label, session_id, .. } => {
+            CliCommand::JoinSession {
+                label, session_id, ..
+            } => {
                 assert_eq!(session_id, "s");
                 assert_eq!(label, "");
             }
@@ -420,7 +419,10 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&ann.to_line()).unwrap();
         assert_eq!(v["event"], "session_announced");
         assert_eq!(v["session_id"], "dkg_42");
-        assert!(v.get("correlates").is_none(), "None correlates must be omitted");
+        assert!(
+            v.get("correlates").is_none(),
+            "None correlates must be omitted"
+        );
 
         let ann = CliEvent::SessionAnnounced {
             correlates: Some(9),

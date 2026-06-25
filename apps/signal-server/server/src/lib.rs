@@ -7,8 +7,8 @@ use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
 
-pub mod session_manager;
 pub mod cloudflare_storage;
+pub mod session_manager;
 
 type DeviceSender = mpsc::UnboundedSender<Message>;
 type DeviceMap = Arc<Mutex<HashMap<String, DeviceSender>>>;
@@ -46,7 +46,10 @@ pub async fn run(listener: TcpListener) {
                 let keep = !session.active_participants.is_empty()
                     || age < std::time::Duration::from_secs(300);
                 if !keep {
-                    eprintln!("🗑️ Expiring session '{}' (no active participants for {:?})", id, age);
+                    eprintln!(
+                        "🗑️ Expiring session '{}' (no active participants for {:?})",
+                        id, age
+                    );
                 }
                 keep
             });
@@ -63,7 +66,10 @@ pub async fn run(listener: TcpListener) {
             let ws_stream = match accept_async(stream).await {
                 Ok(ws) => ws,
                 Err(e) => {
-                    eprintln!("WebSocket handshake failed (this is normal for connection tests): {:?}", e);
+                    eprintln!(
+                        "WebSocket handshake failed (this is normal for connection tests): {:?}",
+                        e
+                    );
                     return;
                 }
             };
@@ -408,13 +414,22 @@ pub async fn run(listener: TcpListener) {
                     for session_id in session_ids {
                         if let Some(session) = sessions_guard.get_mut(session_id) {
                             session.active_participants.retain(|p| p != &my_id);
-                            eprintln!("Removed '{}' from active participants in session '{}'", my_id, session_id);
+                            eprintln!(
+                                "Removed '{}' from active participants in session '{}'",
+                                my_id, session_id
+                            );
                             if session.active_participants.is_empty() {
                                 session.last_active = std::time::Instant::now();
-                                eprintln!("Session '{}' has no active participants, keeping for grace period", session_id);
+                                eprintln!(
+                                    "Session '{}' has no active participants, keeping for grace period",
+                                    session_id
+                                );
                             } else {
-                                eprintln!("Session '{}' continues with {} active participants",
-                                    session_id, session.active_participants.len());
+                                eprintln!(
+                                    "Session '{}' continues with {} active participants",
+                                    session_id,
+                                    session.active_participants.len()
+                                );
                             }
                         }
                     }
@@ -474,7 +489,7 @@ pub enum ServerMsg {
     },
     // Simple session query response - just return what device was in
     SessionsForDevice {
-        sessions: Vec<serde_json::Value>,  // List of session_info objects
+        sessions: Vec<serde_json::Value>, // List of session_info objects
     },
     // Notify when session is removed (creator disconnected)
     SessionRemoved {
@@ -494,5 +509,5 @@ pub enum ClientMsg {
     RequestActiveSessions,
     SessionStatusUpdate { session_info: serde_json::Value },
     // Simple stateless rejoin support
-    QueryMyActiveSessions,  // Device asks: "What sessions am I in?"
+    QueryMyActiveSessions, // Device asks: "What sessions am I in?"
 }

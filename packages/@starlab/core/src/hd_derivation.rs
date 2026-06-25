@@ -35,8 +35,8 @@ impl ChainCode {
     /// Uses HMAC-SHA512 with a domain separator to produce a deterministic
     /// chain code from the group public key bytes.
     pub fn from_group_key(verifying_key_bytes: &[u8]) -> Self {
-        let mut mac = HmacSha512::new_from_slice(b"frost-hd-root")
-            .expect("HMAC accepts any key size");
+        let mut mac =
+            HmacSha512::new_from_slice(b"frost-hd-root").expect("HMAC accepts any key size");
         mac.update(verifying_key_bytes);
         let result = mac.finalize().into_bytes();
         let mut chaincode = [0u8; 32];
@@ -100,9 +100,9 @@ impl DerivationPath {
                 (*part, false)
             };
 
-            let index: u32 = num_str
-                .parse()
-                .map_err(|_| FrostError::DerivationError(format!("invalid path segment: {part}")))?;
+            let index: u32 = num_str.parse().map_err(|_| {
+                FrostError::DerivationError(format!("invalid path segment: {part}"))
+            })?;
 
             if index >= HARDENED_BIT {
                 return Err(FrostError::DerivationError(format!(
@@ -110,7 +110,11 @@ impl DerivationPath {
                 )));
             }
 
-            segments.push(if hardened { index | HARDENED_BIT } else { index });
+            segments.push(if hardened {
+                index | HARDENED_BIT
+            } else {
+                index
+            });
         }
 
         Ok(Self { segments })
@@ -191,9 +195,9 @@ fn scalar_from_seed<C: Ciphersuite>(
             <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                 &serialization,
             )
-        {
-            return Ok(scalar);
-        }
+    {
+        return Ok(scalar);
+    }
 
     // Retry with SHA-256(seed || counter) for values that exceed curve order
     for counter in 1u8..=255 {
@@ -207,9 +211,9 @@ fn scalar_from_seed<C: Ciphersuite>(
                 <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                     &serialization,
                 )
-            {
-                return Ok(scalar);
-            }
+        {
+            return Ok(scalar);
+        }
     }
 
     Err(FrostError::DerivationError(
@@ -284,9 +288,8 @@ pub fn derive_child_key<C: Ciphersuite>(
     let child_share_bytes =
         <<C::Group as frost_core::Group>::Field as frost_core::Field>::serialize(&child_scalar);
     let child_signing_share =
-        frost_core::keys::SigningShare::<C>::deserialize(child_share_bytes.as_ref()).map_err(
-            |e| FrostError::DerivationError(format!("child signing share: {e}")),
-        )?;
+        frost_core::keys::SigningShare::<C>::deserialize(child_share_bytes.as_ref())
+            .map_err(|e| FrostError::DerivationError(format!("child signing share: {e}")))?;
 
     // Step 5: Derive child verifying share for this participant
     let parent_vshare_bytes = key_package
@@ -295,13 +298,11 @@ pub fn derive_child_key<C: Ciphersuite>(
         .map_err(|e| FrostError::DerivationError(format!("serialize verifying share: {e}")))?;
     let parent_vshare_element = bytes_to_element::<C>(parent_vshare_bytes.as_ref())?;
     let child_vshare_element = parent_vshare_element + offset_point;
-    let child_vshare_bytes =
-        <C::Group as frost_core::Group>::serialize(&child_vshare_element)
-            .map_err(|e| FrostError::DerivationError(format!("serialize child vshare: {e}")))?;
+    let child_vshare_bytes = <C::Group as frost_core::Group>::serialize(&child_vshare_element)
+        .map_err(|e| FrostError::DerivationError(format!("serialize child vshare: {e}")))?;
     let child_verifying_share =
-        frost_core::keys::VerifyingShare::<C>::deserialize(child_vshare_bytes.as_ref()).map_err(
-            |e| FrostError::DerivationError(format!("child verifying share: {e}")),
-        )?;
+        frost_core::keys::VerifyingShare::<C>::deserialize(child_vshare_bytes.as_ref())
+            .map_err(|e| FrostError::DerivationError(format!("child verifying share: {e}")))?;
 
     // Step 6: Derive child verifying key (group public key)
     let parent_vk_bytes = public_key_package
@@ -326,9 +327,8 @@ pub fn derive_child_key<C: Ciphersuite>(
         let child_vs_element = vs_element + offset_point;
         let child_vs_bytes = <C::Group as frost_core::Group>::serialize(&child_vs_element)
             .map_err(|e| FrostError::DerivationError(format!("serialize child vs: {e}")))?;
-        let child_vs =
-            frost_core::keys::VerifyingShare::<C>::deserialize(child_vs_bytes.as_ref())
-                .map_err(|e| FrostError::DerivationError(format!("child vs: {e}")))?;
+        let child_vs = frost_core::keys::VerifyingShare::<C>::deserialize(child_vs_bytes.as_ref())
+            .map_err(|e| FrostError::DerivationError(format!("child vs: {e}")))?;
         child_verifying_shares.insert(*id, child_vs);
     }
 
@@ -341,10 +341,8 @@ pub fn derive_child_key<C: Ciphersuite>(
         *key_package.min_signers(),
     );
 
-    let child_public_key_package = frost_core::keys::PublicKeyPackage::<C>::new(
-        child_verifying_shares,
-        child_verifying_key,
-    );
+    let child_public_key_package =
+        frost_core::keys::PublicKeyPackage::<C>::new(child_verifying_shares, child_verifying_key);
 
     Ok(DerivedKeys {
         key_package: child_key_package,
@@ -495,11 +493,21 @@ mod tests {
         let ed_vk_bytes = ed_pub.verifying_key().serialize().unwrap();
         let cc = ChainCode::from_group_key(ed_vk_bytes.as_ref());
 
-        let derived1 = derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
-        let derived2 = derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
+        let derived1 =
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
+        let derived2 =
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
 
-        let vk1 = derived1.public_key_package.verifying_key().serialize().unwrap();
-        let vk2 = derived2.public_key_package.verifying_key().serialize().unwrap();
+        let vk1 = derived1
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
+        let vk2 = derived2
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
         assert_eq!(vk1, vk2, "same inputs must produce same child key");
     }
 
@@ -513,11 +521,21 @@ mod tests {
         let ed_vk_bytes = ed_pub.verifying_key().serialize().unwrap();
         let cc = ChainCode::from_group_key(ed_vk_bytes.as_ref());
 
-        let derived0 = derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
-        let derived1 = derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 1).unwrap();
+        let derived0 =
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 0).unwrap();
+        let derived1 =
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, 1).unwrap();
 
-        let vk0 = derived0.public_key_package.verifying_key().serialize().unwrap();
-        let vk1 = derived1.public_key_package.verifying_key().serialize().unwrap();
+        let vk0 = derived0
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
+        let vk1 = derived1
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
         assert_ne!(vk0, vk1, "different indices must produce different keys");
 
         // Also verify secp256k1
@@ -526,12 +544,27 @@ mod tests {
         let secp_vk_bytes = secp_pub.verifying_key().serialize().unwrap();
         let secp_cc = ChainCode::from_group_key(secp_vk_bytes.as_ref());
 
-        let secp_d0 = derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 0).unwrap();
-        let secp_d1 = derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 1).unwrap();
+        let secp_d0 =
+            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 0)
+                .unwrap();
+        let secp_d1 =
+            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 1)
+                .unwrap();
 
-        let svk0 = secp_d0.public_key_package.verifying_key().serialize().unwrap();
-        let svk1 = secp_d1.public_key_package.verifying_key().serialize().unwrap();
-        assert_ne!(svk0, svk1, "different indices must produce different secp256k1 keys");
+        let svk0 = secp_d0
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
+        let svk1 = secp_d1
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
+        assert_ne!(
+            svk0, svk1,
+            "different indices must produce different secp256k1 keys"
+        );
     }
 
     #[test]
@@ -563,7 +596,8 @@ mod tests {
 
         for i in 1..child_vks.len() {
             assert_eq!(
-                child_vks[0], child_vks[i],
+                child_vks[0],
+                child_vks[i],
                 "participant {} derived different child group pubkey",
                 i + 1
             );
@@ -601,8 +635,7 @@ mod tests {
 
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
-            let (n, c) =
-                frost_ed25519::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
+            let (n, c) = frost_ed25519::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
             let id = *kp.identifier();
             nonces.insert(id, n);
             commitments.insert(id, c);
@@ -656,8 +689,7 @@ mod tests {
 
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
-            let (n, c) =
-                frost_secp256k1::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
+            let (n, c) = frost_secp256k1::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
             let id = *kp.identifier();
             nonces.insert(id, n);
             commitments.insert(id, c);
@@ -674,8 +706,7 @@ mod tests {
         }
 
         let child_pub = &child_keys[0].public_key_package;
-        let signature =
-            frost_secp256k1::aggregate(&signing_pkg, &sig_shares, child_pub).unwrap();
+        let signature = frost_secp256k1::aggregate(&signing_pkg, &sig_shares, child_pub).unwrap();
 
         child_pub
             .verifying_key()
@@ -710,10 +741,16 @@ mod tests {
         let cc = ChainCode::from_group_key(ed_vk_bytes.as_ref());
 
         let path = DerivationPath::parse("m/44'/501'/0'").unwrap();
-        let derived = derive_child_key_path::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, &path).unwrap();
+        let derived =
+            derive_child_key_path::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, &cc, &path)
+                .unwrap();
 
         // Verify it produces a valid key by checking we can serialize
-        let _vk_bytes = derived.public_key_package.verifying_key().serialize().unwrap();
+        let _vk_bytes = derived
+            .public_key_package
+            .verifying_key()
+            .serialize()
+            .unwrap();
     }
     #[test]
     fn public_derivation_matches_full_derivation() {
@@ -747,5 +784,4 @@ mod tests {
         let public_only = derive_child_verifying_key_path::<Ed>(&group, &path).unwrap();
         assert_eq!(public_only, full_group);
     }
-
 }

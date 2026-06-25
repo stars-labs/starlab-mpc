@@ -3,18 +3,18 @@
 //! This module provides support for threshold signing without network connectivity,
 //! using SD cards or other removable media for data transfer.
 
-pub mod types;
 pub mod export;
 pub mod import;
 pub mod session;
+pub mod types;
 
-pub use types::*;
 pub use session::OfflineSession;
+pub use types::*;
 
-use std::path::Path;
-use std::fs;
-use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
 
 /// Result type for offline operations
 pub type Result<T> = std::result::Result<T, OfflineError>;
@@ -58,16 +58,16 @@ pub enum OfflineError {
 pub struct OfflineConfig {
     /// Default session expiration duration (in minutes)
     pub default_expiration_minutes: u64,
-    
+
     /// Path to SD card mount point
     pub sdcard_path: Option<String>,
-    
+
     /// Auto-import files on detection
     pub auto_import: bool,
-    
+
     /// Delete files after successful import
     pub delete_after_import: bool,
-    
+
     /// Maximum file size to import (in bytes)
     pub max_file_size: usize,
 }
@@ -87,7 +87,7 @@ impl Default for OfflineConfig {
 /// Check if a path looks like an SD card or removable media
 pub fn is_removable_media(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
-    
+
     // Common mount points for removable media
     path_str.contains("/mnt/") ||
     path_str.contains("/media/") ||
@@ -105,7 +105,7 @@ pub fn validate_import_file(path: &Path, config: &OfflineConfig) -> Result<()> {
     if !path.exists() {
         return Err(OfflineError::IoError(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("File not found: {}", path.display())
+            format!("File not found: {}", path.display()),
         )));
     }
 
@@ -122,7 +122,7 @@ pub fn validate_import_file(path: &Path, config: &OfflineConfig) -> Result<()> {
     // Check file extension
     if path.extension().and_then(|s| s.to_str()) != Some("json") {
         return Err(OfflineError::InvalidFormat(
-            "Only JSON files are supported".to_string()
+            "Only JSON files are supported".to_string(),
         ));
     }
 

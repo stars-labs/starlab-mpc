@@ -42,25 +42,23 @@ mod tests {
 
     #[test]
     fn test_secp256k1_identification() {
-        assert_eq!(
-            frost_secp256k1::Secp256K1Sha256::curve_type(),
-            "secp256k1"
-        );
+        assert_eq!(frost_secp256k1::Secp256K1Sha256::curve_type(), "secp256k1");
     }
 
     #[test]
     fn test_ed25519_identification() {
-        assert_eq!(
-            frost_ed25519::Ed25519Sha512::curve_type(),
-            "ed25519"
-        );
+        assert_eq!(frost_ed25519::Ed25519Sha512::curve_type(), "ed25519");
     }
 
     #[test]
     fn test_curve_matching() {
-        assert!(is_curve_type::<frost_secp256k1::Secp256K1Sha256>("secp256k1"));
-        assert!(!is_curve_type::<frost_secp256k1::Secp256K1Sha256>("ed25519"));
-        
+        assert!(is_curve_type::<frost_secp256k1::Secp256K1Sha256>(
+            "secp256k1"
+        ));
+        assert!(!is_curve_type::<frost_secp256k1::Secp256K1Sha256>(
+            "ed25519"
+        ));
+
         assert!(is_curve_type::<frost_ed25519::Ed25519Sha512>("ed25519"));
         assert!(!is_curve_type::<frost_ed25519::Ed25519Sha512>("secp256k1"));
     }

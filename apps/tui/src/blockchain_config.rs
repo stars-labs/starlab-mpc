@@ -1,9 +1,9 @@
 //! Blockchain configuration and curve compatibility mapping
-//! 
+//!
 //! Different blockchains require different cryptographic curves:
 //! - Ethereum, Bitcoin, BSC, Polygon: secp256k1
 //! - Solana, Sui, Aptos: ed25519
-//! 
+//!
 //! This module ensures we only generate addresses for compatible chains.
 
 use std::collections::HashMap;
@@ -22,7 +22,7 @@ impl CurveType {
             _ => None,
         }
     }
-    
+
     pub fn to_string(&self) -> &'static str {
         match self {
             CurveType::Secp256k1 => "secp256k1",
@@ -42,72 +42,99 @@ pub struct BlockchainInfo {
 /// Get blockchain configuration
 pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
     let mut config = HashMap::new();
-    
+
     // secp256k1 chains (Ethereum compatible)
-    config.insert("ethereum", BlockchainInfo {
-        name: "Ethereum",
-        curve: CurveType::Secp256k1,
-        symbol: "ETH",
-        address_prefix: Some("0x"),
-    });
-    
-    config.insert("bitcoin", BlockchainInfo {
-        name: "Bitcoin",
-        curve: CurveType::Secp256k1,
-        symbol: "BTC",
-        address_prefix: None, // Bitcoin uses different encoding
-    });
-    
-    config.insert("bsc", BlockchainInfo {
-        name: "Binance Smart Chain",
-        curve: CurveType::Secp256k1,
-        symbol: "BNB",
-        address_prefix: Some("0x"),
-    });
-    
-    config.insert("polygon", BlockchainInfo {
-        name: "Polygon",
-        curve: CurveType::Secp256k1,
-        symbol: "MATIC",
-        address_prefix: Some("0x"),
-    });
-    
-    config.insert("avalanche", BlockchainInfo {
-        name: "Avalanche C-Chain",
-        curve: CurveType::Secp256k1,
-        symbol: "AVAX",
-        address_prefix: Some("0x"),
-    });
-    
+    config.insert(
+        "ethereum",
+        BlockchainInfo {
+            name: "Ethereum",
+            curve: CurveType::Secp256k1,
+            symbol: "ETH",
+            address_prefix: Some("0x"),
+        },
+    );
+
+    config.insert(
+        "bitcoin",
+        BlockchainInfo {
+            name: "Bitcoin",
+            curve: CurveType::Secp256k1,
+            symbol: "BTC",
+            address_prefix: None, // Bitcoin uses different encoding
+        },
+    );
+
+    config.insert(
+        "bsc",
+        BlockchainInfo {
+            name: "Binance Smart Chain",
+            curve: CurveType::Secp256k1,
+            symbol: "BNB",
+            address_prefix: Some("0x"),
+        },
+    );
+
+    config.insert(
+        "polygon",
+        BlockchainInfo {
+            name: "Polygon",
+            curve: CurveType::Secp256k1,
+            symbol: "MATIC",
+            address_prefix: Some("0x"),
+        },
+    );
+
+    config.insert(
+        "avalanche",
+        BlockchainInfo {
+            name: "Avalanche C-Chain",
+            curve: CurveType::Secp256k1,
+            symbol: "AVAX",
+            address_prefix: Some("0x"),
+        },
+    );
+
     // ed25519 chains
-    config.insert("solana", BlockchainInfo {
-        name: "Solana",
-        curve: CurveType::Ed25519,
-        symbol: "SOL",
-        address_prefix: None,
-    });
-    
-    config.insert("sui", BlockchainInfo {
-        name: "Sui",
-        curve: CurveType::Ed25519,
-        symbol: "SUI",
-        address_prefix: Some("0x"),
-    });
-    
-    config.insert("aptos", BlockchainInfo {
-        name: "Aptos",
-        curve: CurveType::Ed25519,
-        symbol: "APT",
-        address_prefix: Some("0x"),
-    });
-    
-    config.insert("near", BlockchainInfo {
-        name: "Near",
-        curve: CurveType::Ed25519,
-        symbol: "NEAR",
-        address_prefix: None,
-    });
-    
+    config.insert(
+        "solana",
+        BlockchainInfo {
+            name: "Solana",
+            curve: CurveType::Ed25519,
+            symbol: "SOL",
+            address_prefix: None,
+        },
+    );
+
+    config.insert(
+        "sui",
+        BlockchainInfo {
+            name: "Sui",
+            curve: CurveType::Ed25519,
+            symbol: "SUI",
+            address_prefix: Some("0x"),
+        },
+    );
+
+    config.insert(
+        "aptos",
+        BlockchainInfo {
+            name: "Aptos",
+            curve: CurveType::Ed25519,
+            symbol: "APT",
+            address_prefix: Some("0x"),
+        },
+    );
+
+    config.insert(
+        "near",
+        BlockchainInfo {
+            name: "Near",
+            curve: CurveType::Ed25519,
+            symbol: "NEAR",
+            address_prefix: None,
+        },
+    );
+
     config
 }
 
@@ -139,7 +166,8 @@ pub fn signing_caveat(chain: &str) -> Option<&'static str> {
 /// Get compatible blockchains for a given curve
 pub fn get_compatible_chains(curve: &CurveType) -> Vec<(&'static str, BlockchainInfo)> {
     let config = get_blockchain_config();
-    config.into_iter()
+    config
+        .into_iter()
         .filter(|(_, info)| info.curve == *curve)
         .collect()
 }
@@ -152,11 +180,12 @@ pub fn generate_address_for_chain(
 ) -> Result<String, String> {
     let curve = CurveType::from_string(curve_str)
         .ok_or_else(|| format!("Unknown curve type: {}", curve_str))?;
-    
+
     let config = get_blockchain_config();
-    let chain_info = config.get(chain)
+    let chain_info = config
+        .get(chain)
         .ok_or_else(|| format!("Unknown blockchain: {}", chain))?;
-    
+
     // Check curve compatibility
     if chain_info.curve != curve {
         return Err(format!(
@@ -166,7 +195,7 @@ pub fn generate_address_for_chain(
             curve.to_string()
         ));
     }
-    
+
     // The four canonical chains delegate to starlab_core::accounts — the
     // single shared implementation (CLI/WASM/desktop must agree byte-for-
     // byte). Remaining chains keep their local encodings below.
@@ -215,9 +244,11 @@ pub fn generate_address_for_chain(
             let hash = hasher.finalize();
             Ok(format!("0x{}", hex::encode(&hash[..32])))
         }
-        
-        _ => {
-            Err(format!("Address generation not implemented for {} with {}", chain, curve.to_string()))
-        }
+
+        _ => Err(format!(
+            "Address generation not implemented for {} with {}",
+            chain,
+            curve.to_string()
+        )),
     }
 }

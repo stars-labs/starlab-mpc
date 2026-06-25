@@ -53,11 +53,7 @@ impl SigningManager {
     /// the attached backend (#94). `password` unlocks this device's share —
     /// the desktop passes it from its unlock flow; it is handed to the
     /// backend and never stored here. Returns the aggregated signature.
-    pub async fn approve_and_sign(
-        &self,
-        request_id: &str,
-        password: String,
-    ) -> CoreResult<String> {
+    pub async fn approve_and_sign(&self, request_id: &str, password: String) -> CoreResult<String> {
         let Some(backend) = self.backend.as_ref() else {
             return Err(CoreError::Dkg(
                 "no signing backend attached — construct SigningManager::with_backend".into(),
@@ -119,8 +115,7 @@ impl SigningManager {
             }
             Err(e) => {
                 let reason = e.to_string();
-                *self.state.signing_state.lock().await =
-                    SigningState::Failed(reason.clone());
+                *self.state.signing_state.lock().await = SigningState::Failed(reason.clone());
                 self.ui_callback
                     .update_signing_state(SigningState::Failed(reason.clone()))
                     .await;
@@ -161,9 +156,7 @@ impl SigningManager {
         *self.state.active_signing_request.lock().await = Some(request.clone());
         *self.state.signing_state.lock().await = SigningState::AwaitingApproval;
 
-        self.ui_callback
-            .update_signing_request(Some(request))
-            .await;
+        self.ui_callback.update_signing_request(Some(request)).await;
         self.ui_callback
             .update_signing_state(SigningState::AwaitingApproval)
             .await;
@@ -225,9 +218,7 @@ impl SigningManager {
         self.ui_callback
             .update_signing_complete(placeholder_sig)
             .await;
-        self.ui_callback
-            .update_signing_request(None)
-            .await;
+        self.ui_callback.update_signing_request(None).await;
         self.ui_callback
             .show_message(
                 "Signing flow completed (placeholder signature — FROST rounds pending)".into(),
@@ -296,7 +287,9 @@ mod tests {
         async fn update_sd_operations(&self, _: Vec<super::super::SDCardOperation>) {}
         async fn show_message(&self, _: String, _: bool) {}
         async fn show_progress(&self, _: String, _: f32) {}
-        async fn request_confirmation(&self, _: String) -> bool { true }
+        async fn request_confirmation(&self, _: String) -> bool {
+            true
+        }
     }
 
     #[tokio::test]
@@ -383,7 +376,12 @@ mod tests {
         let (backend, sink) = ElmSigningBackend::new(tx);
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                if let Message::HeadlessSign { wallet_id, password, .. } = msg {
+                if let Message::HeadlessSign {
+                    wallet_id,
+                    password,
+                    ..
+                } = msg
+                {
                     assert_eq!(wallet_id, "wallet-abc");
                     assert_eq!(password, "hunter2");
                     sink.observe(&Message::SigningComplete {
@@ -459,9 +457,6 @@ mod tests {
             .unwrap();
         let err = mgr.approve_and_sign(&id, "pw".into()).await.unwrap_err();
         assert!(err.to_string().contains("co-signer declined"));
-        assert!(matches!(
-            mgr.current_state().await,
-            SigningState::Failed(_)
-        ));
+        assert!(matches!(mgr.current_state().await, SigningState::Failed(_)));
     }
 }

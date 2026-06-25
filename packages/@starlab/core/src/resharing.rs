@@ -29,7 +29,7 @@
 
 use crate::errors::{FrostError, Result};
 use frost_core::keys::dkg::{part1 as dkg_part1, part2 as dkg_part2, part3 as dkg_part3};
-use frost_core::keys::refresh::{refresh_dkg_part2, refresh_dkg_part_1, refresh_dkg_shares};
+use frost_core::keys::refresh::{refresh_dkg_part_1, refresh_dkg_part2, refresh_dkg_shares};
 use frost_core::keys::{KeyPackage, PublicKeyPackage};
 use frost_core::{Ciphersuite, Identifier};
 use rand_chacha::ChaCha20Rng;
@@ -181,7 +181,7 @@ pub fn threshold_sign_verify<C: Ciphersuite>(
     pubpkg: &PublicKeyPackage<C>,
     msg: &[u8],
 ) -> Result<()> {
-    use frost_core::{aggregate, round1, round2, SigningPackage};
+    use frost_core::{SigningPackage, aggregate, round1, round2};
     let mut nonces = BTreeMap::new();
     let mut commitments = BTreeMap::new();
     for &i in signer_ids {
@@ -221,7 +221,9 @@ impl<C: Ciphersuite, P: Clone> Round2Routing<C, P> for BTreeMap<u16, BTreeMap<Id
         for &cand in ids {
             if let Ok(id) = ident::<C>(cand) {
                 if id == recipient {
-                    self.entry(cand).or_default().insert(ident::<C>(sender).unwrap(), pkg);
+                    self.entry(cand)
+                        .or_default()
+                        .insert(ident::<C>(sender).unwrap(), pkg);
                     return;
                 }
             }
@@ -407,7 +409,11 @@ mod tests {
         let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 10).unwrap();
         let before = group_key_hex(&pp).unwrap();
         let (new_kps, new_pp) = refresh::<Secp>(&kps, &pp, &[1, 2, 3], 2, 50).unwrap();
-        assert_eq!(group_key_hex(&new_pp).unwrap(), before, "group key must not change");
+        assert_eq!(
+            group_key_hex(&new_pp).unwrap(),
+            before,
+            "group key must not change"
+        );
         // refreshed quorum can sign
         threshold_sign_verify::<Secp>(&new_kps, &[1, 2], &new_pp, b"after refresh").unwrap();
     }
@@ -421,7 +427,10 @@ mod tests {
         mixed.insert(1u16, kps[&1].clone()); // stale
         mixed.insert(2u16, new_kps[&2].clone()); // refreshed
         let r = threshold_sign_verify::<Secp>(&mixed, &[1, 2], &new_pp, b"mix");
-        assert!(r.is_err(), "stale + refreshed shares must not produce a valid signature");
+        assert!(
+            r.is_err(),
+            "stale + refreshed shares must not produce a valid signature"
+        );
     }
 
     #[test]
@@ -430,7 +439,11 @@ mod tests {
         let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 12).unwrap();
         let before = group_key_hex(&pp).unwrap();
         let (new_kps, new_pp) = refresh::<Secp>(&kps, &pp, &[1, 2], 2, 52).unwrap();
-        assert_eq!(group_key_hex(&new_pp).unwrap(), before, "address preserved after removal");
+        assert_eq!(
+            group_key_hex(&new_pp).unwrap(),
+            before,
+            "address preserved after removal"
+        );
         assert_eq!(new_kps.len(), 2, "removed participant has no new share");
         threshold_sign_verify::<Secp>(&new_kps, &[1, 2], &new_pp, b"after removal").unwrap();
         // The removed participant's old share is now useless against the new set.
@@ -447,7 +460,10 @@ mod tests {
         let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 13).unwrap();
         // id 9 never had a share.
         let err = refresh::<Secp>(&kps, &pp, &[1, 2, 9], 2, 53);
-        assert!(err.is_err(), "refresh must reject a participant with no prior share");
+        assert!(
+            err.is_err(),
+            "refresh must reject a participant with no prior share"
+        );
     }
 
     // --- Phase 1 gate (#45): NON-CONTIGUOUS identifiers ---------------------
@@ -531,7 +547,10 @@ mod tests {
         for &i in new_ids {
             for &j in new_ids {
                 if i != j {
-                    sessions.get_mut(&i).unwrap().add_round1(j, r1[&j].clone())?;
+                    sessions
+                        .get_mut(&i)
+                        .unwrap()
+                        .add_round1(j, r1[&j].clone())?;
                 }
             }
         }
@@ -543,7 +562,10 @@ mod tests {
         }
         for &sender in new_ids {
             for (&rcpt, pkg) in &r2[&sender] {
-                sessions.get_mut(&rcpt).unwrap().add_round2(sender, pkg.clone())?;
+                sessions
+                    .get_mut(&rcpt)
+                    .unwrap()
+                    .add_round2(sender, pkg.clone())?;
             }
         }
         // finalize
@@ -596,9 +618,13 @@ mod tests {
     fn session_rejects_outsider_and_bad_config() {
         let (kps, pp) = dkg_keypackages::<Secp>(3, 2, 24).unwrap();
         // my_id not in the new set
-        assert!(ReshareSession::<Secp>::new(3, 2, vec![1, 2], kps[&3].clone(), pp.clone()).is_err());
+        assert!(
+            ReshareSession::<Secp>::new(3, 2, vec![1, 2], kps[&3].clone(), pp.clone()).is_err()
+        );
         // too few participants for the threshold
-        assert!(ReshareSession::<Secp>::new(1, 3, vec![1, 2], kps[&1].clone(), pp.clone()).is_err());
+        assert!(
+            ReshareSession::<Secp>::new(1, 3, vec![1, 2], kps[&1].clone(), pp.clone()).is_err()
+        );
         // unexpected sender
         let mut s = ReshareSession::<Secp>::new(1, 2, vec![1, 2], kps[&1].clone(), pp).unwrap();
         let mut rng = ChaCha20Rng::from_seed([7u8; 32]);

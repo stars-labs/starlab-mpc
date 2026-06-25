@@ -11,16 +11,16 @@
 //! which mutate `Model.ui_state.accounts_shown`; the remount pushes the new
 //! count back in through `set_accounts_shown`.
 
-use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
+use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;
 use crate::keystore::WalletMetadata;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::component::{AppComponent, Component};
 use tuirealm::event::Event;
-use tuirealm::ratatui::Frame;
 use tuirealm::props::Props;
+use tuirealm::ratatui::Frame;
 use tuirealm::state::State;
-use tuirealm::command::{Cmd, CmdResult};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 /// How many accounts (0..n) the table shows before the user presses '+'.
 pub const DEFAULT_ACCOUNTS_SHOWN: u32 = 5;
@@ -194,7 +194,10 @@ impl Component for WalletDetail {
         frame.render_widget(hints, chunks[2]);
     }
 
-    fn query<'a>(&'a self, attr: tuirealm::props::Attribute) -> Option<tuirealm::props::QueryResult<'a>> {
+    fn query<'a>(
+        &'a self,
+        attr: tuirealm::props::Attribute,
+    ) -> Option<tuirealm::props::QueryResult<'a>> {
         self.props.get_for_query(attr)
     }
 

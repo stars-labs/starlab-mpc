@@ -16,20 +16,20 @@ pub struct Model {
     pub wallet_state: WalletState,
     pub network_state: NetworkState,
     pub ui_state: UIState,
-    
+
     /// Navigation
     pub navigation_stack: Vec<Screen>,
     pub current_screen: Screen,
-    
+
     /// Session management
     pub active_session: Option<SessionInfo>,
     pub pending_operations: Vec<Operation>,
     pub session_invites: Vec<SessionInfo>,
-    
+
     /// User context
     pub selected_wallet: Option<String>,
     pub device_id: String,
-    
+
     /// Application metadata
     pub app_version: String,
     pub last_saved: Option<DateTime<Utc>>,
@@ -52,13 +52,13 @@ impl Model {
             last_saved: None,
         }
     }
-    
+
     /// Push a screen to the navigation stack
     pub fn push_screen(&mut self, screen: Screen) {
         self.navigation_stack.push(self.current_screen.clone());
         self.current_screen = screen;
     }
-    
+
     /// Pop a screen from the navigation stack
     pub fn pop_screen(&mut self) -> bool {
         if let Some(prev_screen) = self.navigation_stack.pop() {
@@ -68,7 +68,7 @@ impl Model {
             false
         }
     }
-    
+
     /// Clear navigation stack and go to main menu
     pub fn go_home(&mut self) {
         self.navigation_stack.clear();
@@ -341,14 +341,17 @@ impl std::fmt::Debug for WalletState {
             .field("wallets", &self.wallets)
             .field("keystore_initialized", &self.keystore_initialized)
             .field("keystore_path", &self.keystore_path)
-            .field("keystore", &self.keystore.is_some())  // Just show if present
+            .field("keystore", &self.keystore.is_some()) // Just show if present
             .field("selected_wallet", &self.selected_wallet)
             .field("creating_wallet", &self.creating_wallet)
             .field("dkg_in_progress", &self.dkg_in_progress)
             .field("dkg_round", &self.dkg_round)
             // Never log the actual password, even at debug level — just
             // report whether one is currently staged.
-            .field("pending_password", &self.pending_password.as_ref().map(|_| "<redacted>"))
+            .field(
+                "pending_password",
+                &self.pending_password.as_ref().map(|_| "<redacted>"),
+            )
             // Redact cleartext but keep lengths/focus/error visible for debugging.
             .field("password_draft_len", &self.password_draft.len())
             .field("confirm_draft_len", &self.confirm_draft.len())
@@ -432,14 +435,18 @@ impl Default for UIState {
 pub enum Screen {
     Welcome,
     MainMenu,
-    
+
     // Wallet management
     CreateWallet(CreateWalletState),
     ManageWallets,
-    WalletDetail { wallet_id: String },
+    WalletDetail {
+        wallet_id: String,
+    },
     ImportWallet,
-    ExportWallet { wallet_id: String },
-    
+    ExportWallet {
+        wallet_id: String,
+    },
+
     // DKG flow
     PathSelection,
     ModeSelection,
@@ -454,25 +461,39 @@ pub enum Screen {
     /// `Model.active_session` at the transition point — no need to carry
     /// that distinction in the variant itself.
     PasswordPrompt,
-    DKGProgress { session_id: String },
-    WalletComplete { wallet_id: String },
-    
+    DKGProgress {
+        session_id: String,
+    },
+    WalletComplete {
+        wallet_id: String,
+    },
+
     // Session management
     JoinSession,
-    SessionDetail { session_id: String },
-    AcceptSession { sessions: Vec<SessionInfo> },
-    
+    SessionDetail {
+        session_id: String,
+    },
+    AcceptSession {
+        sessions: Vec<SessionInfo>,
+    },
+
     // Signing flow
-    SignTransaction { wallet_id: String },
-    SigningProgress { request_id: String },
+    SignTransaction {
+        wallet_id: String,
+    },
+    SigningProgress {
+        request_id: String,
+    },
     /// Terminal screen shown after a successful FROST aggregate.
     /// `request_id` is the signing ceremony id used by
     /// `Message::SigningComplete`; the full signature payload lives
     /// on `Model.wallet_state.last_completed_signature` so the
     /// rendered component can pull it via `set_from_model` without
     /// the variant carrying unbounded data.
-    SignatureComplete { request_id: String },
-    
+    SignatureComplete {
+        request_id: String,
+    },
+
     // Settings
     Settings,
     NetworkSettings,
@@ -584,16 +605,64 @@ pub enum Modal {
 impl PartialEq for Modal {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Modal::Confirm { title: t1, message: m1, .. }, 
-             Modal::Confirm { title: t2, message: m2, .. }) => t1 == t2 && m1 == m2,
-            (Modal::Progress { title: t1, message: m1, progress: p1 }, 
-             Modal::Progress { title: t2, message: m2, progress: p2 }) => t1 == t2 && m1 == m2 && (p1 - p2).abs() < f32::EPSILON,
-            (Modal::Error { title: t1, message: m1 }, 
-             Modal::Error { title: t2, message: m2 }) => t1 == t2 && m1 == m2,
-            (Modal::Success { title: t1, message: m1 }, 
-             Modal::Success { title: t2, message: m2 }) => t1 == t2 && m1 == m2,
-            (Modal::Input { title: t1, prompt: p1, default_value: d1, .. }, 
-             Modal::Input { title: t2, prompt: p2, default_value: d2, .. }) => t1 == t2 && p1 == p2 && d1 == d2,
+            (
+                Modal::Confirm {
+                    title: t1,
+                    message: m1,
+                    ..
+                },
+                Modal::Confirm {
+                    title: t2,
+                    message: m2,
+                    ..
+                },
+            ) => t1 == t2 && m1 == m2,
+            (
+                Modal::Progress {
+                    title: t1,
+                    message: m1,
+                    progress: p1,
+                },
+                Modal::Progress {
+                    title: t2,
+                    message: m2,
+                    progress: p2,
+                },
+            ) => t1 == t2 && m1 == m2 && (p1 - p2).abs() < f32::EPSILON,
+            (
+                Modal::Error {
+                    title: t1,
+                    message: m1,
+                },
+                Modal::Error {
+                    title: t2,
+                    message: m2,
+                },
+            ) => t1 == t2 && m1 == m2,
+            (
+                Modal::Success {
+                    title: t1,
+                    message: m1,
+                },
+                Modal::Success {
+                    title: t2,
+                    message: m2,
+                },
+            ) => t1 == t2 && m1 == m2,
+            (
+                Modal::Input {
+                    title: t1,
+                    prompt: p1,
+                    default_value: d1,
+                    ..
+                },
+                Modal::Input {
+                    title: t2,
+                    prompt: p2,
+                    default_value: d2,
+                    ..
+                },
+            ) => t1 == t2 && p1 == p2 && d1 == d2,
             _ => false,
         }
     }
@@ -672,7 +741,7 @@ impl Model {
             last_screen: self.current_screen.clone(),
         }
     }
-    
+
     /// Create from persistent state
     pub fn from_persistent(state: PersistentState) -> Self {
         let mut model = Self::new(state.device_id);

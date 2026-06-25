@@ -5,13 +5,14 @@
 //! `#[ignore]` by default (real UDP/ICE on loopback, ~seconds). Run with:
 //!   cargo test -p starlab-cli --test e2e_dkg -- --ignored --nocapture
 
-use starlab_cli::simulate::{run_signing_simulation, run_simulation, SimulateOpts};
+use starlab_cli::simulate::{SimulateOpts, run_signing_simulation, run_simulation};
 
 fn init_logs() {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("starlab_client=warn,webrtc=warn")),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("starlab_client=warn,webrtc=warn")
+            }),
         )
         .with_test_writer()
         .try_init();
@@ -31,7 +32,11 @@ async fn dkg_2_of_2_completes_and_persists() {
     .await
     .expect("simulation ran");
 
-    assert!(result.agreed, "nodes disagreed on group key: {:?}", result.outcomes);
+    assert!(
+        result.agreed,
+        "nodes disagreed on group key: {:?}",
+        result.outcomes
+    );
     assert_eq!(result.outcomes.len(), 2);
     assert!(!result.group_public_key.is_empty());
     eprintln!(
@@ -54,7 +59,11 @@ async fn dkg_2_of_3_completes() {
     .await
     .expect("simulation ran");
 
-    assert!(result.agreed, "nodes disagreed on group key: {:?}", result.outcomes);
+    assert!(
+        result.agreed,
+        "nodes disagreed on group key: {:?}",
+        result.outcomes
+    );
     assert_eq!(result.outcomes.len(), 3);
 }
 
@@ -110,8 +119,14 @@ async fn reshare_then_sign_2_of_3_preserves_group_key() {
 
     assert!(r.key_preserved, "group key changed across reshare: {r:?}");
     assert_eq!(r.dkg_group_public_key, r.reshare_group_public_key);
-    assert!(r.signed_after_reshare, "refreshed shares failed to sign: {r:?}");
-    assert!(r.share_persisted, "refreshed share not persisted with same group key: {r:?}");
+    assert!(
+        r.signed_after_reshare,
+        "refreshed shares failed to sign: {r:?}"
+    );
+    assert!(
+        r.share_persisted,
+        "refreshed share not persisted with same group key: {r:?}"
+    );
     eprintln!(
         "✅ reshare e2e ok in {}ms, group preserved = {}",
         r.elapsed_ms, r.dkg_group_public_key

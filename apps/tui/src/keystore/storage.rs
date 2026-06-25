@@ -20,7 +20,7 @@ pub struct Keystore {
 
     /// Unique identifier for this device
     device_id: String,
-    
+
     /// Device name for this device
     device_name: String,
 
@@ -29,7 +29,6 @@ pub struct Keystore {
 }
 
 impl Keystore {
-
     /// Creates a new keystore at the specified path with the given device name.
     pub fn new(base_path: impl AsRef<Path>, device_name: &str) -> Result<Self> {
         let base_path = base_path.as_ref().to_path_buf();
@@ -51,44 +50,45 @@ impl Keystore {
             device_name,
             wallet_cache: Vec::new(),
         };
-        
+
         // Load wallet metadata from existing wallet files
         keystore.reload_wallet_cache()?;
-        
+
         // Migrate legacy files if needed
         keystore.migrate_legacy_files()?;
-        
+
         Ok(keystore)
     }
 
     /// Reloads the wallet cache by scanning all wallet files
     fn reload_wallet_cache(&mut self) -> Result<()> {
         self.wallet_cache.clear();
-        
+
         let device_dir = self.base_path.join(&self.device_id);
-        
+
         // Scan both curve directories
         for curve_type in &["ed25519", "secp256k1"] {
             let curve_dir = device_dir.join(curve_type);
             if !curve_dir.exists() {
                 continue;
             }
-            
+
             // Read all .json files in the directory
             for entry in fs::read_dir(&curve_dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                
+
                 if path.extension().and_then(|s| s.to_str()) == Some("json") {
                     // Try to read the wallet metadata
                     if let Ok(file) = File::open(&path)
-                        && let Ok(wallet_file) = serde_json::from_reader::<_, WalletFile>(file) {
-                            self.wallet_cache.push(wallet_file.metadata);
-                        }
+                        && let Ok(wallet_file) = serde_json::from_reader::<_, WalletFile>(file)
+                    {
+                        self.wallet_cache.push(wallet_file.metadata);
+                    }
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -112,7 +112,10 @@ impl Keystore {
         Some(DeviceInfo::new(
             self.device_id.clone(),
             self.device_name.clone(),
-            format!("device-{}", self.device_id.split('-').next().unwrap_or("unknown")),
+            format!(
+                "device-{}",
+                self.device_id.split('-').next().unwrap_or("unknown")
+            ),
         ))
     }
 
@@ -130,7 +133,7 @@ impl Keystore {
         group_public_key: &str,
         key_share_data: &[u8],
         password: &str,
-        _tags: Vec<String>, // Deprecated parameter
+        _tags: Vec<String>,           // Deprecated parameter
         _description: Option<String>, // Deprecated parameter
         participant_index: u16,
         // Full device_id list from the DKG session. Read back by
@@ -150,7 +153,8 @@ impl Keystore {
         // Check if a wallet with this ID already exists
         if self.get_wallet(&wallet_id).is_some() {
             return Err(KeystoreError::General(format!(
-                "Wallet with ID '{}' already exists", wallet_id
+                "Wallet with ID '{}' already exists",
+                wallet_id
             )));
         }
 
@@ -289,7 +293,10 @@ impl Keystore {
         password: &str,
         metadata: &WalletMetadata,
     ) -> Result<()> {
-        let wallet_dir = self.base_path.join(&self.device_id).join(&metadata.curve_type);
+        let wallet_dir = self
+            .base_path
+            .join(&self.device_id)
+            .join(&metadata.curve_type);
         fs::create_dir_all(&wallet_dir)?;
         let wallet_path = wallet_dir.join(format!("{}.json", wallet_id));
         let tmp_path = wallet_dir.join(format!(".{}.json.tmp", wallet_id));
@@ -297,7 +304,7 @@ impl Keystore {
         let method = crate::keystore::encryption::KeyDerivation::Pbkdf2;
         let encrypted_data =
             crate::keystore::encryption::encrypt_data_with_method(data, password, method)?;
-        use base64::{engine::general_purpose, Engine as _};
+        use base64::{Engine as _, engine::general_purpose};
         let base64_encrypted = general_purpose::STANDARD.encode(&encrypted_data);
         let wallet_file = WalletFile {
             version: "2.0".to_string(),
@@ -309,8 +316,9 @@ impl Keystore {
 
         {
             let mut file = File::create(&tmp_path)?;
-            serde_json::to_writer_pretty(&mut file, &wallet_file)
-                .map_err(|e| KeystoreError::General(format!("Failed to write wallet JSON: {}", e)))?;
+            serde_json::to_writer_pretty(&mut file, &wallet_file).map_err(|e| {
+                KeystoreError::General(format!("Failed to write wallet JSON: {}", e))
+            })?;
             file.sync_all()?; // durable before the rename
         }
         fs::rename(&tmp_path, &wallet_path)?; // atomic on the same filesystem
@@ -322,7 +330,7 @@ impl Keystore {
         &mut self,
         name: &str,
         curve_type: &str,
-        _blockchain: &str, // Ignored - addresses are derived from curve_type
+        _blockchain: &str,     // Ignored - addresses are derived from curve_type
         _public_address: &str, // Ignored - addresses are derived from group_public_key
         threshold: u16,
         total_participants: u16,
@@ -354,15 +362,36 @@ impl Keystore {
     }
 
     /// Saves encrypted wallet data to a file with embedded metadata (v2 format)
-    fn save_wallet_file_v2(&self, wallet_id: &str, data: &[u8], password: &str, metadata: &WalletMetadata) -> Result<()> {
-        self.save_wallet_file_v2_with_method(wallet_id, data, password, metadata, crate::keystore::encryption::KeyDerivation::Pbkdf2)
+    fn save_wallet_file_v2(
+        &self,
+        wallet_id: &str,
+        data: &[u8],
+        password: &str,
+        metadata: &WalletMetadata,
+    ) -> Result<()> {
+        self.save_wallet_file_v2_with_method(
+            wallet_id,
+            data,
+            password,
+            metadata,
+            crate::keystore::encryption::KeyDerivation::Pbkdf2,
+        )
     }
 
-
     /// Saves encrypted wallet data to a file with embedded metadata (v2 format) using specified encryption method
-    fn save_wallet_file_v2_with_method(&self, wallet_id: &str, data: &[u8], password: &str, metadata: &WalletMetadata, method: crate::keystore::encryption::KeyDerivation) -> Result<()> {
+    fn save_wallet_file_v2_with_method(
+        &self,
+        wallet_id: &str,
+        data: &[u8],
+        password: &str,
+        metadata: &WalletMetadata,
+        method: crate::keystore::encryption::KeyDerivation,
+    ) -> Result<()> {
         // Create device-specific wallet directory with curve type
-        let wallet_dir = self.base_path.join(&self.device_id).join(&metadata.curve_type);
+        let wallet_dir = self
+            .base_path
+            .join(&self.device_id)
+            .join(&metadata.curve_type);
 
         // Create the directory structure if it doesn't exist
         fs::create_dir_all(&wallet_dir)?;
@@ -371,12 +400,13 @@ impl Keystore {
         let wallet_path = wallet_dir.join(format!("{}.json", wallet_id));
 
         // Encrypt the wallet data using the specified method
-        let encrypted_data = crate::keystore::encryption::encrypt_data_with_method(data, password, method)?;
+        let encrypted_data =
+            crate::keystore::encryption::encrypt_data_with_method(data, password, method)?;
 
         // Convert encrypted data to base64 for JSON storage
         use base64::{Engine as _, engine::general_purpose};
         let base64_encrypted = general_purpose::STANDARD.encode(&encrypted_data);
-        
+
         // Create the wallet file with embedded metadata
         let wallet_file = WalletFile {
             version: "2.0".to_string(),
@@ -398,7 +428,8 @@ impl Keystore {
     /// [`Self::load_wallet_file_for_curve`] for unified wallets that store
     /// the same id under BOTH curve directories).
     pub fn load_wallet_file(&self, wallet_id: &str, password: &str) -> Result<Vec<u8>> {
-        let wallet = self.get_wallet(wallet_id)
+        let wallet = self
+            .get_wallet(wallet_id)
             .ok_or_else(|| KeystoreError::WalletNotFound(wallet_id.to_string()))?;
         let curve = wallet.curve_type.clone();
         self.load_wallet_file_for_curve(wallet_id, &curve, password)
@@ -414,29 +445,28 @@ impl Keystore {
         password: &str,
     ) -> Result<Vec<u8>> {
         // Device-specific wallet path with curve type
-        let wallet_dir = self
-            .base_path
-            .join(&self.device_id)
-            .join(curve_type);
-            
+        let wallet_dir = self.base_path.join(&self.device_id).join(curve_type);
+
         let json_path = wallet_dir.join(format!("{}.json", wallet_id));
-        
+
         if !json_path.exists() {
             return Err(KeystoreError::General(format!(
-                "Wallet file not found for {}", wallet_id
+                "Wallet file not found for {}",
+                wallet_id
             )));
         }
-        
+
         // Read JSON format
         let file = File::open(&json_path)
             .map_err(|e| KeystoreError::General(format!("Failed to open wallet file: {}", e)))?;
-        
+
         let wallet_file: WalletFile = serde_json::from_reader(file)
             .map_err(|e| KeystoreError::General(format!("Failed to parse wallet JSON: {}", e)))?;
-        
+
         // Decode from base64
         use base64::{Engine as _, engine::general_purpose};
-        let encrypted_data = general_purpose::STANDARD.decode(&wallet_file.data)
+        let encrypted_data = general_purpose::STANDARD
+            .decode(&wallet_file.data)
             .map_err(|e| KeystoreError::General(format!("Failed to decode base64 data: {}", e)))?;
 
         // Decrypt the data
@@ -445,74 +475,93 @@ impl Keystore {
         Ok(decrypted_data)
     }
 
-
-    
     /// Migrates legacy files to the new self-contained format
     fn migrate_legacy_files(&mut self) -> Result<()> {
         // Check if legacy index.json exists
         let index_path = self.base_path.join("index.json");
         let device_id_path = self.base_path.join("device_id");
-        
+
         if !index_path.exists() {
             // No legacy files to migrate
             return Ok(());
         }
-        
+
         println!("Found legacy index.json, migrating to new format...");
-        
+
         // Load the legacy index
         let index_file = File::open(&index_path)?;
         let legacy_index: KeystoreIndex = serde_json::from_reader(index_file)
             .map_err(|e| KeystoreError::General(format!("Failed to read legacy index: {}", e)))?;
-        
+
         // Migrate each wallet that belongs to this device
         for wallet_info in &legacy_index.wallets {
             // Check if this device has a share for this wallet
-            if wallet_info.devices.iter().any(|d| d.device_id == self.device_id) {
+            if wallet_info
+                .devices
+                .iter()
+                .any(|d| d.device_id == self.device_id)
+            {
                 // Try to find the wallet file
-                let wallet_dir = self.base_path.join(&self.device_id).join(&wallet_info.curve_type);
+                let wallet_dir = self
+                    .base_path
+                    .join(&self.device_id)
+                    .join(&wallet_info.curve_type);
                 let json_path = wallet_dir.join(format!("{}.json", wallet_info.wallet_id));
                 let dat_path = wallet_dir.join(format!("{}.dat", wallet_info.wallet_id));
-                
+
                 if json_path.exists() {
                     // Check if it's already v2 format
                     if let Ok(file) = File::open(&json_path)
                         && let Ok(wallet_file) = serde_json::from_reader::<_, WalletFile>(file)
-                            && wallet_file.version == "2.0" {
-                                // Already migrated
-                                continue;
-                            }
-                    
+                        && wallet_file.version == "2.0"
+                    {
+                        // Already migrated
+                        continue;
+                    }
+
                     // Read v1 JSON file
                     let file = File::open(&json_path)?;
-                    let v1_json: serde_json::Value = serde_json::from_reader(file)
-                        .map_err(|e| KeystoreError::General(format!("Failed to parse v1 JSON: {}", e)))?;
-                    
+                    let v1_json: serde_json::Value =
+                        serde_json::from_reader(file).map_err(|e| {
+                            KeystoreError::General(format!("Failed to parse v1 JSON: {}", e))
+                        })?;
+
                     // Find participant index for this device
-                    let participant_index = wallet_info.devices
+                    let participant_index = wallet_info
+                        .devices
                         .iter()
                         .position(|d| d.device_id == self.device_id)
                         .map(|i| i as u16 + 1) // 1-based index
                         .unwrap_or(1);
-                    
+
                     // Create v2 metadata
                     let metadata = WalletMetadata {
                         session_id: wallet_info.wallet_id.clone(),
                         device_id: self.device_id.clone(),
-                        label: None, // legacy import: no display label
+                        label: None,       // legacy import: no display label
                         device_name: None, // Deprecated field
                         curve_type: wallet_info.curve_type.clone(),
                         blockchain: wallet_info.blockchain.clone(),
                         public_address: wallet_info.public_address.clone(),
                         blockchains: if !wallet_info.blockchains.is_empty() {
                             wallet_info.blockchains.clone()
-                        } else if let (Some(blockchain), Some(address)) = (&wallet_info.blockchain, &wallet_info.public_address) {
+                        } else if let (Some(blockchain), Some(address)) =
+                            (&wallet_info.blockchain, &wallet_info.public_address)
+                        {
                             vec![crate::keystore::BlockchainInfo {
                                 blockchain: blockchain.clone(),
                                 network: "mainnet".to_string(),
-                                chain_id: if blockchain == "ethereum" { Some(1) } else { None },
+                                chain_id: if blockchain == "ethereum" {
+                                    Some(1)
+                                } else {
+                                    None
+                                },
                                 address: address.clone(),
-                                address_format: if blockchain == "ethereum" { "EIP-55".to_string() } else { "base58".to_string() },
+                                address_format: if blockchain == "ethereum" {
+                                    "EIP-55".to_string()
+                                } else {
+                                    "base58".to_string()
+                                },
                                 enabled: true,
                                 rpc_endpoint: None,
                                 metadata: None,
@@ -529,63 +578,89 @@ impl Keystore {
                         participants: Vec::new(),
                         identifier: None, // Deprecated field
                         group_public_key: wallet_info.group_public_key.clone(),
-                        created_at: chrono::DateTime::from_timestamp(wallet_info.created_at as i64, 0)
-                            .unwrap_or_default()
-                            .to_rfc3339(),
+                        created_at: chrono::DateTime::from_timestamp(
+                            wallet_info.created_at as i64,
+                            0,
+                        )
+                        .unwrap_or_default()
+                        .to_rfc3339(),
                         last_modified: chrono::Utc::now().to_rfc3339(),
-                        tags: None, // Deprecated field
+                        tags: None,        // Deprecated field
                         description: None, // Deprecated field
                     };
-                    
+
                     // Create v2 wallet file
                     let wallet_file = WalletFile {
                         version: "2.0".to_string(),
-                        encrypted: v1_json.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(true),
-                        algorithm: v1_json.get("algorithm").and_then(|v| v.as_str()).unwrap_or("AES-256-GCM").to_string(),
-                        data: v1_json.get("data").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        encrypted: v1_json
+                            .get("encrypted")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(true),
+                        algorithm: v1_json
+                            .get("algorithm")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("AES-256-GCM")
+                            .to_string(),
+                        data: v1_json
+                            .get("data")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         metadata,
                     };
-                    
+
                     // Write v2 file
                     let file = File::create(&json_path)?;
-                    serde_json::to_writer_pretty(file, &wallet_file)
-                        .map_err(|e| KeystoreError::General(format!("Failed to write v2 JSON: {}", e)))?;
-                    
+                    serde_json::to_writer_pretty(file, &wallet_file).map_err(|e| {
+                        KeystoreError::General(format!("Failed to write v2 JSON: {}", e))
+                    })?;
+
                     println!("Migrated wallet {} to v2 format", wallet_info.wallet_id);
                 } else if dat_path.exists() {
                     // Convert .dat to v2 JSON
                     let mut file = File::open(&dat_path)?;
                     let mut encrypted_data = Vec::new();
                     file.read_to_end(&mut encrypted_data)?;
-                    
+
                     use base64::{Engine as _, engine::general_purpose};
                     let base64_encrypted = general_purpose::STANDARD.encode(&encrypted_data);
-                    
+
                     // Find participant index
-                    let participant_index = wallet_info.devices
+                    let participant_index = wallet_info
+                        .devices
                         .iter()
                         .position(|d| d.device_id == self.device_id)
                         .map(|i| i as u16 + 1)
                         .unwrap_or(1);
-                    
+
                     // Create v2 metadata
                     let metadata = WalletMetadata {
                         session_id: wallet_info.wallet_id.clone(),
                         device_id: self.device_id.clone(),
-                        label: None, // legacy import: no display label
+                        label: None,       // legacy import: no display label
                         device_name: None, // Deprecated field
                         curve_type: wallet_info.curve_type.clone(),
                         blockchain: wallet_info.blockchain.clone(),
                         public_address: wallet_info.public_address.clone(),
                         blockchains: if !wallet_info.blockchains.is_empty() {
                             wallet_info.blockchains.clone()
-                        } else if let (Some(blockchain), Some(address)) = (&wallet_info.blockchain, &wallet_info.public_address) {
+                        } else if let (Some(blockchain), Some(address)) =
+                            (&wallet_info.blockchain, &wallet_info.public_address)
+                        {
                             vec![crate::keystore::BlockchainInfo {
                                 blockchain: blockchain.clone(),
                                 network: "mainnet".to_string(),
-                                chain_id: if blockchain == "ethereum" { Some(1) } else { None },
+                                chain_id: if blockchain == "ethereum" {
+                                    Some(1)
+                                } else {
+                                    None
+                                },
                                 address: address.clone(),
-                                address_format: if blockchain == "ethereum" { "EIP-55".to_string() } else { "base58".to_string() },
+                                address_format: if blockchain == "ethereum" {
+                                    "EIP-55".to_string()
+                                } else {
+                                    "base58".to_string()
+                                },
                                 enabled: true,
                                 rpc_endpoint: None,
                                 metadata: None,
@@ -602,14 +677,17 @@ impl Keystore {
                         participants: Vec::new(),
                         identifier: None, // Deprecated field
                         group_public_key: wallet_info.group_public_key.clone(),
-                        created_at: chrono::DateTime::from_timestamp(wallet_info.created_at as i64, 0)
-                            .unwrap_or_default()
-                            .to_rfc3339(),
+                        created_at: chrono::DateTime::from_timestamp(
+                            wallet_info.created_at as i64,
+                            0,
+                        )
+                        .unwrap_or_default()
+                        .to_rfc3339(),
                         last_modified: chrono::Utc::now().to_rfc3339(),
-                        tags: None, // Deprecated field
+                        tags: None,        // Deprecated field
                         description: None, // Deprecated field
                     };
-                    
+
                     // Create v2 wallet file
                     let wallet_file = WalletFile {
                         version: "2.0".to_string(),
@@ -618,33 +696,38 @@ impl Keystore {
                         data: base64_encrypted,
                         metadata,
                     };
-                    
+
                     // Write v2 JSON file
                     let json_file = File::create(&json_path)?;
-                    serde_json::to_writer_pretty(json_file, &wallet_file)
-                        .map_err(|e| KeystoreError::General(format!("Failed to write v2 JSON: {}", e)))?;
-                    
+                    serde_json::to_writer_pretty(json_file, &wallet_file).map_err(|e| {
+                        KeystoreError::General(format!("Failed to write v2 JSON: {}", e))
+                    })?;
+
                     // Delete old .dat file
                     fs::remove_file(&dat_path)?;
-                    
-                    println!("Converted wallet {} from .dat to v2 JSON format", wallet_info.wallet_id);
+
+                    println!(
+                        "Converted wallet {} from .dat to v2 JSON format",
+                        wallet_info.wallet_id
+                    );
                 }
             }
         }
-        
+
         // After successful migration, rename legacy files (don't delete in case something goes wrong)
         if let Err(_e) = fs::rename(&index_path, self.base_path.join("index.json.legacy")) {
             eprintln!("Warning: Failed to rename legacy index.json: {}", _e);
         }
-        
+
         if device_id_path.exists()
-            && let Err(_e) = fs::rename(&device_id_path, self.base_path.join("device_id.legacy")) {
-                eprintln!("Warning: Failed to rename legacy device_id file: {}", _e);
-            }
-        
+            && let Err(_e) = fs::rename(&device_id_path, self.base_path.join("device_id.legacy"))
+        {
+            eprintln!("Warning: Failed to rename legacy device_id file: {}", _e);
+        }
+
         // Reload the wallet cache
         self.reload_wallet_cache()?;
-        
+
         println!("Migration to v2 format completed successfully");
         Ok(())
     }
@@ -676,7 +759,11 @@ mod tests {
                 Vec::new(),
                 None,
                 1,
-                vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+                vec![
+                    "mpc-1".to_string(),
+                    "mpc-2".to_string(),
+                    "mpc-3".to_string(),
+                ],
                 None, // no display label in this test
             )
             .expect("create_wallet_multi_chain");
@@ -689,7 +776,11 @@ mod tests {
             .expect("wallet visible after reload");
         assert_eq!(
             wallet.participants,
-            vec!["mpc-1".to_string(), "mpc-2".to_string(), "mpc-3".to_string()],
+            vec![
+                "mpc-1".to_string(),
+                "mpc-2".to_string(),
+                "mpc-3".to_string()
+            ],
             "participants must round-trip through disk"
         );
         assert_eq!(wallet.threshold, 2);
@@ -705,28 +796,50 @@ mod tests {
         let group_key = "bb".repeat(33);
         let wallet_id = ks
             .create_wallet_multi_chain(
-                "resh-wallet", "secp256k1", Vec::new(), 2, 3,
-                group_key.as_str(), b"OLD-SHARE", "pw-123456789012", Vec::new(), None, 1,
+                "resh-wallet",
+                "secp256k1",
+                Vec::new(),
+                2,
+                3,
+                group_key.as_str(),
+                b"OLD-SHARE",
+                "pw-123456789012",
+                Vec::new(),
+                None,
+                1,
                 vec!["mpc-1".into(), "mpc-2".into(), "mpc-3".into()],
                 Some("My Wallet".into()),
             )
             .expect("create");
 
         ks.update_wallet_share(
-            &wallet_id, b"NEW-REFRESHED-SHARE", "pw-123456789012",
-            2, 2, vec!["mpc-1".into(), "mpc-3".into()], 1,
+            &wallet_id,
+            b"NEW-REFRESHED-SHARE",
+            "pw-123456789012",
+            2,
+            2,
+            vec!["mpc-1".into(), "mpc-3".into()],
+            1,
         )
         .expect("update_wallet_share");
 
         // Reload from disk → fresh Keystore.
         let ks2 = Keystore::new(tmp.path(), "mpc-1").expect("reload");
         let w = ks2.get_wallet(&wallet_id).expect("wallet after reshare");
-        assert_eq!(w.group_public_key, group_key, "address (group key) preserved");
+        assert_eq!(
+            w.group_public_key, group_key,
+            "address (group key) preserved"
+        );
         assert_eq!(w.total_participants, 2, "signer set shrank");
-        assert_eq!(w.participants, vec!["mpc-1".to_string(), "mpc-3".to_string()]);
+        assert_eq!(
+            w.participants,
+            vec!["mpc-1".to_string(), "mpc-3".to_string()]
+        );
         assert_eq!(w.label.as_deref(), Some("My Wallet"), "label preserved");
         // The refreshed share bytes are what load now.
-        let loaded = ks2.load_wallet_file(&wallet_id, "pw-123456789012").expect("decrypt");
+        let loaded = ks2
+            .load_wallet_file(&wallet_id, "pw-123456789012")
+            .expect("decrypt");
         assert_eq!(loaded, b"NEW-REFRESHED-SHARE");
     }
 

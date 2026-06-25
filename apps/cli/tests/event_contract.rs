@@ -10,9 +10,7 @@
 //! Regenerate intentionally after a *reviewed* protocol change:
 //!   BLESS=1 cargo test -p starlab-cli --test event_contract
 
-use starlab_cli::protocol::{
-    CliEvent, SessionEntry, WalletEntry, PROTOCOL_VERSION,
-};
+use starlab_cli::protocol::{CliEvent, PROTOCOL_VERSION, SessionEntry, WalletEntry};
 use starlab_cli::trace::normalize_event_line;
 
 /// One representative instance of every `CliEvent` variant, in declaration
@@ -32,13 +30,19 @@ fn all_events() -> Vec<CliEvent> {
             device_id: "node-a".into(),
             wallets: vec![sample_wallet()],
         },
-        CliEvent::SessionAvailable { session: sample_session() },
+        CliEvent::SessionAvailable {
+            session: sample_session(),
+        },
         CliEvent::SessionAnnounced {
             correlates: Some(7),
             session_id: "dkg_x".into(),
         },
-        CliEvent::Wallets { wallets: vec![sample_wallet()] },
-        CliEvent::Sessions { sessions: vec![sample_session()] },
+        CliEvent::Wallets {
+            wallets: vec![sample_wallet()],
+        },
+        CliEvent::Sessions {
+            sessions: vec![sample_session()],
+        },
         CliEvent::DkgProgress {
             session_id: "dkg_x".into(),
             round: 1,

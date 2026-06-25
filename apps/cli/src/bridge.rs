@@ -96,8 +96,11 @@ impl Bridge {
                     // the first entry only if canonical derivation fails.
                     let address = {
                         // Account 0's primary-chain address (BIP-44 model).
-                        let primary_chain =
-                            if curve_type == "ed25519" { "solana" } else { "ethereum" };
+                        let primary_chain = if curve_type == "ed25519" {
+                            "solana"
+                        } else {
+                            "ethereum"
+                        };
                         let primary = hex::decode(group_pubkey_hex)
                             .ok()
                             .and_then(|g| {
@@ -274,8 +277,9 @@ pub(crate) use starlab_core::accounts::chains_for_curve;
 /// if the key can't be decoded/derived (never fails the listing).
 pub(crate) fn derive_address(group_public_key_hex: &str, curve: &str, chain_key: &str) -> String {
     match hex::decode(group_public_key_hex) {
-        Ok(bytes) => starlab_core::accounts::address_for_chain(chain_key, curve, &bytes)
-            .unwrap_or_default(),
+        Ok(bytes) => {
+            starlab_core::accounts::address_for_chain(chain_key, curve, &bytes).unwrap_or_default()
+        }
         Err(_) => String::new(),
     }
 }
@@ -398,7 +402,8 @@ mod tests {
         let evts = b.on_sync(&model, None);
         // Disconnected on first sync.
         assert!(matches!(
-            evts.iter().find(|e| matches!(e, CliEvent::Connection { .. })),
+            evts.iter()
+                .find(|e| matches!(e, CliEvent::Connection { .. })),
             Some(CliEvent::Connection { connected: false })
         ));
         // CRITICAL (wallet-list race): the pre-scan empty model must NOT
@@ -426,7 +431,10 @@ mod tests {
         // every WalletsLoaded answers it — but never duplicates per sync.
         let evts2 = b.on_sync(&model, Some(&Message::WalletsLoaded { wallets: vec![] }));
         assert_eq!(
-            evts2.iter().filter(|e| matches!(e, CliEvent::Wallets { .. })).count(),
+            evts2
+                .iter()
+                .filter(|e| matches!(e, CliEvent::Wallets { .. }))
+                .count(),
             1
         );
     }
@@ -492,7 +500,10 @@ mod tests {
             curve_type: "ed25519".to_string(),
             addresses: vec![
                 ("sui".to_string(), "0xdeadbeefcafe".to_string()), // first, but wrong
-                ("solana".to_string(), "11111111111111111111111111111111".to_string()),
+                (
+                    "solana".to_string(),
+                    "11111111111111111111111111111111".to_string(),
+                ),
             ],
         };
         let addr = b
@@ -503,7 +514,10 @@ mod tests {
                 _ => None,
             })
             .expect("dkg_complete emitted");
-        assert!(!addr.starts_with("0x"), "ed25519 must not report a 0x address: {addr}");
+        assert!(
+            !addr.starts_with("0x"),
+            "ed25519 must not report a 0x address: {addr}"
+        );
         // Account 0's Solana address: a base58 string derived from the group
         // key (not the group key itself — BIP-44 model). Base58 of a 32-byte
         // key is 32–44 chars.
@@ -518,7 +532,10 @@ mod tests {
         // A real compressed secp256k1 group key from a DKG run.
         let key = "0207eb4473c42b74a8a3c72762af295c26fdd40dcaf14e2c65df89aeb6f89073cf";
         let addr = derive_address(key, "secp256k1", "ethereum");
-        assert!(addr.starts_with("0x"), "expected 0x-prefixed eth address, got {addr}");
+        assert!(
+            addr.starts_with("0x"),
+            "expected 0x-prefixed eth address, got {addr}"
+        );
         assert_eq!(addr.len(), 42, "eth address should be 20 bytes hex: {addr}");
     }
 
@@ -647,17 +664,20 @@ mod tests {
         };
         let first = b.on_sync(&model, Some(&msg));
         let ann = first.iter().find_map(|e| match e {
-            CliEvent::SessionAnnounced { session_id, correlates } => {
-                Some((session_id.clone(), *correlates))
-            }
+            CliEvent::SessionAnnounced {
+                session_id,
+                correlates,
+            } => Some((session_id.clone(), *correlates)),
             _ => None,
         });
         assert_eq!(ann, Some(("dkg_real_7".to_string(), None)));
         // Same id again → no duplicate announcement.
         let second = b.on_sync(&model, Some(&msg));
-        assert!(!second
-            .iter()
-            .any(|e| matches!(e, CliEvent::SessionAnnounced { .. })));
+        assert!(
+            !second
+                .iter()
+                .any(|e| matches!(e, CliEvent::SessionAnnounced { .. }))
+        );
     }
 
     #[test]
@@ -669,13 +689,17 @@ mod tests {
             session: sample_session("dkg_1"),
         };
         let first = b.on_sync(&model, Some(&msg));
-        assert!(first
-            .iter()
-            .any(|e| matches!(e, CliEvent::SessionAvailable { .. })));
+        assert!(
+            first
+                .iter()
+                .any(|e| matches!(e, CliEvent::SessionAvailable { .. }))
+        );
         // Same session id again → no duplicate event.
         let second = b.on_sync(&model, Some(&msg));
-        assert!(!second
-            .iter()
-            .any(|e| matches!(e, CliEvent::SessionAvailable { .. })));
+        assert!(
+            !second
+                .iter()
+                .any(|e| matches!(e, CliEvent::SessionAvailable { .. }))
+        );
     }
 }

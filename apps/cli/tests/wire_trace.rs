@@ -21,7 +21,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 
-use starlab_cli::simulate::{run_simulation, SimulateOpts};
+use starlab_cli::simulate::{SimulateOpts, run_simulation};
 
 /// A captured frame: direction (`C>` client→server, `S>` server→client) + the
 /// raw JSON text.
@@ -37,7 +37,11 @@ async fn spawn_record_proxy(upstream_url: String) -> (String, FrameLog) {
     let log_accept = log.clone();
     tokio::spawn(async move {
         while let Ok((stream, _)) = listener.accept().await {
-            tokio::spawn(bridge_conn(stream, upstream_url.clone(), log_accept.clone()));
+            tokio::spawn(bridge_conn(
+                stream,
+                upstream_url.clone(),
+                log_accept.clone(),
+            ));
         }
     });
     (format!("ws://127.0.0.1:{port}"), log)
@@ -98,7 +102,11 @@ async fn capture_dkg_frames(nodes: usize, threshold: u16) -> Vec<String> {
     })
     .await
     .expect("dkg through proxy");
-    assert!(r.agreed, "DKG did not agree through the proxy: {:?}", r.outcomes);
+    assert!(
+        r.agreed,
+        "DKG did not agree through the proxy: {:?}",
+        r.outcomes
+    );
 
     let frames = log.lock().unwrap().clone();
     frames
@@ -279,10 +287,10 @@ async fn dkg_wire_protocol_matches_golden() {
     // 2. Normalized shape of the two session-discovery frames the extension
     //    must produce/parse. (relay bodies are WebRTC transport — volatile —
     //    so only their presence is pinned, via the vocabulary.)
-    let announce = first_shape(&frames, 'C', "announce_session")
-        .expect("an announce_session frame");
-    let available = first_shape(&frames, 'S', "session_available")
-        .expect("a session_available frame");
+    let announce =
+        first_shape(&frames, 'C', "announce_session").expect("an announce_session frame");
+    let available =
+        first_shape(&frames, 'S', "session_available").expect("a session_available frame");
 
     let actual = format!(
         "# DKG wire-protocol contract (normalized)\n\n# type vocabulary\n{}\n\n# announce_session (client→server)\n{}\n\n# session_available (server→client)\n{}\n",

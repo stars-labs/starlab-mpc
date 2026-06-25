@@ -7,17 +7,15 @@
 //! generic signing. Existing secp256k1 keystores are untouched — this is an
 //! ADDITIONAL curve, not a replacement.
 
-use crate::{traits::FrostCurve, errors::{FrostError, Result}};
+use crate::{
+    errors::{FrostError, Result},
+    traits::FrostCurve,
+};
 use frost_secp256k1_tr::{
-    self,
-    Identifier, Signature,
-    keys::{
-        KeyPackage, PublicKeyPackage,
-        dkg,
-    },
+    self, Identifier, Signature, SigningPackage,
+    keys::{KeyPackage, PublicKeyPackage, dkg},
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
-    SigningPackage,
 };
 use rand_core::OsRng;
 use std::collections::BTreeMap;
@@ -58,9 +56,11 @@ impl FrostCurve for Secp256k1TrCurve {
     fn dkg_part2(
         round1_secret: Self::Round1SecretPackage,
         round1_packages: &BTreeMap<Self::Identifier, Self::Round1Package>,
-    ) -> Result<(Self::Round2SecretPackage, BTreeMap<Self::Identifier, Self::Round2Package>)> {
-        dkg::part2(round1_secret, round1_packages)
-            .map_err(|e| FrostError::DkgError(e.to_string()))
+    ) -> Result<(
+        Self::Round2SecretPackage,
+        BTreeMap<Self::Identifier, Self::Round2Package>,
+    )> {
+        dkg::part2(round1_secret, round1_packages).map_err(|e| FrostError::DkgError(e.to_string()))
     }
 
     fn dkg_part3(
@@ -93,7 +93,8 @@ impl FrostCurve for Secp256k1TrCurve {
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
         let mut rng = OsRng;
-        let (nonces, commitments) = frost_secp256k1_tr::round1::commit(key_package.signing_share(), &mut rng);
+        let (nonces, commitments) =
+            frost_secp256k1_tr::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))
     }
 
@@ -102,8 +103,9 @@ impl FrostCurve for Secp256k1TrCurve {
         nonces: &Self::SigningNonces,
         key_package: &Self::KeyPackage,
     ) -> Result<Self::SignatureShare> {
-        frost_secp256k1_tr::round2::sign(signing_package, nonces, key_package)
-            .map_err(|e| FrostError::SigningError(format!("Failed to generate signature share: {:?}", e)))
+        frost_secp256k1_tr::round2::sign(signing_package, nonces, key_package).map_err(|e| {
+            FrostError::SigningError(format!("Failed to generate signature share: {:?}", e))
+        })
     }
 
     fn aggregate_signature(
@@ -133,7 +135,6 @@ impl FrostCurve for Secp256k1TrCurve {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::resharing::{dkg_keypackages, refresh, threshold_sign_verify};
@@ -157,7 +158,10 @@ mod tests {
         let (_, pp) = dkg_keypackages::<Tr>(2, 2, 32).unwrap();
         let bytes = pp.verifying_key().serialize().unwrap();
         assert_eq!(bytes.len(), 33);
-        assert!(bytes[0] == 0x02 || bytes[0] == 0x03, "expected SEC1 parity prefix");
+        assert!(
+            bytes[0] == 0x02 || bytes[0] == 0x03,
+            "expected SEC1 parity prefix"
+        );
     }
 
     #[test]

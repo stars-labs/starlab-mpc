@@ -3,8 +3,8 @@
 //! This module defines the data structures needed to support the documented
 //! wallet creation flow with proper session discovery and announcement.
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 /// Session announcement for wallet creation discovery
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +16,7 @@ pub struct SessionAnnouncement {
     pub total: u16,
     pub threshold: u16,
     pub participants_joined: u16,
-    pub mode: String, // "Online", "Offline", "Hybrid"
+    pub mode: String,                    // "Online", "Offline", "Hybrid"
     pub blockchain_support: Vec<String>, // ["ethereum", "bitcoin", etc.]
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
@@ -56,7 +56,7 @@ impl SessionAnnouncement {
             let duration = self.expires_at - now;
             let hours = duration.num_hours();
             let minutes = duration.num_minutes() % 60;
-            
+
             if hours > 0 {
                 format!("{}h {}m", hours, minutes)
             } else {
@@ -92,9 +92,9 @@ pub struct SessionFilter {
     pub mode: Option<String>,         // "Online", "Offline", "Hybrid"
     pub min_threshold: Option<u16>,
     pub max_threshold: Option<u16>,
-    pub only_valid: bool,            // Only non-expired sessions
-    pub only_available: bool,        // Only sessions with space
-    pub tags: Vec<String>,           // Filter by tags
+    pub only_valid: bool,     // Only non-expired sessions
+    pub only_available: bool, // Only sessions with space
+    pub tags: Vec<String>,    // Filter by tags
 }
 
 impl Default for SessionFilter {
@@ -136,9 +136,9 @@ pub struct BlockchainConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SecurityLevel {
-    Standard,  // Default security settings
-    High,      // Enhanced verification and longer timeouts
-    Maximum,   // Maximum security with additional checks
+    Standard, // Default security settings
+    High,     // Enhanced verification and longer timeouts
+    Maximum,  // Maximum security with additional checks
 }
 
 /// Progress tracking for wallet creation sessions
@@ -207,24 +207,48 @@ pub enum EnhancedWebSocketMessage {
     // Session Management
     SessionAnnouncement(SessionAnnouncement),
     SessionUpdate(SessionUpdate),
-    SessionDiscovery { filter: Option<SessionFilter> },
-    SessionDiscoveryResponse { sessions: Vec<SessionAnnouncement> },
-    
+    SessionDiscovery {
+        filter: Option<SessionFilter>,
+    },
+    SessionDiscoveryResponse {
+        sessions: Vec<SessionAnnouncement>,
+    },
+
     // Participant Management
     ParticipantStatus(ParticipantStatus),
-    ParticipantReady { session_id: String, device_id: String },
-    ParticipantCapabilities { device_id: String, capabilities: ParticipantCapabilities },
-    
+    ParticipantReady {
+        session_id: String,
+        device_id: String,
+    },
+    ParticipantCapabilities {
+        device_id: String,
+        capabilities: ParticipantCapabilities,
+    },
+
     // Progress Tracking
     ProgressUpdate(WalletCreationSessionProgress),
-    
+
     // Error Handling
-    SessionError { session_id: String, error: String },
-    
+    SessionError {
+        session_id: String,
+        error: String,
+    },
+
     // Heartbeat and Connection Management
-    Heartbeat { device_id: String, timestamp: DateTime<Utc> },
-    ConnectionTest { from: String, to: String, test_id: String },
-    ConnectionTestResponse { test_id: String, success: bool, latency_ms: Option<u64> },
+    Heartbeat {
+        device_id: String,
+        timestamp: DateTime<Utc>,
+    },
+    ConnectionTest {
+        from: String,
+        to: String,
+        test_id: String,
+    },
+    ConnectionTestResponse {
+        test_id: String,
+        success: bool,
+        latency_ms: Option<u64>,
+    },
 }
 
 impl EnhancedWebSocketMessage {
@@ -242,9 +266,10 @@ impl EnhancedWebSocketMessage {
 
     /// Check if this message requires immediate handling
     pub fn is_urgent(&self) -> bool {
-        matches!(self, 
-            EnhancedWebSocketMessage::SessionError { .. } |
-            EnhancedWebSocketMessage::ConnectionTest { .. }
+        matches!(
+            self,
+            EnhancedWebSocketMessage::SessionError { .. }
+                | EnhancedWebSocketMessage::ConnectionTest { .. }
         )
     }
 }

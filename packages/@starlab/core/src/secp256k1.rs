@@ -1,19 +1,17 @@
-use crate::{traits::FrostCurve, errors::{FrostError, Result}};
+use crate::{
+    errors::{FrostError, Result},
+    traits::FrostCurve,
+};
 use frost_secp256k1::{
-    self,
-    Identifier, Signature,
-    keys::{
-        KeyPackage, PublicKeyPackage,
-        dkg,
-    },
+    self, Identifier, Signature, SigningPackage,
+    keys::{KeyPackage, PublicKeyPackage, dkg},
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
-    SigningPackage,
 };
-use rand_core::OsRng;
-use std::collections::BTreeMap;
-use sha3::{Digest, Keccak256};
 use k256::ecdsa::VerifyingKey as K256VerifyingKey;
+use rand_core::OsRng;
+use sha3::{Digest, Keccak256};
+use std::collections::BTreeMap;
 
 pub struct Secp256k1Curve;
 
@@ -51,9 +49,11 @@ impl FrostCurve for Secp256k1Curve {
     fn dkg_part2(
         round1_secret: Self::Round1SecretPackage,
         round1_packages: &BTreeMap<Self::Identifier, Self::Round1Package>,
-    ) -> Result<(Self::Round2SecretPackage, BTreeMap<Self::Identifier, Self::Round2Package>)> {
-        dkg::part2(round1_secret, round1_packages)
-            .map_err(|e| FrostError::DkgError(e.to_string()))
+    ) -> Result<(
+        Self::Round2SecretPackage,
+        BTreeMap<Self::Identifier, Self::Round2Package>,
+    )> {
+        dkg::part2(round1_secret, round1_packages).map_err(|e| FrostError::DkgError(e.to_string()))
     }
 
     fn dkg_part3(
@@ -85,7 +85,8 @@ impl FrostCurve for Secp256k1Curve {
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
         let mut rng = OsRng;
-        let (nonces, commitments) = frost_secp256k1::round1::commit(key_package.signing_share(), &mut rng);
+        let (nonces, commitments) =
+            frost_secp256k1::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))
     }
 
@@ -94,8 +95,9 @@ impl FrostCurve for Secp256k1Curve {
         nonces: &Self::SigningNonces,
         key_package: &Self::KeyPackage,
     ) -> Result<Self::SignatureShare> {
-        frost_secp256k1::round2::sign(signing_package, nonces, key_package)
-            .map_err(|e| FrostError::SigningError(format!("Failed to generate signature share: {:?}", e)))
+        frost_secp256k1::round2::sign(signing_package, nonces, key_package).map_err(|e| {
+            FrostError::SigningError(format!("Failed to generate signature share: {:?}", e))
+        })
     }
 
     fn aggregate_signature(
@@ -128,25 +130,28 @@ impl FrostCurve for Secp256k1Curve {
 // Additional Ethereum-specific functions
 impl Secp256k1Curve {
     pub fn get_eth_address(verifying_key: &frost_secp256k1::VerifyingKey) -> Result<String> {
-        let pubkey_bytes = verifying_key.serialize()
+        let pubkey_bytes = verifying_key
+            .serialize()
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
-        
+
         // Try to interpret as SEC1 uncompressed key
         if let Ok(k256_key) = K256VerifyingKey::from_sec1_bytes(&pubkey_bytes) {
             let uncompressed = k256_key.to_encoded_point(false);
             let uncompressed_bytes = uncompressed.as_bytes();
-            
+
             // Skip the 0x04 prefix for uncompressed keys
             let public_key_bytes = &uncompressed_bytes[1..];
-            
+
             // Compute Keccak256 hash
             let hash = Keccak256::digest(public_key_bytes);
-            
+
             // Take the last 20 bytes as the address
             let address_bytes = &hash[12..];
             Ok(format!("0x{}", hex::encode(address_bytes)))
         } else {
-            Err(FrostError::SerializationError("Failed to parse verifying key".to_string()))
+            Err(FrostError::SerializationError(
+                "Failed to parse verifying key".to_string(),
+            ))
         }
     }
 }

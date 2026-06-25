@@ -1,6 +1,6 @@
 //! Ethereum blockchain handler implementation
 
-use super::{BlockchainHandler, ParsedTransaction, SignatureData, Result, BlockchainError};
+use super::{BlockchainError, BlockchainHandler, ParsedTransaction, Result, SignatureData};
 
 pub struct EthereumHandler {
     // Can add configuration here if needed
@@ -16,13 +16,13 @@ impl EthereumHandler {
     pub fn new() -> Self {
         Self {}
     }
-    
+
     /// Parse Ethereum transaction and extract key fields
     fn parse_eth_transaction(tx_bytes: &[u8]) -> Result<(String, u64, serde_json::Value)> {
         // Basic validation
         if tx_bytes.is_empty() {
             return Err(BlockchainError::InvalidTransaction(
-                "Empty transaction data".to_string()
+                "Empty transaction data".to_string(),
             ));
         }
 
@@ -42,7 +42,7 @@ impl EthereumHandler {
             b => {
                 return Err(BlockchainError::InvalidTransaction(format!(
                     "unknown transaction envelope type 0x{b:02x}"
-                )))
+                )));
             }
         };
 
@@ -72,7 +72,9 @@ impl EthereumHandler {
             }
             _ => return Err(err("typed tx body is not an RLP list")),
         };
-        let item = rlp.get(payload_start..).ok_or_else(|| err("truncated RLP list"))?;
+        let item = rlp
+            .get(payload_start..)
+            .ok_or_else(|| err("truncated RLP list"))?;
         if item.is_empty() {
             return Err(err("empty RLP list"));
         }
@@ -84,7 +86,9 @@ impl EthereumHandler {
             // short string: 0x80+len, then big-endian bytes
             b if b <= 0x88 => {
                 let len = (b - 0x80) as usize;
-                let bytes = item.get(1..1 + len).ok_or_else(|| err("truncated chain id"))?;
+                let bytes = item
+                    .get(1..1 + len)
+                    .ok_or_else(|| err("truncated chain id"))?;
                 let mut v = 0u64;
                 for &x in bytes {
                     v = (v << 8) | x as u64;
@@ -100,31 +104,29 @@ impl BlockchainHandler for EthereumHandler {
     fn blockchain_id(&self) -> &str {
         "ethereum"
     }
-    
+
     fn curve_type(&self) -> &str {
         "secp256k1"
     }
-    
+
     fn parse_transaction(&self, tx_hex: &str) -> Result<ParsedTransaction> {
         // Remove 0x prefix if present
         let tx_hex = tx_hex.strip_prefix("0x").unwrap_or(tx_hex);
-        
+
         // Decode hex to bytes
         let raw_bytes = hex::decode(tx_hex)
-            .map_err(|e| BlockchainError::ParseError(
-                format!("Invalid hex transaction: {}", e)
-            ))?;
-        
+            .map_err(|e| BlockchainError::ParseError(format!("Invalid hex transaction: {}", e)))?;
+
         // Parse transaction
         let (hash, chain_id, metadata) = Self::parse_eth_transaction(&raw_bytes)?;
-        
+
         // Create summary
         let summary = format!(
             "Ethereum transaction on chain {} (size: {} bytes)",
             chain_id,
             raw_bytes.len()
         );
-        
+
         Ok(ParsedTransaction {
             raw_bytes,
             hash: format!("0x{}", hash),
@@ -133,34 +135,35 @@ impl BlockchainHandler for EthereumHandler {
             metadata,
         })
     }
-    
+
     fn format_for_signing(&self, tx: &ParsedTransaction) -> Result<Vec<u8>> {
         // For Ethereum, we sign the transaction hash (keccak256)
         use sha3::{Digest, Keccak256};
         let hash = Keccak256::digest(&tx.raw_bytes);
         Ok(hash.to_vec())
     }
-    
+
     fn serialize_signature(&self, signature_bytes: &[u8]) -> Result<SignatureData> {
         // FROST signatures are typically 64 bytes (r,s)
         if signature_bytes.len() < 64 {
-            return Err(BlockchainError::SignatureError(
-                format!("Invalid signature length: expected at least 64 bytes, got {}", signature_bytes.len())
-            ));
+            return Err(BlockchainError::SignatureError(format!(
+                "Invalid signature length: expected at least 64 bytes, got {}",
+                signature_bytes.len()
+            )));
         }
-        
+
         // For Ethereum, we need to format as r,s,v
         // FROST gives us the signature, but we need to calculate v (recovery id)
         // This is complex and requires the public key and message
-        
+
         // For now, return the raw signature
         // In production, calculate proper recovery ID
         let r = &signature_bytes[..32];
         let s = &signature_bytes[32..64];
-        
+
         // Format as 0x-prefixed hex
         let signature_hex = format!("0x{}{}", hex::encode(r), hex::encode(s));
-        
+
         Ok(SignatureData {
             signature: signature_hex,
             recovery_id: Some(27), // Placeholder - need proper calculation
@@ -170,12 +173,11 @@ impl BlockchainHandler for EthereumHandler {
             }),
         })
     }
-    
+
     fn get_tx_hash(&self, tx: &ParsedTransaction) -> String {
         tx.hash.clone()
     }
 }
-
 
 #[cfg(test)]
 mod tests {

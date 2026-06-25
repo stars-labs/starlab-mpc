@@ -8,11 +8,11 @@
 //!
 //! Run with: cargo run --example unified_dkg
 
-use starlab_core::hd_derivation::{ChainCode, derive_child_key};
-use starlab_core::unified_dkg::{UnifiedDkg, UnifiedRound1Package};
 use starlab_core::ed25519::Ed25519Curve;
+use starlab_core::hd_derivation::{ChainCode, derive_child_key};
 use starlab_core::secp256k1::Secp256k1Curve;
 use starlab_core::traits::FrostCurve;
+use starlab_core::unified_dkg::{UnifiedDkg, UnifiedRound1Package};
 use std::collections::BTreeMap;
 
 fn main() {
@@ -65,7 +65,11 @@ fn main() {
         .iter_mut()
         .enumerate()
         .map(|(i, p)| {
-            assert!(p.can_start_round2(), "participant {} not ready for round 2", i + 1);
+            assert!(
+                p.can_start_round2(),
+                "participant {} not ready for round 2",
+                i + 1
+            );
             let pkgs = p.generate_round2().expect("round2 failed");
             println!("  Participant {} generated round 2 packages", i + 1);
             pkgs
@@ -101,7 +105,11 @@ fn main() {
     let mut eth_addresses = Vec::new();
 
     for (i, p) in participants.iter_mut().enumerate() {
-        assert!(p.can_finalize(), "participant {} not ready to finalize", i + 1);
+        assert!(
+            p.can_finalize(),
+            "participant {} not ready to finalize",
+            i + 1
+        );
         let keystore = p.finalize_dkg().expect("finalize failed");
         println!("  Participant {} finalized DKG", i + 1);
         println!("    Ed25519 curve:   {}", keystore.ed25519.curve);
@@ -113,8 +121,18 @@ fn main() {
 
     // Verify all participants agree on addresses
     for i in 1..sol_addresses.len() {
-        assert_eq!(sol_addresses[0], sol_addresses[i], "Solana address mismatch for participant {}", i + 1);
-        assert_eq!(eth_addresses[0], eth_addresses[i], "Ethereum address mismatch for participant {}", i + 1);
+        assert_eq!(
+            sol_addresses[0],
+            sol_addresses[i],
+            "Solana address mismatch for participant {}",
+            i + 1
+        );
+        assert_eq!(
+            eth_addresses[0],
+            eth_addresses[i],
+            "Ethereum address mismatch for participant {}",
+            i + 1
+        );
     }
 
     println!("\n=== DKG Results ===");
@@ -130,22 +148,28 @@ fn main() {
 
     println!("\n=== Threshold Signing: Ed25519 (Solana) ===");
     println!("  Message: {:?}", String::from_utf8_lossy(message));
-    println!("  Signers: participants {:?}", signer_indices.iter().map(|i| i + 1).collect::<Vec<_>>());
+    println!(
+        "  Signers: participants {:?}",
+        signer_indices.iter().map(|i| i + 1).collect::<Vec<_>>()
+    );
 
     // Step 1: Each signer generates nonces and commitments
     let mut ed_nonces = BTreeMap::new();
     let mut ed_commitments = BTreeMap::new();
 
     for &idx in &signer_indices {
-        let key_pkg = participants[idx].ed25519_key_package().expect("no ed25519 key package");
-        let (nonces, commitments) = frost_ed25519::round1::commit(
-            key_pkg.signing_share(),
-            &mut rand_core::OsRng,
-        );
+        let key_pkg = participants[idx]
+            .ed25519_key_package()
+            .expect("no ed25519 key package");
+        let (nonces, commitments) =
+            frost_ed25519::round1::commit(key_pkg.signing_share(), &mut rand_core::OsRng);
         let id = *key_pkg.identifier();
         ed_nonces.insert(id, nonces);
         ed_commitments.insert(id, commitments);
-        println!("  Participant {} generated ed25519 signing commitment", idx + 1);
+        println!(
+            "  Participant {} generated ed25519 signing commitment",
+            idx + 1
+        );
     }
 
     // Step 2: Create signing package and generate signature shares
@@ -159,7 +183,10 @@ fn main() {
         let share = frost_ed25519::round2::sign(&ed_signing_pkg, nonces, key_pkg)
             .expect("ed25519 signing failed");
         ed_sig_shares.insert(id, share);
-        println!("  Participant {} generated ed25519 signature share", idx + 1);
+        println!(
+            "  Participant {} generated ed25519 signature share",
+            idx + 1
+        );
     }
 
     // Step 3: Aggregate and verify
@@ -172,7 +199,9 @@ fn main() {
         .verify(message, &ed_signature)
         .expect("ed25519 signature verification failed");
 
-    let ed_sig_bytes = ed_signature.serialize().expect("ed25519 sig serialize failed");
+    let ed_sig_bytes = ed_signature
+        .serialize()
+        .expect("ed25519 sig serialize failed");
     println!("  Ed25519 signature:  {}", hex::encode(&ed_sig_bytes));
     println!("  Verification: PASSED");
 
@@ -180,22 +209,28 @@ fn main() {
 
     println!("\n=== Threshold Signing: Secp256k1 (Ethereum) ===");
     println!("  Message: {:?}", String::from_utf8_lossy(message));
-    println!("  Signers: participants {:?}", signer_indices.iter().map(|i| i + 1).collect::<Vec<_>>());
+    println!(
+        "  Signers: participants {:?}",
+        signer_indices.iter().map(|i| i + 1).collect::<Vec<_>>()
+    );
 
     // Step 1: Each signer generates nonces and commitments
     let mut secp_nonces = BTreeMap::new();
     let mut secp_commitments = BTreeMap::new();
 
     for &idx in &signer_indices {
-        let key_pkg = participants[idx].secp256k1_key_package().expect("no secp256k1 key package");
-        let (nonces, commitments) = frost_secp256k1::round1::commit(
-            key_pkg.signing_share(),
-            &mut rand_core::OsRng,
-        );
+        let key_pkg = participants[idx]
+            .secp256k1_key_package()
+            .expect("no secp256k1 key package");
+        let (nonces, commitments) =
+            frost_secp256k1::round1::commit(key_pkg.signing_share(), &mut rand_core::OsRng);
         let id = *key_pkg.identifier();
         secp_nonces.insert(id, nonces);
         secp_commitments.insert(id, commitments);
-        println!("  Participant {} generated secp256k1 signing commitment", idx + 1);
+        println!(
+            "  Participant {} generated secp256k1 signing commitment",
+            idx + 1
+        );
     }
 
     // Step 2: Create signing package and generate signature shares
@@ -209,20 +244,26 @@ fn main() {
         let share = frost_secp256k1::round2::sign(&secp_signing_pkg, nonces, key_pkg)
             .expect("secp256k1 signing failed");
         secp_sig_shares.insert(id, share);
-        println!("  Participant {} generated secp256k1 signature share", idx + 1);
+        println!(
+            "  Participant {} generated secp256k1 signature share",
+            idx + 1
+        );
     }
 
     // Step 3: Aggregate and verify
     let secp_pub_pkg = participants[0].secp256k1_public_key_package().unwrap();
-    let secp_signature = frost_secp256k1::aggregate(&secp_signing_pkg, &secp_sig_shares, secp_pub_pkg)
-        .expect("secp256k1 aggregation failed");
+    let secp_signature =
+        frost_secp256k1::aggregate(&secp_signing_pkg, &secp_sig_shares, secp_pub_pkg)
+            .expect("secp256k1 aggregation failed");
 
     let secp_vk = secp_pub_pkg.verifying_key();
     secp_vk
         .verify(message, &secp_signature)
         .expect("secp256k1 signature verification failed");
 
-    let secp_sig_bytes = secp_signature.serialize().expect("secp256k1 sig serialize failed");
+    let secp_sig_bytes = secp_signature
+        .serialize()
+        .expect("secp256k1 sig serialize failed");
     println!("  Secp256k1 signature: {}", hex::encode(&secp_sig_bytes));
     println!("  Verification: PASSED");
 
@@ -233,8 +274,11 @@ fn main() {
     // Derive chain codes from group public keys
     let ed_pub_pkg = participants[0].ed25519_public_key_package().unwrap();
     let secp_pub_pkg = participants[0].secp256k1_public_key_package().unwrap();
-    let ed_vk_bytes = Ed25519Curve::serialize_verifying_key(&Ed25519Curve::verifying_key(ed_pub_pkg)).unwrap();
-    let secp_vk_bytes = Secp256k1Curve::serialize_verifying_key(&Secp256k1Curve::verifying_key(secp_pub_pkg)).unwrap();
+    let ed_vk_bytes =
+        Ed25519Curve::serialize_verifying_key(&Ed25519Curve::verifying_key(ed_pub_pkg)).unwrap();
+    let secp_vk_bytes =
+        Secp256k1Curve::serialize_verifying_key(&Secp256k1Curve::verifying_key(secp_pub_pkg))
+            .unwrap();
     let ed_chain_code = ChainCode::from_group_key(&ed_vk_bytes);
     let secp_chain_code = ChainCode::from_group_key(&secp_vk_bytes);
 
@@ -248,7 +292,8 @@ fn main() {
             participants[0].ed25519_public_key_package().unwrap(),
             &ed_chain_code,
             index,
-        ).expect("ed25519 child derivation failed");
+        )
+        .expect("ed25519 child derivation failed");
         let child_vk = derived.public_key_package.verifying_key();
         let child_vk_bytes = child_vk.serialize().expect("serialize child vk");
         let child_sol_addr = bs58::encode(&child_vk_bytes).into_string();
@@ -266,10 +311,11 @@ fn main() {
             participants[0].secp256k1_public_key_package().unwrap(),
             &secp_chain_code,
             index,
-        ).expect("secp256k1 child derivation failed");
+        )
+        .expect("secp256k1 child derivation failed");
         let child_vk = derived.public_key_package.verifying_key();
-        let child_eth_addr = Secp256k1Curve::get_eth_address(child_vk)
-            .expect("eth address from child key");
+        let child_eth_addr =
+            Secp256k1Curve::get_eth_address(child_vk).expect("eth address from child key");
         println!("  Child #{index}: {child_eth_addr}");
         child_eth_addresses.push((derived, child_eth_addr));
     }
@@ -297,10 +343,25 @@ fn main() {
                 participant.ed25519_public_key_package().unwrap(),
                 &ed_chain_code,
                 index,
-            ).unwrap();
-            let p_vk = p_ed_derived.public_key_package.verifying_key().serialize().unwrap();
-            let p0_vk = child_sol_addresses[index as usize].0.public_key_package.verifying_key().serialize().unwrap();
-            assert_eq!(p_vk, p0_vk, "participant {} disagrees on child ed25519 key at index {index}", p_idx + 1);
+            )
+            .unwrap();
+            let p_vk = p_ed_derived
+                .public_key_package
+                .verifying_key()
+                .serialize()
+                .unwrap();
+            let p0_vk = child_sol_addresses[index as usize]
+                .0
+                .public_key_package
+                .verifying_key()
+                .serialize()
+                .unwrap();
+            assert_eq!(
+                p_vk,
+                p0_vk,
+                "participant {} disagrees on child ed25519 key at index {index}",
+                p_idx + 1
+            );
         }
     }
     println!("  All {max_signers} participants agree on all child addresses!");
@@ -313,30 +374,33 @@ fn main() {
     let child_signer_indices: Vec<usize> = (0..min_signers as usize).collect();
 
     // Derive child keys for all signers at index 1
-    let child_ed_keys: Vec<_> = child_signer_indices.iter().map(|&idx| {
-        derive_child_key::<frost_ed25519::Ed25519Sha512>(
-            participants[idx].ed25519_key_package().unwrap(),
-            participants[idx].ed25519_public_key_package().unwrap(),
-            &ed_chain_code,
-            1,
-        ).unwrap()
-    }).collect();
+    let child_ed_keys: Vec<_> = child_signer_indices
+        .iter()
+        .map(|&idx| {
+            derive_child_key::<frost_ed25519::Ed25519Sha512>(
+                participants[idx].ed25519_key_package().unwrap(),
+                participants[idx].ed25519_public_key_package().unwrap(),
+                &ed_chain_code,
+                1,
+            )
+            .unwrap()
+        })
+        .collect();
 
     // Ed25519 child signing
     let mut child_ed_nonces = BTreeMap::new();
     let mut child_ed_commitments = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_ed_keys[i].key_package;
-        let (nonces, commitments) = frost_ed25519::round1::commit(
-            kp.signing_share(),
-            &mut rand_core::OsRng,
-        );
+        let (nonces, commitments) =
+            frost_ed25519::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
         let id = *kp.identifier();
         child_ed_nonces.insert(id, nonces);
         child_ed_commitments.insert(id, commitments);
     }
 
-    let child_ed_signing_pkg = frost_ed25519::SigningPackage::new(child_ed_commitments, child_message);
+    let child_ed_signing_pkg =
+        frost_ed25519::SigningPackage::new(child_ed_commitments, child_message);
     let mut child_ed_sig_shares = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_ed_keys[i].key_package;
@@ -347,50 +411,61 @@ fn main() {
     }
 
     let child_ed_pub = &child_ed_keys[0].public_key_package;
-    let child_ed_sig = frost_ed25519::aggregate(&child_ed_signing_pkg, &child_ed_sig_shares, child_ed_pub)
-        .expect("child ed25519 aggregation failed");
-    child_ed_pub.verifying_key()
+    let child_ed_sig =
+        frost_ed25519::aggregate(&child_ed_signing_pkg, &child_ed_sig_shares, child_ed_pub)
+            .expect("child ed25519 aggregation failed");
+    child_ed_pub
+        .verifying_key()
         .verify(child_message, &child_ed_sig)
         .expect("child ed25519 signature verification failed");
     println!("  Ed25519 child #1 signing:  PASSED");
 
     // Secp256k1 child signing
-    let child_secp_keys: Vec<_> = child_signer_indices.iter().map(|&idx| {
-        derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
-            participants[idx].secp256k1_key_package().unwrap(),
-            participants[idx].secp256k1_public_key_package().unwrap(),
-            &secp_chain_code,
-            1,
-        ).unwrap()
-    }).collect();
+    let child_secp_keys: Vec<_> = child_signer_indices
+        .iter()
+        .map(|&idx| {
+            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
+                participants[idx].secp256k1_key_package().unwrap(),
+                participants[idx].secp256k1_public_key_package().unwrap(),
+                &secp_chain_code,
+                1,
+            )
+            .unwrap()
+        })
+        .collect();
 
     let mut child_secp_nonces = BTreeMap::new();
     let mut child_secp_commitments = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_secp_keys[i].key_package;
-        let (nonces, commitments) = frost_secp256k1::round1::commit(
-            kp.signing_share(),
-            &mut rand_core::OsRng,
-        );
+        let (nonces, commitments) =
+            frost_secp256k1::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
         let id = *kp.identifier();
         child_secp_nonces.insert(id, nonces);
         child_secp_commitments.insert(id, commitments);
     }
 
-    let child_secp_signing_pkg = frost_secp256k1::SigningPackage::new(child_secp_commitments, child_message);
+    let child_secp_signing_pkg =
+        frost_secp256k1::SigningPackage::new(child_secp_commitments, child_message);
     let mut child_secp_sig_shares = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_secp_keys[i].key_package;
         let id = *kp.identifier();
-        let share = frost_secp256k1::round2::sign(&child_secp_signing_pkg, &child_secp_nonces[&id], kp)
-            .expect("child secp256k1 signing failed");
+        let share =
+            frost_secp256k1::round2::sign(&child_secp_signing_pkg, &child_secp_nonces[&id], kp)
+                .expect("child secp256k1 signing failed");
         child_secp_sig_shares.insert(id, share);
     }
 
     let child_secp_pub = &child_secp_keys[0].public_key_package;
-    let child_secp_sig = frost_secp256k1::aggregate(&child_secp_signing_pkg, &child_secp_sig_shares, child_secp_pub)
-        .expect("child secp256k1 aggregation failed");
-    child_secp_pub.verifying_key()
+    let child_secp_sig = frost_secp256k1::aggregate(
+        &child_secp_signing_pkg,
+        &child_secp_sig_shares,
+        child_secp_pub,
+    )
+    .expect("child secp256k1 aggregation failed");
+    child_secp_pub
+        .verifying_key()
         .verify(child_message, &child_secp_sig)
         .expect("child secp256k1 signature verification failed");
     println!("  Secp256k1 child #1 signing: PASSED");
@@ -406,9 +481,21 @@ fn main() {
     println!("  Base Ethereum:    {}", eth_addresses[0]);
     println!("  Child Solana:     3 derived (indices 0-2)");
     println!("  Child Ethereum:   3 derived (indices 0-2)");
-    println!("  Base ed25519:     {} signers → valid signature", min_signers);
-    println!("  Base secp256k1:   {} signers → valid signature", min_signers);
-    println!("  Child ed25519:    {} signers → valid signature (child #1)", min_signers);
-    println!("  Child secp256k1:  {} signers → valid signature (child #1)", min_signers);
+    println!(
+        "  Base ed25519:     {} signers → valid signature",
+        min_signers
+    );
+    println!(
+        "  Base secp256k1:   {} signers → valid signature",
+        min_signers
+    );
+    println!(
+        "  Child ed25519:    {} signers → valid signature (child #1)",
+        min_signers
+    );
+    println!(
+        "  Child secp256k1:  {} signers → valid signature (child #1)",
+        min_signers
+    );
     println!("{}", "=".repeat(60));
 }

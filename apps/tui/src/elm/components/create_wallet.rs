@@ -1,17 +1,17 @@
 //! Create Wallet screen — collects wallet name + threshold/total + curve.
 
-use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
+use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;
 use crate::elm::model::CreateWalletState;
 
-use tuirealm::command::{Cmd, CmdResult, Direction};
-use tuirealm::event::Event;
-use ratatui::layout::{Rect, Constraint, Direction as LayoutDirection, Layout, Alignment};
+use ratatui::layout::{Alignment, Constraint, Direction as LayoutDirection, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Borders, BorderType, Block, Paragraph, ListItem, List, ListState};
+use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph};
+use tuirealm::command::{Cmd, CmdResult, Direction};
 use tuirealm::component::{AppComponent, Component};
-use tuirealm::ratatui::Frame;
+use tuirealm::event::Event;
 use tuirealm::props::Props;
+use tuirealm::ratatui::Frame;
 use tuirealm::state::{State, StateValue};
 
 /// Enhanced Create Wallet component using stdlib styling
@@ -41,7 +41,7 @@ impl Default for CreateWalletComponent {
 impl CreateWalletComponent {
     pub fn new() -> Self {
         let props = Props::default();
-        
+
         Self {
             props,
             selected: 0,
@@ -49,10 +49,10 @@ impl CreateWalletComponent {
             wallet_state: None,
         }
     }
-    
+
     pub fn with_state(state: Option<CreateWalletState>) -> Self {
         let props = Props::default();
-        
+
         Self {
             props,
             selected: 0,
@@ -60,20 +60,28 @@ impl CreateWalletComponent {
             wallet_state: state,
         }
     }
-    
+
     /// Set the selected index
     pub fn set_selected(&mut self, index: usize) {
         let old_selected = self.selected;
         self.selected = index.min(2); // 3 items (0-2)
-        tracing::debug!("🎯 CreateWalletComponent::set_selected: {} -> {}", old_selected, self.selected);
+        tracing::debug!(
+            "🎯 CreateWalletComponent::set_selected: {} -> {}",
+            old_selected,
+            self.selected
+        );
     }
 
     fn get_wallet_steps(&self) -> Vec<WalletStep> {
-        let mode_completed = self.wallet_state.as_ref()
+        let mode_completed = self
+            .wallet_state
+            .as_ref()
             .and_then(|s| s.mode.as_ref())
             .is_some();
 
-        let template_completed = self.wallet_state.as_ref()
+        let template_completed = self
+            .wallet_state
+            .as_ref()
             .and_then(|s| s.template.as_ref())
             .is_some();
 
@@ -105,42 +113,48 @@ impl CreateWalletComponent {
 
 impl Component for CreateWalletComponent {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
-        tracing::debug!("🎨 CreateWalletComponent::view - rendering with selected: {}, focused: {}", 
-                       self.selected, self.focused);
-        
+        tracing::debug!(
+            "🎨 CreateWalletComponent::view - rendering with selected: {}, focused: {}",
+            self.selected,
+            self.focused
+        );
+
         // Create professional layout
         let chunks = Layout::default()
             .direction(LayoutDirection::Vertical)
             .constraints([
-                Constraint::Length(5),    // Header with title and subtitle
-                Constraint::Min(0),       // Main content area
-                Constraint::Length(4),    // Footer with progress and controls
+                Constraint::Length(5), // Header with title and subtitle
+                Constraint::Min(0),    // Main content area
+                Constraint::Length(4), // Footer with progress and controls
             ])
             .margin(1)
             .split(area);
-        
+
         // Enhanced header section
         self.render_header(frame, chunks[0]);
-        
+
         // Main content with wallet steps
         self.render_steps(frame, chunks[1]);
-        
+
         // Enhanced footer with progress and controls
         self.render_footer(frame, chunks[2]);
     }
-    
-    fn query<'a>(&'a self, attr: tuirealm::props::Attribute) -> Option<tuirealm::props::QueryResult<'a>> {
+
+    fn query<'a>(
+        &'a self,
+        attr: tuirealm::props::Attribute,
+    ) -> Option<tuirealm::props::QueryResult<'a>> {
         self.props.get_for_query(attr)
     }
-    
+
     fn attr(&mut self, attr: tuirealm::props::Attribute, value: tuirealm::props::AttrValue) {
         self.props.set(attr, value);
     }
-    
+
     fn state(&self) -> tuirealm::state::State {
         State::Single(StateValue::Usize(self.selected))
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Move(Direction::Up) => {
@@ -159,9 +173,7 @@ impl Component for CreateWalletComponent {
                 }
                 CmdResult::Changed(self.state())
             }
-            Cmd::Submit => {
-                CmdResult::Submit(self.state())
-            }
+            Cmd::Submit => CmdResult::Submit(self.state()),
             _ => CmdResult::NoChange,
         }
     }
@@ -171,18 +183,15 @@ impl CreateWalletComponent {
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         let header_chunks = Layout::default()
             .direction(LayoutDirection::Vertical)
-            .constraints([
-                Constraint::Length(3),
-                Constraint::Length(2),
-            ])
+            .constraints([Constraint::Length(3), Constraint::Length(2)])
             .split(area);
-        
+
         // Main title
         let title = Paragraph::new("🏦 MPC Wallet Setup Wizard")
             .style(
                 Style::default()
                     .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             )
             .alignment(Alignment::Center)
             .block(
@@ -191,27 +200,35 @@ impl CreateWalletComponent {
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Color::Cyan))
                     .title(" Create New Wallet ")
-                    .title_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
             );
         frame.render_widget(title, header_chunks[0]);
-        
+
         // Subtitle
         let subtitle = Paragraph::new("Professional Multi-Party Computation Wallet Creation")
-            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
+            .style(
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            )
             .alignment(Alignment::Center);
         frame.render_widget(subtitle, header_chunks[1]);
     }
-    
+
     fn render_steps(&self, frame: &mut Frame, area: Rect) {
         let steps = self.get_wallet_steps();
-        
+
         let items: Vec<ListItem> = steps
             .iter()
             .enumerate()
             .map(|(i, step)| {
                 let is_selected = i == self.selected;
                 let is_current = i <= self.selected;
-                
+
                 // Create status indicator
                 let status_icon = if step.completed {
                     "✅"
@@ -222,7 +239,7 @@ impl CreateWalletComponent {
                 } else {
                     "⚪"
                 };
-                
+
                 // Create step content
                 let content = if is_selected {
                     // Show expanded view for selected item
@@ -236,14 +253,9 @@ impl CreateWalletComponent {
                     )
                 } else {
                     // Show compact view for non-selected items
-                    format!(
-                        "{} {} {}",
-                        status_icon,
-                        step.icon,
-                        step.title
-                    )
+                    format!("{} {} {}", status_icon, step.icon, step.title)
                 };
-                
+
                 let style = if is_selected {
                     Style::default()
                         .fg(Color::Yellow)
@@ -253,37 +265,41 @@ impl CreateWalletComponent {
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
-                
+
                 ListItem::new(content).style(style)
             })
             .collect();
-        
+
         let list = List::new(items)
             .block(
                 Block::default()
                     .title(" Wallet Creation Steps ")
-                    .title_style(Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                    .title_style(
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(if self.focused {
                         Style::default().fg(Color::Yellow)
                     } else {
                         Style::default().fg(Color::Gray)
-                    })
+                    }),
             )
             .highlight_style(
                 Style::default()
                     .bg(Color::Yellow)
                     .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::BOLD),
             );
-        
+
         let mut list_state = ListState::default();
         list_state.select(Some(self.selected));
-        
+
         frame.render_stateful_widget(list, area, &mut list_state);
     }
-    
+
     fn render_footer(&self, frame: &mut Frame, area: Rect) {
         let footer_chunks = Layout::default()
             .direction(LayoutDirection::Vertical)
@@ -293,41 +309,49 @@ impl CreateWalletComponent {
                 Constraint::Length(2),
             ])
             .split(area);
-        
+
         // Progress indicator
         let progress = format!("Progress: Step {} of 3", self.selected + 1);
         let progress_widget = Paragraph::new(progress)
             .style(Style::default().fg(Color::Cyan))
             .alignment(Alignment::Center);
         frame.render_widget(progress_widget, footer_chunks[0]);
-        
+
         // Current step info
         let steps = self.get_wallet_steps();
         let current_step = &steps[self.selected];
         let step_info = format!("Current: {} {}", current_step.icon, current_step.title);
         let step_widget = Paragraph::new(step_info)
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+            .style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
             .alignment(Alignment::Center);
         frame.render_widget(step_widget, footer_chunks[1]);
-        
+
         // Controls
         let controls = if self.focused {
             "🎮 ↑↓ Navigate Steps • Enter: Continue • Esc: Return to Main Menu"
         } else {
             "💡 Press Tab to focus • Professional MPC Wallet Creation"
         };
-        
+
         let controls_widget = Paragraph::new(controls)
             .style(
                 Style::default()
-                    .fg(if self.focused { Color::Green } else { Color::Gray })
-                    .add_modifier(Modifier::ITALIC)
+                    .fg(if self.focused {
+                        Color::Green
+                    } else {
+                        Color::Gray
+                    })
+                    .add_modifier(Modifier::ITALIC),
             )
             .alignment(Alignment::Center)
             .block(
                 Block::default()
                     .borders(Borders::TOP)
-                    .border_style(Style::default().fg(Color::DarkGray))
+                    .border_style(Style::default().fg(Color::DarkGray)),
             );
         frame.render_widget(controls_widget, footer_chunks[2]);
     }
@@ -356,11 +380,11 @@ impl MpcWalletComponent for CreateWalletComponent {
     fn id(&self) -> Id {
         Id::CreateWallet
     }
-    
+
     fn is_visible(&self) -> bool {
         true
     }
-    
+
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
     }

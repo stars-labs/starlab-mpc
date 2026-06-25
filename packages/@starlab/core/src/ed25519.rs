@@ -1,14 +1,12 @@
-use crate::{traits::FrostCurve, errors::{FrostError, Result}};
+use crate::{
+    errors::{FrostError, Result},
+    traits::FrostCurve,
+};
 use frost_ed25519::{
-    self,
-    Identifier, Signature,
-    keys::{
-        KeyPackage, PublicKeyPackage,
-        dkg,
-    },
+    self, Identifier, Signature, SigningPackage,
+    keys::{KeyPackage, PublicKeyPackage, dkg},
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
-    SigningPackage,
 };
 use rand_core::OsRng;
 use std::collections::BTreeMap;
@@ -49,9 +47,11 @@ impl FrostCurve for Ed25519Curve {
     fn dkg_part2(
         round1_secret: Self::Round1SecretPackage,
         round1_packages: &BTreeMap<Self::Identifier, Self::Round1Package>,
-    ) -> Result<(Self::Round2SecretPackage, BTreeMap<Self::Identifier, Self::Round2Package>)> {
-        dkg::part2(round1_secret, round1_packages)
-            .map_err(|e| FrostError::DkgError(e.to_string()))
+    ) -> Result<(
+        Self::Round2SecretPackage,
+        BTreeMap<Self::Identifier, Self::Round2Package>,
+    )> {
+        dkg::part2(round1_secret, round1_packages).map_err(|e| FrostError::DkgError(e.to_string()))
     }
 
     fn dkg_part3(
@@ -81,7 +81,8 @@ impl FrostCurve for Ed25519Curve {
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
         let mut rng = OsRng;
-        let (nonces, commitments) = frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
+        let (nonces, commitments) =
+            frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))
     }
 
@@ -90,8 +91,9 @@ impl FrostCurve for Ed25519Curve {
         nonces: &Self::SigningNonces,
         key_package: &Self::KeyPackage,
     ) -> Result<Self::SignatureShare> {
-        frost_ed25519::round2::sign(signing_package, nonces, key_package)
-            .map_err(|e| FrostError::SigningError(format!("Failed to generate signature share: {:?}", e)))
+        frost_ed25519::round2::sign(signing_package, nonces, key_package).map_err(|e| {
+            FrostError::SigningError(format!("Failed to generate signature share: {:?}", e))
+        })
     }
 
     fn aggregate_signature(

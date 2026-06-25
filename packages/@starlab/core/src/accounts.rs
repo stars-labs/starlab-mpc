@@ -12,7 +12,7 @@
 //! in one place is what guarantees it byte-for-byte.
 
 use crate::errors::{FrostError, Result};
-use crate::hd_derivation::{derive_child_verifying_key_path, DerivationPath};
+use crate::hd_derivation::{DerivationPath, derive_child_verifying_key_path};
 
 /// (config key, display name) of the chains a curve's key controls.
 /// EVM L2s share the Ethereum address and are deliberately not listed.
@@ -139,7 +139,7 @@ pub fn account_addresses(
             other => {
                 return Err(FrostError::DerivationError(format!(
                     "unsupported curve {other}"
-                )))
+                )));
             }
         };
         out.push((

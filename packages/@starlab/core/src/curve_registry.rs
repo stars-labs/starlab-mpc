@@ -361,7 +361,10 @@ mod tests {
         let first = &outputs[0].group_public_key_hex;
         assert!(!first.is_empty(), "group key must be set");
         for o in outputs {
-            assert_eq!(&o.group_public_key_hex, first, "all participants must agree");
+            assert_eq!(
+                &o.group_public_key_hex, first,
+                "all participants must agree"
+            );
         }
     }
 
@@ -389,9 +392,9 @@ mod tests {
     #[test]
     fn third_curve_registers_without_engine_edits() {
         let mut reg = CurveRegistry::with_default_curves();
-        reg.register(FrostCurveDkg::<frost_ristretto255::Ristretto255Sha512>::boxed(
-            "ristretto255",
-        ));
+        reg.register(
+            FrostCurveDkg::<frost_ristretto255::Ristretto255Sha512>::boxed("ristretto255"),
+        );
         assert_eq!(reg.tags(), vec!["ed25519", "secp256k1", "ristretto255"]);
 
         let out = run_dkg_simulation(&reg, &roots(3), 2, 0).unwrap();
@@ -419,7 +422,11 @@ mod tests {
     #[should_panic(expected = "already registered")]
     fn duplicate_tag_panics() {
         let mut reg = CurveRegistry::new();
-        reg.register(FrostCurveDkg::<frost_ed25519::Ed25519Sha512>::boxed("ed25519"));
-        reg.register(FrostCurveDkg::<frost_secp256k1::Secp256K1Sha256>::boxed("ed25519"));
+        reg.register(FrostCurveDkg::<frost_ed25519::Ed25519Sha512>::boxed(
+            "ed25519",
+        ));
+        reg.register(FrostCurveDkg::<frost_secp256k1::Secp256K1Sha256>::boxed(
+            "ed25519",
+        ));
     }
 }

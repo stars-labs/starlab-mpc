@@ -1,13 +1,9 @@
 //! Export functionality for offline data
 
-use std::path::Path;
+use super::{OfflineError, Result, create_filename, types::*};
 use std::fs::{self, File};
 use std::io::Write;
-use super::{
-    types::*,
-    OfflineError, Result,
-    create_filename,
-};
+use std::path::Path;
 
 /// Export signing request to file
 pub fn export_signing_request(
@@ -22,7 +18,7 @@ pub fn export_signing_request(
         request,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&data, output_path)
 }
 
@@ -38,7 +34,7 @@ pub fn export_commitments(
         commitments,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&data, output_path)
 }
 
@@ -54,7 +50,7 @@ pub fn export_signing_package(
         package,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&data, output_path)
 }
 
@@ -70,7 +66,7 @@ pub fn export_signature_share(
         share,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&data, output_path)
 }
 
@@ -86,7 +82,7 @@ pub fn export_aggregated_signature(
         signature,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&data, output_path)
 }
 
@@ -96,16 +92,16 @@ fn write_offline_data(data: &OfflineData, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    
+
     // Serialize to pretty JSON
     let json = serde_json::to_string_pretty(data)
         .map_err(|e| OfflineError::SerializationError(e.to_string()))?;
-    
+
     // Write to file
     let mut file = File::create(path)?;
     file.write_all(json.as_bytes())?;
     file.sync_all()?;
-    
+
     Ok(())
 }
 
@@ -120,7 +116,7 @@ pub fn export_with_standard_name(
 ) -> Result<String> {
     let filename = create_filename(data_type, session_id, device_id);
     let output_path = output_dir.join(&filename);
-    
+
     let offline_data = OfflineData::new(
         match data_type {
             "request" => OfflineDataType::SigningRequest,
@@ -128,14 +124,19 @@ pub fn export_with_standard_name(
             "package" => OfflineDataType::SigningPackage,
             "share" => OfflineDataType::SignatureShare,
             "signature" => OfflineDataType::AggregatedSignature,
-            _ => return Err(OfflineError::InvalidFormat(format!("Unknown data type: {}", data_type))),
+            _ => {
+                return Err(OfflineError::InvalidFormat(format!(
+                    "Unknown data type: {}",
+                    data_type
+                )));
+            }
         },
         session_id.to_string(),
         data,
         expiration_minutes,
     )?;
-    
+
     write_offline_data(&offline_data, &output_path)?;
-    
+
     Ok(filename)
 }

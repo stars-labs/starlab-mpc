@@ -2,7 +2,7 @@
 //!
 //! Displays the list of available wallets with their metadata.
 
-use crate::elm::components::{Id, UserEvent, MpcWalletComponent};
+use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;
 use crate::keystore::WalletMetadata;
 
@@ -12,10 +12,12 @@ use tuirealm::props::{Color, Style, TextModifiers};
 // tuirealm 4.0 split Alignment into horizontal/vertical. For widget
 // layout we want ratatui's plain Alignment.
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::widgets::{Block, BorderType as TuiBorderType, Borders as TuiBorders, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{
+    Block, BorderType as TuiBorderType, Borders as TuiBorders, List, ListItem, ListState, Paragraph,
+};
 use tuirealm::component::{AppComponent, Component};
-use tuirealm::ratatui::Frame;
 use tuirealm::props::Props;
+use tuirealm::ratatui::Frame;
 use tuirealm::state::{State, StateValue};
 
 /// Wallet list component
@@ -37,9 +39,12 @@ impl Default for WalletList {
 impl WalletList {
     pub fn new() -> Self {
         let mut props = Props::default();
-        props.set(tuirealm::props::Attribute::Title, tuirealm::props::AttrValue::String("Manage Wallets".to_string()));
+        props.set(
+            tuirealm::props::Attribute::Title,
+            tuirealm::props::AttrValue::String("Manage Wallets".to_string()),
+        );
         // Set borders - tuirealm doesn't have Borders::ALL, so we use default
-        
+
         Self {
             props,
             wallets: Vec::new(),
@@ -48,7 +53,7 @@ impl WalletList {
             scroll_offset: 0,
         }
     }
-    
+
     pub fn set_wallets(&mut self, wallets: Vec<WalletMetadata>) {
         self.wallets = wallets;
         if self.selected >= self.wallets.len() && !self.wallets.is_empty() {
@@ -83,7 +88,7 @@ impl WalletList {
             }
         }
     }
-    
+
     fn move_down(&mut self) {
         if self.selected < self.wallets.len().saturating_sub(1) {
             self.selected += 1;
@@ -94,9 +99,11 @@ impl WalletList {
             }
         }
     }
-    
+
     fn select_current(&self) -> Option<Message> {
-        self.wallets.get(self.selected).map(|wallet| Message::SelectWallet {
+        self.wallets
+            .get(self.selected)
+            .map(|wallet| Message::SelectWallet {
                 wallet_id: wallet.session_id.clone(),
             })
     }
@@ -108,11 +115,11 @@ impl Component for WalletList {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(5),      // List area
-                Constraint::Length(4),   // Details area
+                Constraint::Min(5),    // List area
+                Constraint::Length(4), // Details area
             ])
             .split(area);
-        
+
         // Render wallet list
         if self.wallets.is_empty() {
             // Show empty state
@@ -126,21 +133,22 @@ impl Component for WalletList {
                             Style::default().fg(Color::Cyan)
                         } else {
                             Style::default().fg(Color::Gray)
-                        })
+                        }),
                 )
                 .style(Style::default().fg(Color::DarkGray))
                 .alignment(Alignment::Center);
-            
+
             frame.render_widget(empty_msg, chunks[0]);
         } else {
             // Create list items
-            let items: Vec<ListItem> = self.wallets
+            let items: Vec<ListItem> = self
+                .wallets
                 .iter()
                 .enumerate()
                 .skip(self.scroll_offset)
                 .map(|(i, wallet)| {
                     let is_selected = i == self.selected;
-                    
+
                     let style = if is_selected {
                         if self.focused {
                             Style::default()
@@ -154,7 +162,7 @@ impl Component for WalletList {
                     } else {
                         Style::default().fg(Color::Gray)
                     };
-                    
+
                     let prefix = if is_selected { "► " } else { "  " };
                     // Disambiguate wallets visually: show a longer
                     // session_id slice (was 12 → truncated at
@@ -170,11 +178,7 @@ impl Component for WalletList {
                     } else {
                         display.to_string()
                     };
-                    let key_prefix = wallet
-                        .group_public_key
-                        .chars()
-                        .take(10)
-                        .collect::<String>();
+                    let key_prefix = wallet.group_public_key.chars().take(10).collect::<String>();
                     let created = wallet
                         .created_at
                         .split('T')
@@ -190,15 +194,15 @@ impl Component for WalletList {
                         key_prefix,
                         created,
                     );
-                    
+
                     ListItem::new(text).style(style)
                 })
                 .collect();
-            
+
             // Create the list widget
             let mut list_state = ListState::default();
             list_state.select(Some(self.selected - self.scroll_offset));
-            
+
             let list = List::new(items)
                 .block(
                     Block::default()
@@ -209,18 +213,23 @@ impl Component for WalletList {
                             Style::default().fg(Color::Cyan)
                         } else {
                             Style::default().fg(Color::Gray)
-                        })
+                        }),
                 )
                 .highlight_style(Style::default().bg(Color::DarkGray));
-            
+
             frame.render_stateful_widget(list, chunks[0], &mut list_state);
         }
-        
+
         // Render selected wallet details
         if let Some(wallet) = self.wallets.get(self.selected) {
-            let details = [format!("Created: {}", wallet.created_at),
+            let details = [
+                format!("Created: {}", wallet.created_at),
                 format!("Device: {}", wallet.device_id),
-                format!("Index: {}/{}", wallet.participant_index, wallet.total_participants)];
+                format!(
+                    "Index: {}/{}",
+                    wallet.participant_index, wallet.total_participants
+                ),
+            ];
 
             // BIP-44 all the way: the displayed address is ACCOUNT 0's
             // primary chain address (pinned standard path), never the raw
@@ -235,34 +244,37 @@ impl Component for WalletList {
                 .unwrap_or_else(|| "Account 0: (underivable)".to_string());
 
             let details_text = format!("{}\n{}", details.join(" | "), account0);
-            
+
             let details_widget = Paragraph::new(details_text)
                 .block(
                     Block::default()
                         .title("Details")
                         .borders(TuiBorders::ALL)
                         .border_type(TuiBorderType::Rounded)
-                        .border_style(Style::default().fg(Color::DarkGray))
+                        .border_style(Style::default().fg(Color::DarkGray)),
                 )
                 .style(Style::default().fg(Color::Gray))
                 .wrap(ratatui::widgets::Wrap { trim: true });
-            
+
             frame.render_widget(details_widget, chunks[1]);
         }
     }
-    
-    fn query<'a>(&'a self, attr: tuirealm::props::Attribute) -> Option<tuirealm::props::QueryResult<'a>> {
+
+    fn query<'a>(
+        &'a self,
+        attr: tuirealm::props::Attribute,
+    ) -> Option<tuirealm::props::QueryResult<'a>> {
         self.props.get_for_query(attr)
     }
-    
+
     fn attr(&mut self, attr: tuirealm::props::Attribute, value: tuirealm::props::AttrValue) {
         self.props.set(attr, value);
     }
-    
+
     fn state(&self) -> tuirealm::state::State {
         State::Single(StateValue::Usize(self.selected))
     }
-    
+
     fn perform(&mut self, cmd: Cmd) -> CmdResult {
         match cmd {
             Cmd::Move(tuirealm::command::Direction::Up) => {
@@ -299,9 +311,7 @@ impl AppComponent<Message, UserEvent> for WalletList {
             Event::Keyboard(KeyEvent {
                 code: Key::Enter,
                 modifiers: KeyModifiers::NONE,
-            }) => {
-                self.select_current()
-            }
+            }) => self.select_current(),
             Event::Keyboard(KeyEvent {
                 code: Key::Esc,
                 modifiers: KeyModifiers::NONE,
@@ -314,7 +324,9 @@ impl AppComponent<Message, UserEvent> for WalletList {
                 modifiers: KeyModifiers::NONE,
             }) => {
                 // Delete wallet
-                self.wallets.get(self.selected).map(|wallet| Message::DeleteWallet {
+                self.wallets
+                    .get(self.selected)
+                    .map(|wallet| Message::DeleteWallet {
                         wallet_id: wallet.session_id.clone(),
                     })
             }
@@ -323,7 +335,9 @@ impl AppComponent<Message, UserEvent> for WalletList {
                 modifiers: KeyModifiers::NONE,
             }) => {
                 // Export wallet
-                self.wallets.get(self.selected).map(|wallet| Message::ExportWallet {
+                self.wallets
+                    .get(self.selected)
+                    .map(|wallet| Message::ExportWallet {
                         wallet_id: wallet.session_id.clone(),
                     })
             }
@@ -344,11 +358,11 @@ impl MpcWalletComponent for WalletList {
     fn id(&self) -> Id {
         Id::WalletList
     }
-    
+
     fn is_visible(&self) -> bool {
         true
     }
-    
+
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
     }

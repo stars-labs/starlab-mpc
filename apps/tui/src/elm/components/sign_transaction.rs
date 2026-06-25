@@ -119,15 +119,13 @@ impl Component for SignTransactionComponent {
 
         // Message input with caret.
         let content = format!("{}_", self.message_preview);
-        let msg_widget = Paragraph::new(content)
-            .wrap(Wrap { trim: false })
-            .block(
-                Block::default()
-                    .title(" Message to sign ")
-                    .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
-                    .border_style(Style::default().fg(Color::Yellow)),
-            );
+        let msg_widget = Paragraph::new(content).wrap(Wrap { trim: false }).block(
+            Block::default()
+                .title(" Message to sign ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
         frame.render_widget(msg_widget, rows[2]);
 
         // Inline error.

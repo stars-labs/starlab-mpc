@@ -127,7 +127,8 @@ impl DurableObject for Devices {
                                             device_list.push(reg_id.clone());
                                         }
                                         // Save updated device list to storage
-                                        let _ = state.storage().put("device_list", &device_list).await;
+                                        let _ =
+                                            state.storage().put("device_list", &device_list).await;
 
                                         // Broadcast updated device list to all *other* devices
                                         let msg = ServerMsg::Devices {
@@ -150,51 +151,88 @@ impl DurableObject for Devices {
                                             .await
                                             .unwrap_or_else(|_| Some(vec![]))
                                             .unwrap_or(vec![]);
-                                        let msg = ServerMsg::Devices { devices: device_list };
+                                        let msg = ServerMsg::Devices {
+                                            devices: device_list,
+                                        };
                                         let _ = server
                                             .send_with_str(serde_json::to_string(&msg).unwrap());
                                     }
                                     Ok(ClientMsg::Relay { to, data }) => {
                                         // Check if this is a SessionUpdate to track active participants
-                                        if let Ok(relay_msg) = serde_json::from_value::<serde_json::Value>(data.clone())
-                                            && relay_msg.get("type").and_then(|v| v.as_str()) == Some("SessionUpdate")
-                                                && let (Some(session_code), Some(participants)) = (
-                                                    relay_msg.get("session_code").and_then(|v| v.as_str()),
-                                                    relay_msg.get("participants").and_then(|v| v.as_array())
-                                                ) {
-                                                    // Update session's active participants
-                                                    let session_key = format!("session:{}", session_code);
-                                                    if let Ok(Some(mut session_data)) = state.storage().get::<serde_json::Value>(&session_key).await {
-                                                        // Update active participants based on who's connected
-                                                        let mut active_participants = Vec::new();
-                                                        for p in participants {
-                                                            if let Some(participant_id) = p.as_str()
-                                                                && devices.borrow().contains_key(participant_id) {
-                                                                    active_participants.push(participant_id.to_string());
-                                                                }
-                                                        }
-                                                        session_data["active_participants"] = serde_json::json!(active_participants);
-                                                        session_data["session_info"] = relay_msg.clone();
-                                                        let _ = state.storage().put(&session_key, &session_data).await;
-                                                        
-                                                        // Update device sessions for new participants
-                                                        for p in participants {
-                                                            if let Some(participant_id) = p.as_str() {
-                                                                let device_sessions_key = format!("device_sessions:{}", participant_id);
-                                                                let mut device_sessions: Vec<String> = state.storage()
-                                                                    .get(&device_sessions_key)
-                                                                    .await
-                                                                    .unwrap_or_else(|_| Some(vec![]))
-                                                                    .unwrap_or(vec![]);
-                                                                if !device_sessions.contains(&session_code.to_string()) {
-                                                                    device_sessions.push(session_code.to_string());
-                                                                    let _ = state.storage().put(&device_sessions_key, &device_sessions).await;
-                                                                }
-                                                            }
+                                        if let Ok(relay_msg) =
+                                            serde_json::from_value::<serde_json::Value>(
+                                                data.clone(),
+                                            )
+                                            && relay_msg.get("type").and_then(|v| v.as_str())
+                                                == Some("SessionUpdate")
+                                            && let (Some(session_code), Some(participants)) = (
+                                                relay_msg
+                                                    .get("session_code")
+                                                    .and_then(|v| v.as_str()),
+                                                relay_msg
+                                                    .get("participants")
+                                                    .and_then(|v| v.as_array()),
+                                            )
+                                        {
+                                            // Update session's active participants
+                                            let session_key = format!("session:{}", session_code);
+                                            if let Ok(Some(mut session_data)) = state
+                                                .storage()
+                                                .get::<serde_json::Value>(&session_key)
+                                                .await
+                                            {
+                                                // Update active participants based on who's connected
+                                                let mut active_participants = Vec::new();
+                                                for p in participants {
+                                                    if let Some(participant_id) = p.as_str()
+                                                        && devices
+                                                            .borrow()
+                                                            .contains_key(participant_id)
+                                                    {
+                                                        active_participants
+                                                            .push(participant_id.to_string());
+                                                    }
+                                                }
+                                                session_data["active_participants"] =
+                                                    serde_json::json!(active_participants);
+                                                session_data["session_info"] = relay_msg.clone();
+                                                let _ = state
+                                                    .storage()
+                                                    .put(&session_key, &session_data)
+                                                    .await;
+
+                                                // Update device sessions for new participants
+                                                for p in participants {
+                                                    if let Some(participant_id) = p.as_str() {
+                                                        let device_sessions_key = format!(
+                                                            "device_sessions:{}",
+                                                            participant_id
+                                                        );
+                                                        let mut device_sessions: Vec<String> =
+                                                            state
+                                                                .storage()
+                                                                .get(&device_sessions_key)
+                                                                .await
+                                                                .unwrap_or_else(|_| Some(vec![]))
+                                                                .unwrap_or(vec![]);
+                                                        if !device_sessions
+                                                            .contains(&session_code.to_string())
+                                                        {
+                                                            device_sessions
+                                                                .push(session_code.to_string());
+                                                            let _ = state
+                                                                .storage()
+                                                                .put(
+                                                                    &device_sessions_key,
+                                                                    &device_sessions,
+                                                                )
+                                                                .await;
                                                         }
                                                     }
                                                 }
-                                        
+                                            }
+                                        }
+
                                         // Relay the message
                                         let from = device_id.clone().unwrap_or_default();
                                         let relay = ServerMsg::Relay { from, data };
@@ -220,9 +258,14 @@ impl DurableObject for Devices {
                                         // to `session_code`, and only use `"unknown"` if both are missing —
                                         // otherwise every session collides on `session:unknown`.
                                         if let Some(ref device) = device_id {
-                                            let session_key = session_info.get("session_id")
+                                            let session_key = session_info
+                                                .get("session_id")
                                                 .and_then(|v| v.as_str())
-                                                .or_else(|| session_info.get("session_code").and_then(|v| v.as_str()))
+                                                .or_else(|| {
+                                                    session_info
+                                                        .get("session_code")
+                                                        .and_then(|v| v.as_str())
+                                                })
                                                 .unwrap_or("unknown")
                                                 .to_string();
 
@@ -231,20 +274,31 @@ impl DurableObject for Devices {
                                                 "session_info": session_info,
                                                 "active_participants": vec![device.clone()]
                                             });
-                                            let _ = state.storage().put(&format!("session:{}", session_key), &session_data).await;
-                                            
+                                            let _ = state
+                                                .storage()
+                                                .put(
+                                                    &format!("session:{}", session_key),
+                                                    &session_data,
+                                                )
+                                                .await;
+
                                             // Track session for this device
-                                            let device_sessions_key = format!("device_sessions:{}", device);
-                                            let mut device_sessions: Vec<String> = state.storage()
+                                            let device_sessions_key =
+                                                format!("device_sessions:{}", device);
+                                            let mut device_sessions: Vec<String> = state
+                                                .storage()
                                                 .get(&device_sessions_key)
                                                 .await
                                                 .unwrap_or_else(|_| Some(vec![]))
                                                 .unwrap_or(vec![]);
                                             if !device_sessions.contains(&session_key) {
                                                 device_sessions.push(session_key.clone());
-                                                let _ = state.storage().put(&device_sessions_key, &device_sessions).await;
+                                                let _ = state
+                                                    .storage()
+                                                    .put(&device_sessions_key, &device_sessions)
+                                                    .await;
                                             }
-                                            
+
                                             // Broadcast to all connected devices
                                             let msg = ServerMsg::SessionAvailable { session_info };
                                             let msg_str = serde_json::to_string(&msg).unwrap();
@@ -265,42 +319,46 @@ impl DurableObject for Devices {
                                         if let Ok(keys) = list_result {
                                             for key_result in keys.keys() {
                                                 if let Ok(key_value) = key_result
-                                                    && let Some(key_str) = key_value.as_string() {
-                                                        if !key_str.starts_with("session:") {
-                                                            continue;
-                                                        }
-                                                        // Skip the pre-fix "session:unknown" bucket — it's a
-                                                        // single slot that all legacy AnnounceSessions
-                                                        // collided on, and the contents may be stale.
-                                                        if key_str == "session:unknown" {
-                                                            let _ = state.storage().delete(&key_str).await;
-                                                            continue;
-                                                        }
-                                                        if let Ok(Some(session_data)) = state
-                                                            .storage()
-                                                            .get::<serde_json::Value>(&key_str)
-                                                            .await
-                                                            && let Some(session_info) =
-                                                                session_data.get("session_info").cloned()
-                                                            {
-                                                                // Drop entries whose stored key doesn't match
-                                                                // their declared session_id — these are leftovers
-                                                                // from the old collision-keyed writes.
-                                                                if let Some(declared) = session_info
-                                                                    .get("session_id")
-                                                                    .and_then(|v| v.as_str())
-                                                                    && format!("session:{}", declared) != key_str {
-                                                                        continue;
-                                                                    }
-                                                                let reply = ServerMsg::SessionAvailable {
-                                                                    session_info,
-                                                                };
-                                                                let _ = server.send_with_str(
-                                                                    serde_json::to_string(&reply)
-                                                                        .unwrap(),
-                                                                );
-                                                            }
+                                                    && let Some(key_str) = key_value.as_string()
+                                                {
+                                                    if !key_str.starts_with("session:") {
+                                                        continue;
                                                     }
+                                                    // Skip the pre-fix "session:unknown" bucket — it's a
+                                                    // single slot that all legacy AnnounceSessions
+                                                    // collided on, and the contents may be stale.
+                                                    if key_str == "session:unknown" {
+                                                        let _ =
+                                                            state.storage().delete(&key_str).await;
+                                                        continue;
+                                                    }
+                                                    if let Ok(Some(session_data)) = state
+                                                        .storage()
+                                                        .get::<serde_json::Value>(&key_str)
+                                                        .await
+                                                        && let Some(session_info) = session_data
+                                                            .get("session_info")
+                                                            .cloned()
+                                                    {
+                                                        // Drop entries whose stored key doesn't match
+                                                        // their declared session_id — these are leftovers
+                                                        // from the old collision-keyed writes.
+                                                        if let Some(declared) = session_info
+                                                            .get("session_id")
+                                                            .and_then(|v| v.as_str())
+                                                            && format!("session:{}", declared)
+                                                                != key_str
+                                                        {
+                                                            continue;
+                                                        }
+                                                        let reply = ServerMsg::SessionAvailable {
+                                                            session_info,
+                                                        };
+                                                        let _ = server.send_with_str(
+                                                            serde_json::to_string(&reply).unwrap(),
+                                                        );
+                                                    }
+                                                }
                                             }
                                         }
 
@@ -319,50 +377,83 @@ impl DurableObject for Devices {
                                         }
                                     }
                                     Ok(ClientMsg::QueryMyActiveSessions) => {
-                                        // Return all sessions where this device is a participant  
+                                        // Return all sessions where this device is a participant
                                         if let Some(ref dev_id) = device_id {
                                             let mut my_sessions = Vec::new();
                                             let mut tracked_sessions = Vec::new();
-                                            
+
                                             // Scan ALL sessions to find where device is participant
                                             let list_result = state.storage().list().await;
                                             if let Ok(keys) = list_result {
                                                 for key_result in keys.keys() {
                                                     if let Ok(key_value) = key_result
                                                         && let Some(key_str) = key_value.as_string()
-                                                            && key_str.starts_with("session:")
-                                                                && let Ok(Some(mut session_data)) = state.storage().get::<serde_json::Value>(&key_str).await
-                                                                    && let Some(info) = session_data.get("session_info").cloned() {
-                                                                        // Check if device is in participants
-                                                                        if let Some(participants) = info.get("participants").and_then(|v| v.as_array()) {
-                                                                            let is_participant = participants.iter()
-                                                                                .any(|p| p.as_str() == Some(dev_id.as_str()));
-                                                                            if is_participant {
-                                                                                // Add to active participants if rejoining
-                                                                                if let Some(active) = session_data.get_mut("active_participants").and_then(|v| v.as_array_mut()) {
-                                                                                    let dev_value = serde_json::Value::String(dev_id.clone());
-                                                                                    if !active.contains(&dev_value) {
-                                                                                        active.push(dev_value);
-                                                                                        let _ = state.storage().put(&key_str, &session_data).await;
-                                                                                    }
-                                                                                }
-                                                                                my_sessions.push(info);
-                                                                                tracked_sessions.push(key_str.replace("session:", ""));
-                                                                            }
-                                                                        }
+                                                        && key_str.starts_with("session:")
+                                                        && let Ok(Some(mut session_data)) = state
+                                                            .storage()
+                                                            .get::<serde_json::Value>(&key_str)
+                                                            .await
+                                                        && let Some(info) = session_data
+                                                            .get("session_info")
+                                                            .cloned()
+                                                    {
+                                                        // Check if device is in participants
+                                                        if let Some(participants) = info
+                                                            .get("participants")
+                                                            .and_then(|v| v.as_array())
+                                                        {
+                                                            let is_participant =
+                                                                participants.iter().any(|p| {
+                                                                    p.as_str()
+                                                                        == Some(dev_id.as_str())
+                                                                });
+                                                            if is_participant {
+                                                                // Add to active participants if rejoining
+                                                                if let Some(active) = session_data
+                                                                    .get_mut("active_participants")
+                                                                    .and_then(|v| v.as_array_mut())
+                                                                {
+                                                                    let dev_value =
+                                                                        serde_json::Value::String(
+                                                                            dev_id.clone(),
+                                                                        );
+                                                                    if !active.contains(&dev_value)
+                                                                    {
+                                                                        active.push(dev_value);
+                                                                        let _ = state
+                                                                            .storage()
+                                                                            .put(
+                                                                                &key_str,
+                                                                                &session_data,
+                                                                            )
+                                                                            .await;
                                                                     }
+                                                                }
+                                                                my_sessions.push(info);
+                                                                tracked_sessions.push(
+                                                                    key_str.replace("session:", ""),
+                                                                );
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
-                                            
+
                                             // Update device sessions tracking
-                                            let device_sessions_key = format!("device_sessions:{}", dev_id);
-                                            let _ = state.storage().put(&device_sessions_key, &tracked_sessions).await;
-                                            
+                                            let device_sessions_key =
+                                                format!("device_sessions:{}", dev_id);
+                                            let _ = state
+                                                .storage()
+                                                .put(&device_sessions_key, &tracked_sessions)
+                                                .await;
+
                                             // Send response
                                             let response = ServerMsg::SessionsForDevice {
                                                 sessions: my_sessions,
                                             };
-                                            let _ = server.send_with_str(serde_json::to_string(&response).unwrap());
+                                            let _ = server.send_with_str(
+                                                serde_json::to_string(&response).unwrap(),
+                                            );
                                         }
                                     }
                                     Ok(ClientMsg::SessionStatusUpdate { session_info }) => {
@@ -389,10 +480,12 @@ impl DurableObject for Devices {
                                             .map(|s| s.to_string());
                                         if session_id.is_empty() {
                                             let err = ServerMsg::Error {
-                                                error: "SessionStatusUpdate missing session_id".to_string(),
+                                                error: "SessionStatusUpdate missing session_id"
+                                                    .to_string(),
                                             };
-                                            let _ = server
-                                                .send_with_str(serde_json::to_string(&err).unwrap());
+                                            let _ = server.send_with_str(
+                                                serde_json::to_string(&err).unwrap(),
+                                            );
                                             continue;
                                         }
 
@@ -423,13 +516,13 @@ impl DurableObject for Devices {
                                                 && let Some(participants) = info
                                                     .get_mut("participants")
                                                     .and_then(|v| v.as_array_mut())
-                                                {
-                                                    let joiner_val =
-                                                        serde_json::Value::String(joiner.clone());
-                                                    if !participants.contains(&joiner_val) {
-                                                        participants.push(joiner_val);
-                                                    }
+                                            {
+                                                let joiner_val =
+                                                    serde_json::Value::String(joiner.clone());
+                                                if !participants.contains(&joiner_val) {
+                                                    participants.push(joiner_val);
                                                 }
+                                            }
                                             // Track for cleanup on disconnect
                                             if let Some(active) = session_data
                                                 .get_mut("active_participants")
@@ -442,7 +535,7 @@ impl DurableObject for Devices {
                                                 }
                                             }
                                             // Remember that this device is in this session so that
-                                                // `WebsocketEvent::Close` can clean up correctly.
+                                            // `WebsocketEvent::Close` can clean up correctly.
                                             let device_sessions_key =
                                                 format!("device_sessions:{}", joiner);
                                             let mut device_sessions: Vec<String> = state
@@ -459,10 +552,8 @@ impl DurableObject for Devices {
                                                     .await;
                                             }
                                         }
-                                        let _ = state
-                                            .storage()
-                                            .put(&session_key, &session_data)
-                                            .await;
+                                        let _ =
+                                            state.storage().put(&session_key, &session_data).await;
 
                                         // Broadcast `participant_update` as a server-originated
                                         // Relay to every participant of this session. The client's
@@ -487,10 +578,10 @@ impl DurableObject for Devices {
                                                 let registered = devices.borrow();
                                                 for p in participants {
                                                     if let Some(pid) = p.as_str()
-                                                        && let Some(ws) = registered.get(pid) {
-                                                            let _ =
-                                                                ws.send_with_str(&update_str);
-                                                        }
+                                                        && let Some(ws) = registered.get(pid)
+                                                    {
+                                                        let _ = ws.send_with_str(&update_str);
+                                                    }
                                                 }
                                             }
                                         }
@@ -510,28 +601,43 @@ impl DurableObject for Devices {
                             if let Some(my_id) = device_id.clone() {
                                 // Remove device from active participants in sessions
                                 let device_sessions_key = format!("device_sessions:{}", my_id);
-                                if let Ok(Some(session_ids)) = state.storage().get::<Vec<String>>(&device_sessions_key).await {
+                                if let Ok(Some(session_ids)) = state
+                                    .storage()
+                                    .get::<Vec<String>>(&device_sessions_key)
+                                    .await
+                                {
                                     let mut sessions_to_remove = Vec::new();
 
                                     for session_id in &session_ids {
                                         let session_key = format!("session:{}", session_id);
-                                        if let Ok(Some(mut session_data)) = state.storage().get::<serde_json::Value>(&session_key).await {
+                                        if let Ok(Some(mut session_data)) = state
+                                            .storage()
+                                            .get::<serde_json::Value>(&session_key)
+                                            .await
+                                        {
                                             // Remove from active participants
-                                            if let Some(active) = session_data.get_mut("active_participants").and_then(|v| v.as_array_mut()) {
+                                            if let Some(active) = session_data
+                                                .get_mut("active_participants")
+                                                .and_then(|v| v.as_array_mut())
+                                            {
                                                 active.retain(|p| p.as_str() != Some(&my_id));
-                                                
+
                                                 // Only remove session if NO active participants remain
                                                 if active.is_empty() {
                                                     sessions_to_remove.push(session_id.clone());
-                                                    let _ = state.storage().delete(&session_key).await;
+                                                    let _ =
+                                                        state.storage().delete(&session_key).await;
                                                 } else {
                                                     // Session continues with remaining participants
-                                                    let _ = state.storage().put(&session_key, &session_data).await;
+                                                    let _ = state
+                                                        .storage()
+                                                        .put(&session_key, &session_data)
+                                                        .await;
                                                 }
                                             }
                                         }
                                     }
-                                    
+
                                     // Notify about removed sessions only
                                     for session_id in sessions_to_remove {
                                         let msg = ServerMsg::SessionRemoved {
@@ -543,11 +649,11 @@ impl DurableObject for Devices {
                                             let _ = ws.send_with_str(&msg_str);
                                         }
                                     }
-                                    
+
                                     // Delete the device's session list
                                     let _ = state.storage().delete(&device_sessions_key).await;
                                 }
-                                
+
                                 // Now remove device from active list
                                 devices.borrow_mut().remove(&my_id);
                                 let mut device_list: Vec<String> = state
@@ -558,7 +664,7 @@ impl DurableObject for Devices {
                                     .unwrap_or(vec![]);
                                 device_list.retain(|id| id != &my_id);
                                 let _ = state.storage().put("device_list", &device_list).await;
-                                
+
                                 // Broadcast updated device list
                                 let msg = ServerMsg::Devices {
                                     devices: device_list.clone(),
@@ -570,8 +676,8 @@ impl DurableObject for Devices {
                         }
                     }
                 }
-            }  // End of while loop
-        });  // End of spawn_local (async move)
+            } // End of while loop
+        }); // End of spawn_local (async move)
 
         Response::from_websocket(client)
     }
@@ -642,7 +748,7 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
 #[cfg(test)]
 mod tests {
-    use super::{sanitize_room, validate_room, MIN_ROOM_LEN};
+    use super::{MIN_ROOM_LEN, sanitize_room, validate_room};
 
     #[test]
     fn rejects_missing_or_weak_rooms() {
