@@ -8,6 +8,12 @@ members = [
     "packages/@starlab/core-wasm",
     "packages/@starlab/blockchain",
 ]
+# Bare `cargo run` at the workspace root is ambiguous (starlab-cli,
+# starlab-signal-server and starlab-tui are all binaries), so point the
+# default at the terminal UI — the app you normally want to launch.
+# Package-scoped commands keep working: `cargo run -p starlab-cli`,
+# `cargo test --workspace`, `cargo build -p starlab-signal-server`.
+default-members = ["apps/tui"]
 resolver = "2"
 
 [workspace.package]

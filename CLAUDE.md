@@ -6,14 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Rust (all workspace crates)
-cargo build                              # Build all workspace members
-cargo test                               # Run all Rust tests
-cargo test -p starlab-core            # Test specific package
-cargo test -p starlab-client                   # Test TUI node
-cargo test test_name                     # Run single test by name
+# NOTE: `default-members = ["apps/tui"]`, so bare cargo commands only cover the
+# TUI package. Pass --workspace (or -p <pkg>) for everything else.
+cargo build --workspace                  # Build all workspace members
+cargo test --workspace                   # Run all Rust tests
+cargo test -p starlab-core               # Test specific package
+cargo test -p starlab-client             # Test TUI node
+cargo test --workspace test_name         # Run single test by name
 cargo run --example unified_dkg -p starlab-core  # Run example
-cargo run --bin starlab-tui -p starlab-client                # Run TUI app
-cargo check                              # Fast type check without codegen
+cargo run                                # Run TUI app (the default member)
+cargo check --workspace                  # Fast type check without codegen
 
 # WASM + TypeScript packages (Bun)
 bun install                              # Install JS dependencies (from repo root)
