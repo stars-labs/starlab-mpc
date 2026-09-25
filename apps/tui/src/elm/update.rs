@@ -405,6 +405,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .cloned()
             {
                 Some(invite) => {
+                    if matches!(invite.session_type, SessionType::DKG) {
+                        model.wallet_state.joining_session = Some(invite.session_id.clone());
+                    }
                     model.active_session = Some(invite);
                     model.wallet_state.wallet_name_draft = label;
                     Some(Command::SendMessage(Message::SubmitPassword {
@@ -462,6 +465,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // active_session.is_none()) is taken — otherwise a wallet we just
             // created would re-route into the creator/joiner DKG branch.
             model.wallet_state.creating_wallet = None;
+            model.wallet_state.joining_session = None;
             model.active_session = None;
             model.wallet_state.password_prompt_purpose =
                 crate::elm::model::PasswordPromptPurpose::Unlock;
@@ -1539,6 +1543,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.active_session = None;
             model.pending_operations.clear();
             model.wallet_state.creating_wallet = None;
+            model.wallet_state.joining_session = None;
             model.ui_state.modal = None;
 
             // Navigate back to main menu
@@ -1775,6 +1780,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // reads it.
             model.wallet_state.pending_password = None;
             model.wallet_state.creating_wallet = None;
+            model.wallet_state.joining_session = None;
             model.wallet_state.dkg_in_progress = false;
 
             // Snapshot for the WalletComplete component to read.
@@ -3372,6 +3378,72 @@ mod tests {
         );
         assert!(cmd.is_none());
         assert!(model.active_session.is_none());
+    }
+
+    fn dkg_invite(session_id: &str) -> SessionInfo {
+        SessionInfo {
+            session_id: session_id.to_string(),
+            proposer_id: "peer".to_string(),
+            total: 3,
+            threshold: 2,
+            participants: vec!["peer".to_string()],
+            session_type: SessionType::DKG,
+            curve_type: "secp256k1".to_string(),
+            coordination_type: "online".to_string(),
+            signing_message_hex: None,
+        }
+    }
+
+    fn join(model: &mut Model, session_id: &str) {
+        update(
+            model,
+            Message::HeadlessJoinSession {
+                session_id: session_id.to_string(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        );
+    }
+
+    #[test]
+    fn headless_join_dkg_marks_joining_session() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        assert_eq!(model.wallet_state.joining_session.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn headless_join_unknown_session_leaves_joining_unset() {
+        let mut model = Model::new("dev".to_string());
+        join(&mut model, "nope");
+        assert!(model.wallet_state.joining_session.is_none());
+    }
+
+    #[test]
+    fn cancel_dkg_clears_joining_session() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        update(&mut model, Message::CancelDKG);
+        assert!(model.wallet_state.joining_session.is_none());
+    }
+
+    #[test]
+    fn dkg_finalized_clears_joining_session() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        update(
+            &mut model,
+            Message::DKGFinalized {
+                wallet_id: "w".to_string(),
+                group_pubkey_hex: "00".repeat(32),
+                curve_type: "secp256k1".to_string(),
+                addresses: Vec::new(),
+            },
+        );
+        assert!(model.wallet_state.joining_session.is_none());
     }
 
     #[test]

@@ -111,6 +111,11 @@ pub struct WalletState {
     pub keystore: Option<std::sync::Arc<Keystore>>,
     pub selected_wallet: Option<String>,
     pub creating_wallet: Option<CreateWalletState>,
+    /// Joiner-side counterpart of `creating_wallet`: the DKG session this
+    /// device has joined and is waiting on. Set by `HeadlessJoinSession`,
+    /// cleared on `DKGFinalized` / `CancelDKG`. `active_session` can't serve
+    /// this purpose because it outlives the ceremony.
+    pub joining_session: Option<String>,
     pub dkg_in_progress: bool,
     /// Current phase of the FROST DKG protocol. The DKGProgress component
     /// is rebuilt from Model on every remount, so we keep the round here
@@ -344,6 +349,7 @@ impl std::fmt::Debug for WalletState {
             .field("keystore", &self.keystore.is_some())  // Just show if present
             .field("selected_wallet", &self.selected_wallet)
             .field("creating_wallet", &self.creating_wallet)
+            .field("joining_session", &self.joining_session)
             .field("dkg_in_progress", &self.dkg_in_progress)
             .field("dkg_round", &self.dkg_round)
             // Never log the actual password, even at debug level — just
