@@ -2017,7 +2017,7 @@ impl Command {
 
                                 // Re-initiate WebRTC if we have new participants
                                 if participants_count > prev_count && participants_count > 1 {
-                                    let _ = tx_msg.send(Message::Info { 
+                                    let _ = tx_msg.send(Message::Info {
                                                             message: format!("🔄 New participant detected, re-initiating WebRTC with all {} participants", participants_count)
                                                         });
 
@@ -2042,7 +2042,7 @@ impl Command {
                                     });
 
                                     // Final WebRTC initiation to ensure all connections
-                                    let _ = tx_msg.send(Message::Info { 
+                                    let _ = tx_msg.send(Message::Info {
                                                             message: "🔗 Ensuring all peer-to-peer connections are established...".to_string()
                                                         });
 

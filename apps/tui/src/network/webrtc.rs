@@ -529,7 +529,7 @@ pub async fn initiate_webrtc_with_channel<C>(
                 let ui_msg_tx_state = ui_msg_tx_state.clone();
                 Box::pin(async move {
                     let is_connected = matches!(state, webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected);
-                    
+
                     // Send UI update
                     if let Some(tx) = ui_msg_tx_state {
                         let _ = tx.send(crate::elm::message::Message::UpdateParticipantWebRTCStatus {
@@ -538,7 +538,7 @@ pub async fn initiate_webrtc_with_channel<C>(
                             data_channel_open: false, // Will be updated when data channel opens
                         });
                     }
-                    
+
                     match state {
                         webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
                             info!("✅ WebRTC connection ESTABLISHED with {}", device_id_state);
@@ -623,17 +623,17 @@ pub async fn initiate_webrtc_with_channel<C>(
                         let dc_open = dc_for_open.clone();
                         let app_state_mesh = app_state_for_mesh.clone();
                         let ui_msg_tx_open = ui_msg_tx_open;
-                        
+
                         Box::pin(async move {
                             info!("📂 Data channel OPENED with {}", device_id_open);
-                            
+
                             // Store the data channel in AppState for DKG messaging
                             {
                                 let mut state = app_state_mesh.lock().await;
                                 state.data_channels.insert(device_id_open.clone(), dc_open.clone());
                                 info!("📦 Stored data channel for {} in AppState", device_id_open);
                             }
-                            
+
                             // Send UI update for data channel open
                             if let Some(tx) = ui_msg_tx_open.clone() {
                                 let _ = tx.send(crate::elm::message::Message::UpdateParticipantWebRTCStatus {
@@ -642,7 +642,7 @@ pub async fn initiate_webrtc_with_channel<C>(
                                     data_channel_open: true,
                                 });
                             }
-                            
+
                             // Send channel_open message to peer
                             let channel_open_msg = serde_json::json!({
                                 "type": "channel_open",
@@ -650,31 +650,31 @@ pub async fn initiate_webrtc_with_channel<C>(
                                     "device_id": self_id
                                 }
                             });
-                            
+
                             if let Ok(msg_str) = serde_json::to_string(&channel_open_msg) {
                                 let _ = dc_open.send_text(msg_str).await;
                                 info!("📤 Sent channel_open message to {}", device_id_open);
                             }
-                            
+
                             // Check if all channels are open and send mesh_ready if so
                             // Note: Cannot use tokio::spawn due to Send constraints
-                            // Small delay to allow other channels to open  
-                            
+                            // Small delay to allow other channels to open
+
                             let state = app_state_mesh.lock().await;
                             let session = state.session.clone();
                             let participants = session.as_ref().map(|s| s.participants.clone()).unwrap_or_default();
                             let device_conns = state.device_connections.clone();
                             let own_mesh_ready_sent = state.own_mesh_ready_sent;
                             drop(state);
-                            
+
                             // Check if all expected connections are established
                             let conns = device_conns.lock().await;
                             let expected_count = participants.len().saturating_sub(1); // Exclude self
                             let connected_count = conns.len();
-                            
+
                             if connected_count >= expected_count && expected_count > 0 && !own_mesh_ready_sent {
                                 info!("✅ All {} peer connections established, sending mesh_ready", connected_count);
-                                
+
                                 // Send mesh_ready to all peers
                                 let mesh_ready_msg = serde_json::json!({
                                     "type": "mesh_ready",
@@ -683,23 +683,23 @@ pub async fn initiate_webrtc_with_channel<C>(
                                         "device_id": self_id
                                     }
                                 });
-                                
+
                                 if let Ok(msg_str) = serde_json::to_string(&mesh_ready_msg) {
                                     let _ = dc_open.send_text(msg_str).await;
                                     info!("📤 Sent mesh_ready signal via data channel");
-                                    
+
                                     // Mark as sent and check if all participants are ready
                                     let mut state = app_state_mesh.lock().await;
                                     state.own_mesh_ready_sent = true;
-                                    
+
                                     // Since we're sending mesh_ready, check if we've received mesh_ready from all others
                                     let ready_peers = state.pending_mesh_ready_signals.len();
                                     let expected_peers = expected_count;
-                                    
+
                                     if ready_peers >= expected_peers {
                                         info!("🎉 All peers ready - triggering DKG protocol!");
                                         state.mesh_status = crate::utils::state::MeshStatus::Ready;
-                                        
+
                                         // Trigger DKG protocol start
                                         if let Some(tx) = &ui_msg_tx_open {
                                             info!("🚀 Sending StartDKGProtocol message!");

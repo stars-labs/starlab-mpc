@@ -465,7 +465,7 @@ pub async fn setup_data_channel_callbacks<C>(
 
             if let Ok(text) = String::from_utf8(msg.data.to_vec()) {
                 // DEBUG: Log the raw message content to see exactly what we're receiving
-                
+
                 // Parse envelope
                 match serde_json::from_str::<WebRTCMessage<C>>(&text) {
                     Ok(envelope) => {

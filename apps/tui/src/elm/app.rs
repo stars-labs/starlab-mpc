@@ -63,7 +63,7 @@ where
     ) -> anyhow::Result<Self> {
         // Create message channels
         let (message_tx, message_rx) = tokio::sync::mpsc::unbounded_channel();
-        
+
         // Initialize model. We seed `wallet_state.curve_type` here because
         // `update()` is plain-data (no generic `C`) — every update-layer
         // site that used to emit `"unified"` now reads this instead, which
@@ -72,17 +72,17 @@ where
         let mut model = Model::new(device_id);
         model.wallet_state.curve_type =
             <C as crate::utils::curve_traits::CurveIdentifier>::curve_type();
-        
+
         // Initialize terminal (adapter directly, no bridge in tuirealm 4.0)
         let mut terminal = CrosstermTerminalAdapter::new()?;
         terminal.enable_raw_mode()?;
         terminal.enter_alternate_screen()?;
-        
+
         // Initialize tui-realm application
         let app = Application::init(
             EventListenerCfg::default()
         );
-        
+
         let mut elm_app = Self {
             model,
             app,
@@ -92,20 +92,20 @@ where
             app_state,
             should_quit: false,
         };
-        
+
         // Mount initial components
         elm_app.mount_components()?;
-        
+
         // Send initialization message
         let _ = message_tx.send(Message::Initialize);
-        
+
         Ok(elm_app)
     }
-    
+
     /// Mount components based on current screen
     fn mount_components(&mut self) -> anyhow::Result<()> {
         debug!("🔧 Mounting components for screen: {:?}", self.model.current_screen);
-        
+
         // Log state before mounting
         if matches!(self.model.current_screen, Screen::ThresholdConfig) {
             let selected = self.model.ui_state.selected_indices
@@ -114,26 +114,26 @@ where
                 .unwrap_or(0);
             info!("🔄 PRE-MOUNT: ThresholdConfig selected_field in model = {}", selected);
         }
-        
+
         // Clear all components first
         self.app.umount_all();
-        
+
         // Mount components based on current screen
         match self.model.current_screen {
             Screen::Welcome | Screen::MainMenu => {
                 // Create main menu with actual wallet count
                 let wallet_count = self.model.wallet_state.wallets.len();
                 let mut main_menu = MainMenu::with_wallet_count(wallet_count);
-                
+
                 // Set the selected index from the model
                 let selected = self.model.ui_state.selected_indices
                     .get(&crate::elm::model::ComponentId::MainMenu)
                     .copied()
                     .unwrap_or(0);
-                    
+
                 debug!("Setting MainMenu selected index to: {}, wallet count: {}", selected, wallet_count);
                 main_menu.set_selected(selected);
-                
+
                 self.app.mount(
                     Id::MainMenu,
                     Box::new(main_menu),
@@ -189,35 +189,35 @@ where
                 self.app.active(&Id::WalletDetail)?;
             }
             Screen::CreateWallet(_) => {
-                info!("🔨 Mounting CreateWallet component with state: {:?}", 
+                info!("🔨 Mounting CreateWallet component with state: {:?}",
                      self.model.wallet_state.creating_wallet);
-                
+
                 // Pass the wallet state to the component
                 let mut create_wallet = crate::elm::components::CreateWalletComponent::with_state(
                     self.model.wallet_state.creating_wallet.clone()
                 );
-                
+
                 // Set the selected index from the model
                 let selected = self.model.ui_state.selected_indices
                     .get(&crate::elm::model::ComponentId::CreateWallet)
                     .copied()
                     .unwrap_or(0);
-                    
+
                 debug!("🔧 Mounting CreateWallet component:");
                 debug!("   - Model focus: {:?}", self.model.ui_state.focus);
                 debug!("   - Model selected indices: {:?}", self.model.ui_state.selected_indices);
                 debug!("   - Setting component selected index to: {}", selected);
                 debug!("   - Wallet state: {:?}", self.model.wallet_state.creating_wallet);
-                
+
                 create_wallet.set_selected(selected);
-                
+
                 self.app.mount(
                     Id::CreateWallet,
                     Box::new(create_wallet),
                     vec![]
                 )?;
                 self.app.active(&Id::CreateWallet)?;
-                
+
                 debug!("✅ CreateWallet component mounted and activated");
             }
             Screen::ModeSelection => {
@@ -241,15 +241,15 @@ where
             }
             Screen::ThresholdConfig => {
                 debug!("🔧 Mounting ThresholdConfig component");
-                
+
                 // ALWAYS get the selected field from the correct place
                 let selected_field = self.model.ui_state.selected_indices
                     .get(&crate::elm::model::ComponentId::ThresholdConfig)
                     .copied()
                     .unwrap_or(0);
-                    
+
                 info!("🎯 ThresholdConfig selected_field from model: {}", selected_field);
-                
+
                 // Get values from model if available
                 let (participants, threshold) = if let Some(ref creating_wallet) = self.model.wallet_state.creating_wallet {
                     if let Some(ref config) = creating_wallet.custom_config {
@@ -263,16 +263,16 @@ where
                     debug!("ThresholdConfig mounting with default values (no creating_wallet)");
                     (3, 2) // Default values
                 };
-                
-                info!("🎯 FINAL: Mounting ThresholdConfig with participants={}, threshold={}, selected_field={}", 
+
+                info!("🎯 FINAL: Mounting ThresholdConfig with participants={}, threshold={}, selected_field={}",
                      participants, threshold, selected_field);
-                
+
                 // First unmount if already mounted to force recreation
                 if self.app.mounted(&Id::ThresholdConfig) {
                     debug!("Unmounting existing ThresholdConfig component first");
                     let _ = self.app.umount(&Id::ThresholdConfig);
                 }
-                
+
                 self.app.mount(
                     Id::ThresholdConfig,
                     Box::new(crate::elm::components::ThresholdConfigComponent::with_values(
@@ -284,10 +284,10 @@ where
             }
             Screen::JoinSession => {
                 debug!("🔧 Mounting JoinSession component");
-                
+
                 // Create component and update it with real sessions from model
                 let mut component = crate::elm::components::JoinSessionComponent::new();
-                
+
                 // Convert model sessions to UI format
                 let ui_sessions: Vec<crate::elm::components::join_session::SessionInfo> = self.model.session_invites
                     .iter()
@@ -312,19 +312,19 @@ where
                         }
                     })
                     .collect();
-                
+
                 component.update_sessions(ui_sessions);
-                
+
                 // Set the selected tab from model
                 component.set_selected_tab(self.model.ui_state.join_session_tab);
                 debug!("🎯 JoinSession tab set to: {}", if self.model.ui_state.join_session_tab == 0 { "DKG" } else { "Signing" });
-                
+
                 // Set the selected index from model
                 if let Some(selected_idx) = self.model.ui_state.selected_indices.get(&crate::elm::model::ComponentId::JoinSession) {
                     component.set_selected_index(*selected_idx);
                     debug!("🎯 JoinSession selected index set to: {}", selected_idx);
                 }
-                
+
                 self.app.mount(
                     Id::JoinSession,
                     Box::new(component),
@@ -334,7 +334,7 @@ where
             }
             Screen::DKGProgress { ref session_id } => {
                 info!("🔧 Mounting DKGProgress component for session: {}", session_id);
-                
+
                 // Get config values from creating_wallet state
                 let (total_participants, threshold) = if let Some(ref creating_wallet) = self.model.wallet_state.creating_wallet {
                     if let Some(ref config) = creating_wallet.custom_config {
@@ -345,7 +345,7 @@ where
                 } else {
                     (3, 2) // Default values
                 };
-                
+
                 // Create the DKG progress component with proper state
                 let mut dkg_progress = crate::elm::components::DKGProgressComponent::new(
                     session_id.clone(),
@@ -363,7 +363,7 @@ where
 
                 // Update WebSocket connection status
                 dkg_progress.set_websocket_connected(self.model.network_state.connected);
-                
+
                 // Add participants from active session if available (excluding self)
                 if let Some(ref session) = self.model.active_session {
                     info!("📋 Session participants: {:?}, self: {}", session.participants, self.model.device_id);
@@ -373,9 +373,9 @@ where
                             info!("  Skipping self: {}", participant);
                             continue;
                         }
-                        
+
                         // Check if we have WebRTC status for this participant
-                        if let Some(&(webrtc_connected, data_channel_open)) = 
+                        if let Some(&(webrtc_connected, data_channel_open)) =
                             self.model.network_state.participant_webrtc_status.get(participant) {
                             info!("  {} - WebRTC: {}, DataChannel: {}", participant, webrtc_connected, data_channel_open);
                             // Use the actual WebRTC status
@@ -394,7 +394,7 @@ where
                         }
                     }
                 }
-                
+
                 // Calculate and update mesh status if we have an active session
                 if let Some(ref session) = self.model.active_session {
                     // Count how many participants have data channels open (excluding self)
@@ -405,23 +405,23 @@ where
                                 .is_some_and(|(_, data_channel_open)| *data_channel_open)
                         })
                         .count();
-                    
+
                     // Check if all expected participants have data channels open
                     let expected_other_participants = (total_participants as usize).saturating_sub(1);
                     let all_connected = mesh_ready_count == expected_other_participants;
-                    
-                    info!("🔗 Mesh status calculation: ready_count={}, expected={}, all_connected={}", 
+
+                    info!("🔗 Mesh status calculation: ready_count={}, expected={}, all_connected={}",
                           mesh_ready_count, expected_other_participants, all_connected);
-                    
+
                     // Update mesh status in the component
                     dkg_progress.update_mesh_status(mesh_ready_count, all_connected);
                 }
-                
+
                 // Set the selected action from the model
                 if let Some(selected_action) = self.model.ui_state.selected_indices.get(&crate::elm::model::ComponentId::DKGProgress) {
                     dkg_progress.set_selected_action(*selected_action);
                 }
-                
+
                 self.app.mount(
                     Id::DKGProgress,
                     Box::new(dkg_progress),
@@ -601,7 +601,7 @@ where
                 self.app.active(&Id::MainMenu)?;
             }
         }
-        
+
         // Always mount modal and notification components (they control
         // their own visibility). `set_from_model` populates each with
         // the current Model state so their `view()` renders the live
@@ -618,29 +618,29 @@ where
             Box::new(notification_bar),
             vec![]
         )?;
-        
+
         Ok(())
     }
-    
+
     /// Process a message through the update function
     async fn process_message(&mut self, msg: Message) {
         info!("📨 Processing message: {:?}", msg);
-        
+
         // Special debug for NavigateBack
         if matches!(msg, Message::NavigateBack) {
             debug!("🚨 PROCESSING NavigateBack MESSAGE!");
         }
-        
+
         // Log the current screen before processing
         debug!("Current screen before: {:?}", self.model.current_screen);
-        
+
         // Check for quit message
         if matches!(msg, Message::Quit) {
             info!("Quit message received, exiting...");
             self.should_quit = true;
             return;
         }
-        
+
         // Check if this is a scroll message that needs component update
         // Remount after any message that mutates state the component reads
         // from Model at mount time. For PasswordPrompt that's every
@@ -671,20 +671,20 @@ where
                 | Message::ProcessSigningRound1 { .. }
                 | Message::ProcessSigningRound2 { .. }
         );
-        
+
         // Check if this is a force remount message
         let force_remount = matches!(msg, Message::ForceRemount);
         if force_remount {
             info!("🔄 ForceRemount detected in app.rs");
         }
-        
+
         // Update the model and get command
         if let Some(command) = update(&mut self.model, msg) {
             debug!("Update produced command: {:?}", command);
             // Execute the command
             let tx = self.message_tx.clone();
             let app_state = self.app_state.clone();
-            
+
             tokio::spawn(async move {
                 if let Err(e) = command.execute(tx, &app_state).await {
                     error!("Command execution failed: {}", e);
@@ -693,17 +693,17 @@ where
         } else {
             debug!("Update produced no command");
         }
-        
+
         // Log the current screen after processing
         debug!("Current screen after: {:?}", self.model.current_screen);
-        
+
         // Check if we need to remount
         let need_remount = self.should_remount() || needs_component_update || force_remount;
         if need_remount {
-            info!("🔁 Need remount: {} (should_remount: {}, needs_update: {}, force: {})", 
+            info!("🔁 Need remount: {} (should_remount: {}, needs_update: {}, force: {})",
                    need_remount, self.should_remount(), needs_component_update, force_remount);
         }
-        
+
         // Enhanced debug logging for CreateWallet state sync
         if matches!(self.model.current_screen, Screen::CreateWallet(_)) {
             debug!("🔍 CreateWallet post-update state:");
@@ -714,11 +714,11 @@ where
                 debug!("   - Current selection for focused component: {}", selected);
             }
         }
-        
+
         // Remount components if screen changed or selection updated
         if need_remount {
             debug!("Remounting components for screen: {:?}", self.model.current_screen);
-            
+
             // Add specific debug for ThresholdConfig
             if matches!(self.model.current_screen, Screen::ThresholdConfig) {
                 let selected_field = self.model.ui_state.selected_indices
@@ -727,7 +727,7 @@ where
                     .unwrap_or(0);
                 info!("🔄 REMOUNTING ThresholdConfig with selected_field={} from selected_indices", selected_field);
             }
-            
+
             // Add specific debug for DKGProgress
             if matches!(self.model.current_screen, Screen::DKGProgress { .. }) {
                 let selected_action = self.model.ui_state.selected_indices
@@ -736,22 +736,22 @@ where
                     .unwrap_or(0);
                 info!("🔄 REMOUNTING DKGProgress with selected_action={} from selected_indices", selected_action);
             }
-            
+
             if let Err(e) = self.mount_components() {
                 error!("Failed to mount components: {}", e);
             }
-            
+
             // Force a render after remounting to ensure UI updates
             if let Err(e) = self.render() {
                 error!("Failed to render after remount: {}", e);
             }
         }
-        
+
         // Update component states
         self.update_component_states();
     }
-    
-    /// Check if components need to be remounted  
+
+    /// Check if components need to be remounted
     fn should_remount(&self) -> bool {
         // Check if the mounted component matches current screen
         match self.model.current_screen {
@@ -773,7 +773,7 @@ where
             _ => false,
         }
     }
-    
+
     /// Update component states with latest model data
     fn update_component_states(&mut self) {
         // Update MainMenu selection if it's mounted
@@ -784,21 +784,21 @@ where
                 debug!("Would update MainMenu selected index to: {}", selected_idx);
             }
     }
-    
+
     /// Main event loop
     pub async fn run(&mut self) -> anyhow::Result<()> {
         info!("Starting Elm application event loop");
-        
+
         // Initial render
         self.render()?;
-        
+
         loop {
             // Check if we should quit
             if self.should_quit {
                 info!("Quitting application");
                 break;
             }
-            
+
             // Poll for events with a small timeout
             tokio::select! {
                 // Handle terminal events
@@ -816,7 +816,7 @@ where
                         }
                     }
                 }
-                
+
                 // Handle messages from the update loop
                 Some(msg) = self.message_rx.recv() => {
                     self.process_message(msg).await;
@@ -824,16 +824,16 @@ where
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Handle terminal events
     async fn handle_terminal_event(&mut self, event: CrosstermEvent) -> anyhow::Result<()> {
         match event {
             CrosstermEvent::Key(key_event) => {
                 info!("📺 Received key event: {:?}", key_event);
-                
+
                 // Special debug for Enter and Esc keys at terminal level
                 if matches!(key_event.code, crossterm::event::KeyCode::Enter) {
                     info!("🔥 ENTER KEY RECEIVED AT TERMINAL LEVEL!");
@@ -841,7 +841,7 @@ where
                 if matches!(key_event.code, crossterm::event::KeyCode::Esc) {
                     debug!("🚨 ESC KEY RECEIVED AT TERMINAL LEVEL!");
                 }
-                
+
                 let msg = self.handle_key_event(key_event);
                 if let Some(msg) = msg {
                     debug!("🎯 Key event produced message: {:?}", msg);
@@ -858,16 +858,16 @@ where
                 debug!("Other terminal event: {:?}", event);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Handle key events - KISS approach, direct crossterm handling
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Option<Message> {
         debug!("🔑 Key pressed: {:?}", key.code);
-        
+
         use crossterm::event::KeyCode;
-        
+
         // Check if modal is open first - modal keys take priority.
         // For Modal::Confirm we must distinguish the two keys: Enter
         // fires ConfirmModal (→ on_confirm), Esc fires CancelModal (→
@@ -889,7 +889,7 @@ where
                 _ => return None, // Ignore other keys when modal is open
             }
         }
-        
+
         // Global keys first - work everywhere
         match key.code {
             KeyCode::Esc => {
@@ -914,7 +914,7 @@ where
             }
             _ => {}
         }
-        
+
         // For ThresholdConfig screen, we need to update the component's state and then remount
         // Since tuirealm doesn't provide a direct way to send commands to components,
         // we'll update our model and remount the component
@@ -927,7 +927,7 @@ where
                         info!("⬅️ ThresholdConfig LEFT -> ScrollLeft");
                         return Some(Message::ScrollLeft);
                     } else {
-                        info!("➡️ ThresholdConfig RIGHT -> ScrollRight");  
+                        info!("➡️ ThresholdConfig RIGHT -> ScrollRight");
                         return Some(Message::ScrollRight);
                     }
                 }
@@ -953,7 +953,7 @@ where
                 _ => {}
             }
         }
-        
+
         // WalletComplete is a terminal success screen — both Enter and
         // Esc mean "I'm done, go home". Esc is already handled by the
         // global arm above (→ NavigateBack, which pops our stack frame
@@ -1102,16 +1102,16 @@ where
                 Some(Message::ScrollRight)
             }
             KeyCode::Enter => {
-                info!("🔥 ENTER KEY PRESSED! Screen: {:?}, Focus: {:?}", 
+                info!("🔥 ENTER KEY PRESSED! Screen: {:?}, Focus: {:?}",
                      self.model.current_screen, self.model.ui_state.focus);
-                
+
                 // Get the current selected index from the model for the focused component
                 let selected_index = self.model.ui_state.selected_indices
                     .get(&self.model.ui_state.focus)
                     .copied()
                     .unwrap_or(0);
-                    
-                info!("✅ Enter -> SelectItem with current selected index: {} (focus: {:?})", 
+
+                info!("✅ Enter -> SelectItem with current selected index: {} (focus: {:?})",
                        selected_index, self.model.ui_state.focus);
                 Some(Message::SelectItem { index: selected_index })
             }
@@ -1121,7 +1121,7 @@ where
             }
         }
     }
-    
+
     /// Render the UI
     fn render(&mut self) -> anyhow::Result<()> {
         debug!("🎨 Rendering UI - Current screen: {:?}", self.model.current_screen);
@@ -1159,19 +1159,19 @@ where
                     Constraint::Min(0),
                 ])
                 .split(f.area());
-            
+
             // Render notification bar if there are notifications
             if !self.model.ui_state.notifications.is_empty() {
                 self.app.view(&Id::NotificationBar, f, chunks[0]);
             }
-            
+
             // Render main content based on screen
             let main_area = if self.model.ui_state.notifications.is_empty() {
                 f.area()
             } else {
                 chunks[1]
             };
-            
+
             // Render active component
             match self.model.current_screen {
                 Screen::MainMenu | Screen::Welcome => {
@@ -1219,7 +1219,7 @@ where
                     self.app.view(&Id::MainMenu, f, main_area);
                 }
             }
-            
+
             // Render modal if present
             if self.model.ui_state.modal.is_some() {
                 // Calculate modal area (centered, smaller than full screen)
@@ -1227,10 +1227,10 @@ where
                 self.app.view(&Id::Modal, f, modal_area);
             }
         })?;
-        
+
         Ok(())
     }
-    
+
     /// Get a message sender for external use
     pub fn get_message_sender(&self) -> UnboundedSender<Message> {
         self.message_tx.clone()
