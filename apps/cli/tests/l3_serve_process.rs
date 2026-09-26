@@ -176,16 +176,28 @@ async fn dkg_2of2(a: &mut ServeProc, b: &mut ServeProc) -> anyhow::Result<(Strin
     ))
 }
 
-/// Verify a FROST(secp256k1) signature against the group verifying key. Inputs
-/// are hex (the `signature_complete` event 0x-prefixes both; group key is bare).
+/// Verify a FROST(secp256k1) signature made with a root wallet id. Signing
+/// never uses the root key: a root id signs as account 0 (`…-ethereum-0`), so
+/// verify against that child, derived publicly from the root group key.
+/// Inputs are hex (the `signature_complete` event 0x-prefixes both; group key
+/// is bare).
 fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
     use frost_secp256k1::{Signature, VerifyingKey};
     let strip = |s: &str| s.trim_start_matches("0x").to_string();
-    let (Ok(vkb), Ok(msg), Ok(sigb)) = (
+    let (Ok(group), Ok(msg), Ok(sigb)) = (
         hex::decode(strip(group_hex)),
         hex::decode(strip(msg_hex)),
         hex::decode(strip(sig_hex)),
     ) else {
+        return false;
+    };
+    let path = starlab_core::DerivationPath::parse(
+        &starlab_core::accounts::standard_path("ethereum", 0).expect("ethereum path"),
+    )
+    .expect("valid path");
+    let Ok(vkb) = starlab_core::derive_child_verifying_key_path::<
+        frost_secp256k1::Secp256K1Sha256,
+    >(&group, &path) else {
         return false;
     };
     match (VerifyingKey::deserialize(&vkb), Signature::deserialize(&sigb)) {

@@ -2557,6 +2557,11 @@ impl Command {
                     state.group_public_key = Some(*public_key_package.verifying_key());
                     state.public_key_package = Some(public_key_package);
                     state.current_wallet_id = Some(wallet_id.clone());
+                    // `ks` may hold an account child materialized above that the
+                    // shared cache has never seen. Publish it, or the cold-start
+                    // StartSigning/JoinSigning metadata lookups by child id miss
+                    // and announce/join with an empty participant list.
+                    state.keystore = Some(std::sync::Arc::new(ks));
                 }
 
                 info!("✅ Wallet '{}' unlocked — ready to sign", wallet_id);

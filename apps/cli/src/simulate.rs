@@ -518,7 +518,8 @@ pub async fn run_reshare_e2e(opts: SimulateOpts, message: &str) -> anyhow::Resul
     };
     let share_persisted = persisted_group_key == dkg_group_key;
 
-    // Sign with the REFRESHED shares and verify against the (unchanged) group key.
+    // Sign with the REFRESHED shares and verify against the (unchanged) group
+    // key's account-0 child.
     let (signature, signed_message) = drive_signing(
         &senders,
         &mut receivers,
@@ -877,17 +878,35 @@ pub async fn run_unknown_wallet_sign_simulation() -> anyhow::Result<UnlockAttemp
     })
 }
 
-/// Verify a produced FROST signature against the group key for the given curve.
+/// Verify a produced FROST signature for a root wallet. `HeadlessSign` never
+/// signs with the root: a root id is mapped to account 0 of the curve's
+/// primary chain, so verify against that child key, derived publicly from
+/// the root group key.
 fn verify_signature(
     curve: &str,
     group_key_hex: &str,
     message_hex: &str,
     sig_hex: &str,
 ) -> anyhow::Result<bool> {
-    if curve == "ed25519" {
-        verify_ed25519(group_key_hex, message_hex, sig_hex)
+    let chain = if curve == "ed25519" {
+        "solana"
     } else {
-        verify_secp256k1(group_key_hex, message_hex, sig_hex)
+        "ethereum"
+    };
+    let path = starlab_core::accounts::standard_path(chain, 0)
+        .ok_or_else(|| anyhow::anyhow!("no standard path for {chain}"))?;
+    let path = starlab_core::DerivationPath::parse(&path)?;
+    let group_key = hex::decode(group_key_hex)?;
+    if curve == "ed25519" {
+        let child = starlab_core::derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
+            &group_key, &path,
+        )?;
+        verify_ed25519(&hex::encode(child), message_hex, sig_hex)
+    } else {
+        let child = starlab_core::derive_child_verifying_key_path::<
+            frost_secp256k1::Secp256K1Sha256,
+        >(&group_key, &path)?;
+        verify_secp256k1(&hex::encode(child), message_hex, sig_hex)
     }
 }
 
