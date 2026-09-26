@@ -556,66 +556,66 @@ pub async fn initiate_webrtc_with_channel<C>(
         self_device_id
     );
 
+    // Only a PC created by THIS call gets an offer. Commands run as concurrent tasks and several
+    // paths dispatch `InitiateWebRTCWithParticipants`, so initiations overlap. The existence
+    // check and the insert therefore share one lock hold (as in `ensure_peer_connection`):
+    // checking, releasing the lock across the build and inserting afterwards let two calls
+    // each build a PC, the second replacing the first in the map after the first's offer was
+    // out. The peer's answer to that first offer was then applied to the second PC, whose ICE
+    // credentials never matched the peer's (`ErrMismatchUsername`), and the connection FAILED.
+    // An existing PC already has its offer in flight; re-offering on it would race that
+    // negotiation, so it is left alone.
+    let mut devices_to_offer: Vec<String> = Vec::new();
     for participant in other_participants.iter() {
         if self_device_id >= *participant {
             // We're the answerer — wait for the offer, let ensure_peer_connection
             // create the PC with a full handler set.
             continue;
         }
-        let needs_creation = {
-            let conns = device_connections.lock().await;
-            !conns.contains_key(participant)
-        };
-
-        if needs_creation {
+        let mut conns = device_connections.lock().await;
+        if conns.contains_key(participant) {
             info!(
-                "📱 [{}] Creating NEW peer connection for {}",
+                "✓ [{}] Peer connection already exists for {}, negotiation already started",
                 self_device_id, participant
             );
+            continue;
+        }
 
-            // Build the peer connection with the shared `SignalingHandler` installed
-            // (webrtc 0.21: the handler is constructor-only, see `build_peer_connection`'s
-            // doc comment). Both this offerer path and the answerer path in
-            // `webrtc_signaling::ensure_peer_connection` go through the same helper so
-            // every PC in the mesh gets identical ICE / connection-state / data-channel
-            // wiring regardless of which side created it.
-            match crate::elm::webrtc_signaling::build_peer_connection(
-                participant.clone(),
-                app_state.clone(),
-                &tx_for_handler,
-                &ws_msg_tx,
-            )
-            .await
-            {
-                Some(pc) => {
-                    let mut conns = device_connections.lock().await;
-                    conns.insert(participant.clone(), pc);
-                    info!(
-                        "✅ [{}] Successfully created peer connection for {}",
-                        self_device_id, participant
-                    );
-                }
-                None => {
-                    error!(
-                        "❌ [{}] Failed to create peer connection for {}",
-                        self_device_id, participant
-                    );
-                }
+        info!(
+            "📱 [{}] Creating NEW peer connection for {}",
+            self_device_id, participant
+        );
+
+        // Build the peer connection with the shared `SignalingHandler` installed
+        // (webrtc 0.21: the handler is constructor-only, see `build_peer_connection`'s
+        // doc comment). Both this offerer path and the answerer path in
+        // `webrtc_signaling::ensure_peer_connection` go through the same helper so
+        // every PC in the mesh gets identical ICE / connection-state / data-channel
+        // wiring regardless of which side created it.
+        match crate::elm::webrtc_signaling::build_peer_connection(
+            participant.clone(),
+            app_state.clone(),
+            &tx_for_handler,
+            &ws_msg_tx,
+        )
+        .await
+        {
+            Some(pc) => {
+                conns.insert(participant.clone(), pc);
+                devices_to_offer.push(participant.clone());
+                info!(
+                    "✅ [{}] Successfully created peer connection for {}",
+                    self_device_id, participant
+                );
             }
-        } else {
-            info!(
-                "✓ [{}] Peer connection already exists for {}, will reuse",
-                self_device_id, participant
-            );
+            None => {
+                error!(
+                    "❌ [{}] Failed to create peer connection for {}",
+                    self_device_id, participant
+                );
+            }
         }
     }
-
-    // Now create offers for participants where we have lower ID (perfect negotiation)
-    let devices_to_offer: Vec<String> = other_participants
-        .clone()
-        .into_iter()
-        .filter(|p| self_device_id < *p)
-        .collect();
 
     info!(
         "📤 [{}] Will send offers to {} devices: {:?}",
@@ -651,20 +651,6 @@ pub async fn initiate_webrtc_with_channel<C>(
     }
 
     for device_id in devices_to_offer {
-        // Check if we already have a data channel for this participant
-        let has_data_channel = {
-            let state = app_state.lock().await;
-            state.data_channels.contains_key(&device_id)
-        };
-
-        if has_data_channel {
-            info!(
-                "✓ [{}] Data channel already exists for {}, skipping offer creation",
-                self_device_id, device_id
-            );
-            continue;
-        }
-
         let conns = device_connections.lock().await;
         let pc = conns.get(&device_id).cloned();
         drop(conns);
@@ -771,4 +757,51 @@ pub async fn initiate_webrtc_with_channel<C>(
     }
 
     info!("✅ Simple WebRTC initiation complete");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use frost_secp256k1::Secp256K1Sha256;
+
+    /// Two `InitiateWebRTCWithParticipants` commands can run at the same time (each command is
+    /// its own spawned task). They must end up with ONE peer connection per peer and send ONE
+    /// offer: a second PC would replace the first in `device_connections`, and the answer to
+    /// the first PC's offer would then be applied to the second — its ICE credentials never
+    /// match the peer's, so the connection fails with `ErrMismatchUsername`.
+    #[tokio::test]
+    async fn concurrent_initiations_create_one_peer_connection_and_one_offer() {
+        let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let mut state = AppState::<Secp256K1Sha256>::new();
+        state.websocket_msg_tx = Some(ws_tx);
+        let device_connections = state.device_connections.clone();
+        let app_state = Arc::new(Mutex::new(state));
+        let participants = vec!["test-offerer-a".to_string(), "test-offerer-b".to_string()];
+
+        tokio::join!(
+            initiate_webrtc_with_channel(
+                "test-offerer-a".to_string(),
+                participants.clone(),
+                device_connections.clone(),
+                app_state.clone(),
+                None,
+            ),
+            initiate_webrtc_with_channel(
+                "test-offerer-a".to_string(),
+                participants.clone(),
+                device_connections.clone(),
+                app_state.clone(),
+                None,
+            ),
+        );
+
+        let mut offers = 0;
+        while let Ok(frame) = ws_rx.try_recv() {
+            if frame.contains("\"Offer\"") {
+                offers += 1;
+            }
+        }
+        assert_eq!(offers, 1, "exactly one offer must be sent to the peer");
+        assert_eq!(device_connections.lock().await.len(), 1);
+    }
 }
