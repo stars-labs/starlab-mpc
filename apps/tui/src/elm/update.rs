@@ -58,7 +58,10 @@ fn frost_trigger_batch(model: &mut Model) -> Command {
 
 /// The main update function that handles all state transitions
 pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
-    debug!("Processing message: {:?}", msg);
+    debug!(
+        "Processing message: {}",
+        crate::elm::log_safe::redacted(&msg)
+    );
 
     match msg {
         // ============= Navigation Messages =============
@@ -1238,6 +1241,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 model.wallet_state.pending_sign_message = Some(preview.bytes_to_sign);
                 model.wallet_state.pending_sign_wallet_id = Some(preview.wallet_id);
                 model.wallet_state.pending_sign_session_id = None;
+                // Same gate as HeadlessSign: SubmitPassword takes the
+                // cold-start *sign* branch only when no DKG creation/join is
+                // live — a just-finished DKG leaves `active_session` set and
+                // would re-route this password into JoinDKG.
+                model.wallet_state.creating_wallet = None;
+                model.wallet_state.joining_session = None;
+                model.active_session = None;
                 // The screen is shared with creator/joiner DKG, which set
                 // a new password. Cold-start sign instead UNLOCKS an
                 // existing wallet — flip the purpose so the component
@@ -2886,22 +2896,26 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
                     // Get the session from the filtered list
                     if let Some(session) = filtered_sessions.get(selected_idx).cloned() {
-                        info!("Joining DKG session: {}", session.session_id);
+                        info!("Joining session: {}", session.session_id);
+                        let is_dkg = matches!(session.session_type, SessionType::DKG);
 
                         // Stash the session so `Message::SubmitPassword` can
-                        // recognize this as the joiner path and dispatch
-                        // `Command::JoinDKG` with the right session_id.
+                        // recognize this as the joiner path and dispatch the
+                        // right join command for the session type.
                         model.active_session = Some(session);
 
                         // Route through the password-capture screen before
-                        // actually joining. This ensures the local key-share
-                        // encryption password is staged before the DKG
-                        // starts producing a KeyPackage we need to persist.
-                        // Joiners may also set a local wallet name (label).
-                        model.wallet_state.password_prompt_purpose =
-                            crate::elm::model::PasswordPromptPurpose::SetNew;
+                        // actually joining. A DKG joiner sets a NEW password
+                        // (and optional wallet name) for the share it is
+                        // about to produce; signing / reshare unlock an
+                        // existing share, so they get the single-field unlock.
+                        model.wallet_state.password_prompt_purpose = if is_dkg {
+                            crate::elm::model::PasswordPromptPurpose::SetNew
+                        } else {
+                            crate::elm::model::PasswordPromptPurpose::Unlock
+                        };
                         model.wallet_state.wallet_name_draft.clear();
-                        model.wallet_state.wallet_name_focus = true;
+                        model.wallet_state.wallet_name_focus = is_dkg;
                         model.push_screen(Screen::PasswordPrompt);
                         model.ui_state.focus = crate::elm::model::ComponentId::PasswordPrompt;
                         None
@@ -3334,7 +3348,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         // ============= Default =============
         _ => {
-            debug!("Unhandled message: {:?}", msg);
+            debug!(
+                "Unhandled message: {}",
+                crate::elm::log_safe::redacted(&msg)
+            );
             None
         }
     }
@@ -3374,6 +3391,22 @@ fn account_signing_wallet_id(wallet_id: &str, curve_type: &str) -> String {
     format!("{wallet_id}-{chain}-0")
 }
 
+/// `(threshold, total_participants)` for `wallet_id` from wallet metadata.
+/// Account-child ids (`<root>-<chain>-<n>`) aren't in the root-only wallet
+/// list, so they resolve through their parent.
+pub(crate) fn wallet_threshold(
+    wallet_id: &str,
+    wallets: &[crate::keystore::WalletMetadata],
+) -> Option<(u16, u16)> {
+    let child = starlab_core::accounts::parse_child_wallet_id(wallet_id);
+    wallets
+        .iter()
+        .find(|w| {
+            w.session_id == wallet_id || child.is_some_and(|(parent, _, _)| w.session_id == parent)
+        })
+        .map(|w| (w.threshold, w.total_participants))
+}
+
 fn preview_lines(
     wallet_id: &str,
     curve: &str,
@@ -3386,13 +3419,7 @@ fn preview_lines(
     // BIP-44 identity ("signing as") so the user sees the account key,
     // not the root.
     let child = starlab_core::accounts::parse_child_wallet_id(wallet_id);
-    let (threshold, total) = wallets
-        .iter()
-        .find(|w| {
-            w.session_id == wallet_id || child.is_some_and(|(parent, _, _)| w.session_id == parent)
-        })
-        .map(|w| (w.threshold, w.total_participants))
-        .unwrap_or((0, 0));
+    let (threshold, total) = wallet_threshold(wallet_id, wallets).unwrap_or((0, 0));
     let account_line = child
         .and_then(|(_, chain, account)| {
             starlab_core::accounts::standard_path(chain, account)
@@ -3696,6 +3723,68 @@ mod tests {
             other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
         }
         assert_eq!(model.active_session, Some(signing));
+    }
+
+    #[test]
+    fn interactive_cold_sign_after_dkg_unlocks_instead_of_rejoining_dkg() {
+        // The creator's `active_session` still holds the finished DKG session.
+        // Confirming a cold sign must route the password to UnlockWallet, not
+        // back into the DKG joiner branch.
+        let mut model = Model::new("dev".to_string());
+        model.active_session = Some(dkg_invite("s1"));
+        model.wallet_state.pending_sign_preview = Some(crate::elm::model::PendingSignPreview {
+            wallet_id: "w-ethereum-0".to_string(),
+            bytes_to_sign: vec![7; 32],
+            raw_message: None,
+            warm: false,
+        });
+        update(&mut model, Message::ConfirmSigningRequest);
+        let cmd = update(
+            &mut model,
+            Message::SubmitPassword {
+                value: "pw".to_string(),
+            },
+        );
+        match cmd {
+            Some(Command::UnlockWallet { wallet_id, .. }) => {
+                assert_eq!(wallet_id, "w-ethereum-0")
+            }
+            other => panic!("expected UnlockWallet, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn joining_a_signing_session_prompts_to_unlock_not_to_set_a_password() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(SessionInfo {
+            session_type: SessionType::Signing {
+                wallet_name: "w-ethereum-0".to_string(),
+                curve_type: "secp256k1".to_string(),
+                blockchain: "ethereum".to_string(),
+                group_public_key: "02ab".to_string(),
+            },
+            signing_message_hex: Some("deadbeef".to_string()),
+            ..dkg_invite("s1")
+        });
+        model.push_screen(Screen::JoinSession);
+        model.ui_state.join_session_tab = 1; // Signing tab
+        update(&mut model, Message::SelectItem { index: 0 });
+        assert_eq!(
+            model.wallet_state.password_prompt_purpose,
+            crate::elm::model::PasswordPromptPurpose::Unlock
+        );
+    }
+
+    #[test]
+    fn joining_a_dkg_session_prompts_to_set_a_new_password() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        model.push_screen(Screen::JoinSession);
+        update(&mut model, Message::SelectItem { index: 0 });
+        assert_eq!(
+            model.wallet_state.password_prompt_purpose,
+            crate::elm::model::PasswordPromptPurpose::SetNew
+        );
     }
 
     #[test]

@@ -34,7 +34,10 @@ pub struct SessionInfo {
     pub creator: String,
     pub status: SessionStatus,
     pub participants: Vec<String>,
-    pub required: usize,
+    /// Key-share holders the session is for (n).
+    pub total: usize,
+    /// Signers required (t).
+    pub threshold: usize,
     pub joined: usize,
     pub curve: String,
     pub mode: String,
@@ -288,7 +291,7 @@ impl JoinSessionComponent {
                         SessionStatus::Ready => "✅",
                     },
                     session.joined,
-                    session.required
+                    session.total
                 );
 
                 ListItem::new(content).style(Style::default().fg(if is_selected {
@@ -341,13 +344,9 @@ impl JoinSessionComponent {
             format!("🔐 Configuration:"),
             format!("  • Curve: {}", session.curve),
             format!("  • Mode: {} Mode", session.mode),
-            format!(
-                "  • Threshold: {}-of-{}",
-                session.required,
-                session.participants.len() + 1
-            ),
+            format!("  • Threshold: {}-of-{}", session.threshold, session.total),
             format!(""),
-            format!("👥 Participants ({}/{}):", session.joined, session.required),
+            format!("👥 Participants ({}/{}):", session.joined, session.total),
         ];
 
         let mut full_details = details;
@@ -365,7 +364,7 @@ impl JoinSessionComponent {
                 SessionStatus::Ready => "✅ Ready to join! Press Enter to participate".to_string(),
                 SessionStatus::Waiting => format!(
                     "⏳ Waiting for {} more participant(s)",
-                    session.required - session.joined
+                    session.total.saturating_sub(session.joined)
                 ),
             },
         ]);

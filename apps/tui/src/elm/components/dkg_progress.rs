@@ -820,7 +820,10 @@ impl DKGProgressComponent {
 
 impl AppComponent<Message, UserEvent> for DKGProgressComponent {
     fn on(&mut self, event: &Event<UserEvent>) -> Option<Message> {
-        tracing::debug!("🎮 DKGProgress received event: {:?}", event);
+        tracing::debug!(
+            "🎮 DKGProgress received event: {}",
+            crate::elm::log_safe::redacted(event)
+        );
 
         match event {
             // Intentionally do NOT consume Left/Right here — return `None` so

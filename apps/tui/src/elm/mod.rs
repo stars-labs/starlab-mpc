@@ -9,6 +9,7 @@ pub mod command;
 pub mod components;
 pub mod error_help;
 pub mod headless;
+pub mod log_safe;
 pub mod message;
 pub mod model;
 pub mod provider;

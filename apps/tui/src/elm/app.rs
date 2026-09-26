@@ -303,7 +303,8 @@ where
                             creator: s.proposer_id.clone(),
                             status: SessionStatus::Waiting,
                             participants: s.participants.clone(),
-                            required: s.total as usize,
+                            total: s.total as usize,
+                            threshold: s.threshold as usize,
                             joined: s.participants.len(),
                             curve: s.curve_type.clone(),
                             mode: s.coordination_type.clone(),
@@ -335,16 +336,21 @@ where
             Screen::DKGProgress { ref session_id } => {
                 info!("🔧 Mounting DKGProgress component for session: {}", session_id);
 
-                // Get config values from creating_wallet state
-                let (total_participants, threshold) = if let Some(ref creating_wallet) = self.model.wallet_state.creating_wallet {
-                    if let Some(ref config) = creating_wallet.custom_config {
-                        (config.total_participants, config.threshold)
-                    } else {
-                        (3, 2) // Default values
-                    }
-                } else {
-                    (3, 2) // Default values
-                };
+                // Creator: the wizard's config. Joiner: the session it joined.
+                let (total_participants, threshold) = self
+                    .model
+                    .wallet_state
+                    .creating_wallet
+                    .as_ref()
+                    .and_then(|w| w.custom_config.as_ref())
+                    .map(|c| (c.total_participants, c.threshold))
+                    .or_else(|| {
+                        self.model
+                            .active_session
+                            .as_ref()
+                            .map(|s| (s.total, s.threshold))
+                    })
+                    .unwrap_or((3, 2));
 
                 // Create the DKG progress component with proper state
                 let mut dkg_progress = crate::elm::components::DKGProgressComponent::new(
@@ -502,11 +508,18 @@ where
                 // aggregate) which the enum doesn't model — showing
                 // them would need a separate component. That's a
                 // Phase D polish task.
+                // Joiners get the shape from the announce; the creator has no
+                // session of its own, so read the signing wallet's metadata.
                 let (total_participants, threshold) = self
                     .model
                     .active_session
                     .as_ref()
                     .map(|s| (s.total, s.threshold))
+                    .or_else(|| {
+                        let id = self.model.wallet_state.wallet_unlocked_id.as_deref()?;
+                        crate::elm::update::wallet_threshold(id, &self.model.wallet_state.wallets)
+                            .map(|(threshold, total)| (total, threshold))
+                    })
                     .unwrap_or((3, 2));
 
                 // Resolve a chain label for the header. Joiners get the
@@ -624,7 +637,10 @@ where
 
     /// Process a message through the update function
     async fn process_message(&mut self, msg: Message) {
-        info!("📨 Processing message: {:?}", msg);
+        info!(
+            "📨 Processing message: {}",
+            crate::elm::log_safe::redacted(&msg)
+        );
 
         // Special debug for NavigateBack
         if matches!(msg, Message::NavigateBack) {
@@ -680,7 +696,10 @@ where
 
         // Update the model and get command
         if let Some(command) = update(&mut self.model, msg) {
-            debug!("Update produced command: {:?}", command);
+            debug!(
+                "Update produced command: {}",
+                crate::elm::log_safe::redacted(&command)
+            );
             // Execute the command
             let tx = self.message_tx.clone();
             let app_state = self.app_state.clone();
@@ -807,7 +826,10 @@ where
                     if crossterm::event::poll(Duration::from_millis(10))? {
                         match crossterm::event::read() {
                             Ok(event) => {
-                                debug!("Read terminal event: {:?}", event);
+                                debug!(
+                                    "Read terminal event: {}",
+                                    crate::elm::log_safe::redacted(&event)
+                                );
                                 self.handle_terminal_event(event).await?;
                             }
                             Err(e) => {
@@ -832,7 +854,10 @@ where
     async fn handle_terminal_event(&mut self, event: CrosstermEvent) -> anyhow::Result<()> {
         match event {
             CrosstermEvent::Key(key_event) => {
-                info!("📺 Received key event: {:?}", key_event);
+                debug!(
+                    "📺 Received key event: {}",
+                    crate::elm::log_safe::redacted(&key_event)
+                );
 
                 // Special debug for Enter and Esc keys at terminal level
                 if matches!(key_event.code, crossterm::event::KeyCode::Enter) {
@@ -844,7 +869,10 @@ where
 
                 let msg = self.handle_key_event(key_event);
                 if let Some(msg) = msg {
-                    debug!("🎯 Key event produced message: {:?}", msg);
+                    debug!(
+                        "🎯 Key event produced message: {}",
+                        crate::elm::log_safe::redacted(&msg)
+                    );
                     self.process_message(msg).await;
                 }
                 // Always render after key events to show component updates
@@ -855,7 +883,10 @@ where
                 self.render()?;
             }
             _ => {
-                debug!("Other terminal event: {:?}", event);
+                debug!(
+                    "Other terminal event: {}",
+                    crate::elm::log_safe::redacted(&event)
+                );
             }
         }
 
@@ -864,7 +895,10 @@ where
 
     /// Handle key events - KISS approach, direct crossterm handling
     fn handle_key_event(&mut self, key: crossterm::event::KeyEvent) -> Option<Message> {
-        debug!("🔑 Key pressed: {:?}", key.code);
+        debug!(
+            "🔑 Key pressed: {}",
+            crate::elm::log_safe::redacted(&key.code)
+        );
 
         use crossterm::event::KeyCode;
 
@@ -1116,7 +1150,10 @@ where
                 Some(Message::SelectItem { index: selected_index })
             }
             _ => {
-                debug!("❓ Unhandled key: {:?}", key.code);
+                debug!(
+                    "❓ Unhandled key: {}",
+                    crate::elm::log_safe::redacted(&key.code)
+                );
                 None
             }
         }

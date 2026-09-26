@@ -542,17 +542,28 @@ pub enum ServerMsg {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
-    Register { device_id: String },
+    Register {
+        device_id: String,
+    },
     ListDevices,
-    Relay { to: String, data: serde_json::Value },
+    Relay {
+        to: String,
+        data: serde_json::Value,
+    },
     // Session discovery messages
-    AnnounceSession { session_info: serde_json::Value },
+    AnnounceSession {
+        session_info: serde_json::Value,
+    },
     RequestActiveSessions,
-    SessionStatusUpdate { session_info: serde_json::Value },
+    SessionStatusUpdate {
+        session_info: serde_json::Value,
+    },
     // Simple stateless rejoin support
     QueryMyActiveSessions, // Device asks: "What sessions am I in?"
     /// Withdraw from a session: the proposer's leave removes the session for
     /// everyone (`SessionRemoved`); anyone else is dropped from its
     /// participants (`participant_update`).
-    LeaveSession { session_id: String },
+    LeaveSession {
+        session_id: String,
+    },
 }
