@@ -3757,6 +3757,41 @@ mod tests {
         assert!(model.wallet_state.joining_session.is_none());
     }
 
+    /// StartSigning's warm path reuses the DKG session id, so a co-signer
+    /// whose `active_session` is still the finished DKG must not treat the
+    /// signing invite as "already joined".
+    #[test]
+    fn headless_join_signing_reusing_dkg_session_id_is_not_skipped() {
+        let mut model = Model::new("dev".to_string());
+        model.active_session = Some(dkg_invite("s1"));
+        let mut signing = dkg_invite("s1");
+        signing.session_type = SessionType::Signing {
+            wallet_name: "w-ethereum-0".to_string(),
+            curve_type: "secp256k1".to_string(),
+            blockchain: "secp256k1".to_string(),
+            group_public_key: String::new(),
+        };
+        model.session_invites.push(signing.clone());
+        join(&mut model, "s1");
+        assert_eq!(model.active_session, Some(signing));
+    }
+
+    #[test]
+    fn headless_join_same_dkg_session_twice_is_noop() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        let cmd = update(
+            &mut model,
+            Message::HeadlessJoinSession {
+                session_id: "s1".to_string(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        );
+        assert!(cmd.is_none());
+    }
+
     #[test]
     fn dkg_finalized_clears_joining_session() {
         let mut model = Model::new("dev".to_string());

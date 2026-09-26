@@ -412,7 +412,7 @@ pub async fn run_signing_simulation_enc(
     shut_down(c.senders, c.receivers).await;
 
     let verified =
-        verify_account0_signature(&opts.curve, &c.group_key, &signed_message, &signature);
+        verify_signature(&opts.curve, &c.group_key, &signed_message, &signature).unwrap_or(false);
 
     Ok(SigningResult {
         nodes,
@@ -562,7 +562,8 @@ pub async fn run_reshare_e2e(
     };
     let share_persisted = persisted_group_key == dkg_group_key;
 
-    // Sign with the REFRESHED shares and verify against the (unchanged) group key.
+    // Sign with the REFRESHED shares and verify against the (unchanged) group
+    // key's account-0 child.
     let (signature, signed_message) = drive_signing(
         &senders,
         &mut receivers,
@@ -575,7 +576,7 @@ pub async fn run_reshare_e2e(
     .await?;
     shut_down(senders, receivers).await;
     let signed_after_reshare =
-        verify_account0_signature(&opts.curve, &dkg_group_key, &signed_message, &signature);
+        verify_signature(&opts.curve, &dkg_group_key, &signed_message, &signature).unwrap_or(false);
 
     Ok(ReshareE2eResult {
         nodes,
@@ -908,40 +909,35 @@ pub async fn run_unknown_wallet_sign_simulation() -> anyhow::Result<UnlockAttemp
     })
 }
 
-/// Verify a produced FROST signature against the group key for the given curve.
-/// Headless signing never signs with the root key ("BIP-44 all the way"): it
-/// signs with account 0 of the curve's primary chain. Verify against that
-/// child's public key, derived from the root group key.
-fn verify_account0_signature(
-    curve: &str,
-    root_key_hex: &str,
-    message_hex: &str,
-    sig_hex: &str,
-) -> bool {
-    let chain = if curve == "secp256k1" {
-        "ethereum"
-    } else {
-        "solana"
-    };
-    let Ok(root) = hex::decode(root_key_hex) else {
-        return false;
-    };
-    let Ok(child) = starlab_core::accounts::account_verifying_key(chain, curve, &root, 0) else {
-        return false;
-    };
-    verify_signature(curve, &hex::encode(child), message_hex, sig_hex).unwrap_or(false)
-}
-
+/// Verify a produced FROST signature for a root wallet. `HeadlessSign` never
+/// signs with the root: a root id is mapped to account 0 of the curve's
+/// primary chain, so verify against that child key, derived publicly from
+/// the root group key.
 fn verify_signature(
     curve: &str,
     group_key_hex: &str,
     message_hex: &str,
     sig_hex: &str,
 ) -> anyhow::Result<bool> {
-    if curve == "ed25519" {
-        verify_ed25519(group_key_hex, message_hex, sig_hex)
+    let chain = if curve == "ed25519" {
+        "solana"
     } else {
-        verify_secp256k1(group_key_hex, message_hex, sig_hex)
+        "ethereum"
+    };
+    let path = starlab_core::accounts::standard_path(chain, 0)
+        .ok_or_else(|| anyhow::anyhow!("no standard path for {chain}"))?;
+    let path = starlab_core::DerivationPath::parse(&path)?;
+    let group_key = hex::decode(group_key_hex)?;
+    if curve == "ed25519" {
+        let child = starlab_core::derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
+            &group_key, &path,
+        )?;
+        verify_ed25519(&hex::encode(child), message_hex, sig_hex)
+    } else {
+        let child = starlab_core::derive_child_verifying_key_path::<
+            frost_secp256k1::Secp256K1Sha256,
+        >(&group_key, &path)?;
+        verify_secp256k1(&hex::encode(child), message_hex, sig_hex)
     }
 }
 
