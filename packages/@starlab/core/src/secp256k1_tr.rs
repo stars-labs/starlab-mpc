@@ -38,9 +38,10 @@ impl FrostCurve for Secp256k1TrCurve {
     type SigningPackage = SigningPackage;
 
     fn identifier_from_u16(value: u16) -> Result<Self::Identifier> {
-        let bytes = crate::traits::identifier_bytes_from_u16(value);
-        Identifier::deserialize(&bytes)
-            .map_err(|_| FrostError::InvalidIdentifier("Invalid identifier bytes".to_string()))
+        // frost's own conversion — scalar encoding is curve-specific
+        // (ed25519 is little-endian), and CLI/TUI peers use it too.
+        Identifier::try_from(value)
+            .map_err(|_| FrostError::InvalidIdentifier(format!("Invalid identifier {value}")))
     }
 
     fn dkg_part1(

@@ -3,18 +3,6 @@ use crate::rng::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Serialize a u16 participant index into a 32-byte big-endian identifier.
-///
-/// Both ed25519 and secp256k1 use the same identifier encoding:
-/// 30 zero bytes followed by the u16 in big-endian.
-pub fn identifier_bytes_from_u16(value: u16) -> [u8; 32] {
-    let mut bytes = [0u8; 32];
-    let be = value.to_be_bytes();
-    bytes[30] = be[0];
-    bytes[31] = be[1];
-    bytes
-}
-
 /// Generic trait for FROST curve operations
 /// This abstracts over Ed25519 and Secp256k1 curves
 pub trait FrostCurve {

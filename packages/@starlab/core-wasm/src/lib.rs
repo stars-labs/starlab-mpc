@@ -39,6 +39,91 @@ macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
 
+/// Re-encode a package the engine produced (hex of its JSON — what
+/// generate_round1/2, signing_commit and sign return) in FROST's binary
+/// `serialize()` form, the CLI/TUI wire encoding (`DKG_ROUND1:`,
+/// `DKG_ROUND2:`, `SIGN_COMMIT:`, `SIGN_SHARE:` frames). Returns hex.
+///
+/// `curve`: "ed25519" | "secp256k1" | "secp256k1-tr";
+/// `kind`: "round1" | "round2" | "commitment" | "share".
+#[wasm_bindgen]
+pub fn to_frost_wire(curve: &str, kind: &str, json_hex: &str) -> Result<String, WasmError> {
+    fn reencode<T: serde::de::DeserializeOwned, E: std::fmt::Display>(
+        json: &[u8],
+        serialize: impl FnOnce(&T) -> Result<Vec<u8>, E>,
+    ) -> Result<Vec<u8>, WasmError> {
+        let value: T = serde_json::from_slice(json).map_err(|e| WasmError::new(&e.to_string()))?;
+        serialize(&value).map_err(|e| WasmError::new(&e.to_string()))
+    }
+    let json = hex::decode(json_hex).map_err(|e| WasmError::new(&e.to_string()))?;
+    let infallible = |bytes: Vec<u8>| Ok::<_, std::convert::Infallible>(bytes);
+    let bytes = match (curve, kind) {
+        ("ed25519", "round1") => {
+            reencode(&json, frost_ed25519::keys::dkg::round1::Package::serialize)?
+        }
+        ("ed25519", "round2") => {
+            reencode(&json, frost_ed25519::keys::dkg::round2::Package::serialize)?
+        }
+        ("ed25519", "commitment") => reencode(&json, Ed25519SigningCommitments::serialize)?,
+        ("ed25519", "share") => {
+            reencode(&json, |s: &Ed25519SignatureShare| infallible(s.serialize()))?
+        }
+        ("secp256k1", "round1") => reencode(
+            &json,
+            frost_secp256k1::keys::dkg::round1::Package::serialize,
+        )?,
+        ("secp256k1", "round2") => reencode(
+            &json,
+            frost_secp256k1::keys::dkg::round2::Package::serialize,
+        )?,
+        ("secp256k1", "commitment") => reencode(&json, Secp256k1SigningCommitments::serialize)?,
+        ("secp256k1", "share") => reencode(&json, |s: &Secp256k1SignatureShare| {
+            infallible(s.serialize())
+        })?,
+        ("secp256k1-tr", "round1") => reencode(
+            &json,
+            frost_secp256k1_tr::keys::dkg::round1::Package::serialize,
+        )?,
+        ("secp256k1-tr", "round2") => reencode(
+            &json,
+            frost_secp256k1_tr::keys::dkg::round2::Package::serialize,
+        )?,
+        ("secp256k1-tr", "commitment") => {
+            reencode(&json, Secp256k1TrSigningCommitments::serialize)?
+        }
+        ("secp256k1-tr", "share") => reencode(&json, |s: &Secp256k1TrSignatureShare| {
+            infallible(s.serialize())
+        })?,
+        _ => {
+            return Err(WasmError::new(&format!(
+                "unsupported wire encoding: {curve}/{kind}"
+            )));
+        }
+    };
+    Ok(hex::encode(bytes))
+}
+
+/// Decode a FROST round package / commitment / share received from a peer.
+/// Extension peers send JSON; CLI/TUI peers send FROST's own binary
+/// `serialize()` encoding (the `DKG_ROUND*:` / signing frames). Accept both
+/// so mixed extension + CLI ceremonies interoperate.
+fn decode_wire<T, E>(
+    bytes: &[u8],
+    frost_deserialize: impl FnOnce(&[u8]) -> Result<T, E>,
+) -> Result<T, WasmError>
+where
+    T: serde::de::DeserializeOwned,
+    E: std::fmt::Display,
+{
+    serde_json::from_slice(bytes).or_else(|json_err| {
+        frost_deserialize(bytes).map_err(|frost_err| {
+            WasmError::new(&format!(
+                "not a JSON ({json_err}) or FROST-binary ({frost_err}) encoded package"
+            ))
+        })
+    })
+}
+
 // Error type for WASM
 #[wasm_bindgen]
 #[derive(Debug)]
@@ -169,8 +254,10 @@ impl FrostDkgEd25519 {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_ed25519::keys::dkg::round1::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_ed25519::keys::dkg::round1::Package = decode_wire(
+            &package_json,
+            frost_ed25519::keys::dkg::round1::Package::deserialize,
+        )?;
 
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
@@ -200,12 +287,11 @@ impl FrostDkgEd25519 {
 
         let mut packages_map = BTreeMap::new();
         for (id, package) in round2_packages {
-            // Both Ed25519 and Secp256k1 identifiers are produced by
-            // identifier_bytes_from_u16 (traits.rs): 30 zero bytes
-            // followed by the u16 big-endian at [30..=31]. Reading
-            // from [31] (low) | [30]<<8 (high) recovers the index.
-            let ser = id.serialize();
-            let id_value = ser[31] as u16 | ((ser[30] as u16) << 8);
+            // Map the recipient back to its u16 index by conversion, not
+            // by poking at the scalar bytes (their order is curve-specific).
+            let id_value = (1..=self.total)
+                .find(|i| Ed25519Curve::identifier_from_u16(*i).ok() == Some(id))
+                .ok_or_else(|| WasmError::new("Round 2 package for an unknown participant"))?;
             packages_map.insert(
                 id_value,
                 hex::encode(serde_json::to_string(&package).unwrap()),
@@ -226,8 +312,10 @@ impl FrostDkgEd25519 {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_ed25519::keys::dkg::round2::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_ed25519::keys::dkg::round2::Package = decode_wire(
+            &package_json,
+            frost_ed25519::keys::dkg::round2::Package::deserialize,
+        )?;
 
         let identifier = Ed25519Curve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
@@ -317,7 +405,7 @@ impl FrostDkgEd25519 {
         let commitment_json =
             hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let commitment: Ed25519SigningCommitments =
-            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&commitment_json, Ed25519SigningCommitments::deserialize)?;
 
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
@@ -363,7 +451,7 @@ impl FrostDkgEd25519 {
     ) -> Result<(), WasmError> {
         let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let share: Ed25519SignatureShare =
-            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&share_json, Ed25519SignatureShare::deserialize)?;
 
         let identifier = Ed25519Curve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
@@ -519,8 +607,10 @@ impl FrostDkgSecp256k1 {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1::keys::dkg::round1::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1::keys::dkg::round1::Package = decode_wire(
+            &package_json,
+            frost_secp256k1::keys::dkg::round1::Package::deserialize,
+        )?;
 
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
@@ -571,8 +661,10 @@ impl FrostDkgSecp256k1 {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1::keys::dkg::round2::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1::keys::dkg::round2::Package = decode_wire(
+            &package_json,
+            frost_secp256k1::keys::dkg::round2::Package::deserialize,
+        )?;
 
         let identifier = Secp256k1Curve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
@@ -669,7 +761,7 @@ impl FrostDkgSecp256k1 {
         let commitment_json =
             hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let commitment: Secp256k1SigningCommitments =
-            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&commitment_json, Secp256k1SigningCommitments::deserialize)?;
 
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
@@ -712,7 +804,7 @@ impl FrostDkgSecp256k1 {
     ) -> Result<(), WasmError> {
         let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let share: Secp256k1SignatureShare =
-            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&share_json, Secp256k1SignatureShare::deserialize)?;
 
         let identifier = Secp256k1Curve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
@@ -1312,8 +1404,10 @@ impl FrostDkgSecp256k1Tr {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1_tr::keys::dkg::round1::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round1::Package = decode_wire(
+            &package_json,
+            frost_secp256k1_tr::keys::dkg::round1::Package::deserialize,
+        )?;
 
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.round1_packages.insert(identifier, package);
@@ -1364,8 +1458,10 @@ impl FrostDkgSecp256k1Tr {
         package_hex: &str,
     ) -> Result<(), WasmError> {
         let package_json = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-        let package: frost_secp256k1_tr::keys::dkg::round2::Package =
-            serde_json::from_slice(&package_json).map_err(|e| WasmError::new(&e.to_string()))?;
+        let package: frost_secp256k1_tr::keys::dkg::round2::Package = decode_wire(
+            &package_json,
+            frost_secp256k1_tr::keys::dkg::round2::Package::deserialize,
+        )?;
 
         let identifier = Secp256k1TrCurve::identifier_from_u16(sender_index)?;
         self.round2_packages.insert(identifier, package);
@@ -1472,7 +1568,7 @@ impl FrostDkgSecp256k1Tr {
         let commitment_json =
             hex::decode(commitment_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let commitment: Secp256k1TrSigningCommitments =
-            serde_json::from_slice(&commitment_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&commitment_json, Secp256k1TrSigningCommitments::deserialize)?;
 
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.signing_commitments.insert(identifier, commitment);
@@ -1515,7 +1611,7 @@ impl FrostDkgSecp256k1Tr {
     ) -> Result<(), WasmError> {
         let share_json = hex::decode(share_hex).map_err(|e| WasmError::new(&e.to_string()))?;
         let share: Secp256k1TrSignatureShare =
-            serde_json::from_slice(&share_json).map_err(|e| WasmError::new(&e.to_string()))?;
+            decode_wire(&share_json, Secp256k1TrSignatureShare::deserialize)?;
 
         let identifier = Secp256k1TrCurve::identifier_from_u16(participant_index)?;
         self.signature_shares.insert(identifier, share);
@@ -1629,4 +1725,79 @@ pub fn derive_account_addresses(
         })
         .collect();
     serde_json::to_string(&json).map_err(|e| WasmError::new(&e.to_string()))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round1_package() -> frost_secp256k1::keys::dkg::round1::Package {
+        let id = frost_secp256k1::Identifier::try_from(2u16).unwrap();
+        frost_secp256k1::keys::dkg::part1(id, 3, 2, &mut os_rng())
+            .unwrap()
+            .1
+    }
+
+    #[test]
+    fn decode_wire_accepts_json() {
+        let pkg = round1_package();
+        let bytes = serde_json::to_vec(&pkg).unwrap();
+        let decoded: frost_secp256k1::keys::dkg::round1::Package = decode_wire(
+            &bytes,
+            frost_secp256k1::keys::dkg::round1::Package::deserialize,
+        )
+        .unwrap();
+        assert_eq!(decoded, pkg);
+    }
+
+    #[test]
+    fn decode_wire_accepts_frost_binary() {
+        // What CLI/TUI peers put in their `DKG_ROUND1:` frames.
+        let pkg = round1_package();
+        let bytes = pkg.serialize().unwrap();
+        let decoded: frost_secp256k1::keys::dkg::round1::Package = decode_wire(
+            &bytes,
+            frost_secp256k1::keys::dkg::round1::Package::deserialize,
+        )
+        .unwrap();
+        assert_eq!(decoded, pkg);
+    }
+
+    #[test]
+    fn identifiers_match_frost_native_u16_conversion() {
+        // CLI/TUI peers use `Identifier::try_from(u16)`; the engine must
+        // agree for every curve or DKG proofs of knowledge fail to verify.
+        for i in 1..=5u16 {
+            assert_eq!(
+                Ed25519Curve::identifier_from_u16(i).unwrap(),
+                frost_ed25519::Identifier::try_from(i).unwrap()
+            );
+            assert_eq!(
+                Secp256k1Curve::identifier_from_u16(i).unwrap(),
+                frost_secp256k1::Identifier::try_from(i).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn to_frost_wire_matches_frost_serialize() {
+        // The CLI/TUI puts `package.serialize()` in its DKG_ROUND1: frames.
+        let pkg = round1_package();
+        let json_hex = hex::encode(serde_json::to_vec(&pkg).unwrap());
+        let wire = to_frost_wire("secp256k1", "round1", &json_hex).unwrap();
+        assert_eq!(hex::decode(wire).unwrap(), pkg.serialize().unwrap());
+    }
+
+    #[test]
+    fn to_frost_wire_rejects_unknown_kind() {
+        assert!(to_frost_wire("secp256k1", "nope", "7b7d").is_err());
+    }
+
+    #[test]
+    fn decode_wire_rejects_garbage() {
+        let result: Result<frost_secp256k1::keys::dkg::round1::Package, _> = decode_wire(
+            b"not a package",
+            frost_secp256k1::keys::dkg::round1::Package::deserialize,
+        );
+        assert!(result.is_err());
+    }
 }
