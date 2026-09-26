@@ -385,25 +385,27 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // Headless joiner entry: pick the discovered invite by id, mark it
         // active (the joiner signal SubmitPassword keys off), then hand off.
         Message::HeadlessJoinSession { session_id, password, label } => {
+            let invite = model
+                .session_invites
+                .iter()
+                .find(|s| s.session_id == session_id)
+                .cloned();
             // Idempotent: the CLI joiner retries refresh+join on a short cadence
             // to beat the announce/connect race (the creator may announce before
             // we connect, and `announce_session` is a one-shot broadcast). Once
             // we've already joined this session, ignore repeat sends so we don't
             // re-fire SubmitPassword and clobber an in-progress DKG.
-            if model
-                .active_session
-                .as_ref()
-                .map(|s| s.session_id.as_str())
-                == Some(session_id.as_str())
-            {
-                return None;
+            // Compare the session type too: StartSigning's warm path reuses the
+            // DKG session id, and `active_session` outlives the DKG.
+            if let (Some(active), Some(invite)) = (model.active_session.as_ref(), invite.as_ref()) {
+                if active.session_id == invite.session_id
+                    && std::mem::discriminant(&active.session_type)
+                        == std::mem::discriminant(&invite.session_type)
+                {
+                    return None;
+                }
             }
-            match model
-                .session_invites
-                .iter()
-                .find(|s| s.session_id == session_id)
-                .cloned()
-            {
+            match invite {
                 Some(invite) => {
                     if matches!(invite.session_type, SessionType::DKG) {
                         model.wallet_state.joining_session = Some(invite.session_id.clone());
@@ -3427,6 +3429,41 @@ mod tests {
         join(&mut model, "s1");
         update(&mut model, Message::CancelDKG);
         assert!(model.wallet_state.joining_session.is_none());
+    }
+
+    /// StartSigning's warm path reuses the DKG session id, so a co-signer
+    /// whose `active_session` is still the finished DKG must not treat the
+    /// signing invite as "already joined".
+    #[test]
+    fn headless_join_signing_reusing_dkg_session_id_is_not_skipped() {
+        let mut model = Model::new("dev".to_string());
+        model.active_session = Some(dkg_invite("s1"));
+        let mut signing = dkg_invite("s1");
+        signing.session_type = SessionType::Signing {
+            wallet_name: "w-ethereum-0".to_string(),
+            curve_type: "secp256k1".to_string(),
+            blockchain: "secp256k1".to_string(),
+            group_public_key: String::new(),
+        };
+        model.session_invites.push(signing.clone());
+        join(&mut model, "s1");
+        assert_eq!(model.active_session, Some(signing));
+    }
+
+    #[test]
+    fn headless_join_same_dkg_session_twice_is_noop() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        let cmd = update(
+            &mut model,
+            Message::HeadlessJoinSession {
+                session_id: "s1".to_string(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        );
+        assert!(cmd.is_none());
     }
 
     #[test]
