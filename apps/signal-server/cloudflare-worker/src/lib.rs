@@ -42,15 +42,30 @@ pub enum ServerMsg {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMsg {
-    Register { device_id: String },
+    Register {
+        device_id: String,
+    },
     ListDevices,
-    Relay { to: String, data: serde_json::Value },
+    Relay {
+        to: String,
+        data: serde_json::Value,
+    },
     // Session discovery messages
-    AnnounceSession { session_info: serde_json::Value },
+    AnnounceSession {
+        session_info: serde_json::Value,
+    },
     RequestActiveSessions,
-    SessionStatusUpdate { session_info: serde_json::Value },
+    SessionStatusUpdate {
+        session_info: serde_json::Value,
+    },
     // Simple stateless rejoin support
     QueryMyActiveSessions,
+    /// Withdraw from a session: the proposer's leave removes the session for
+    /// everyone (`SessionRemoved`); anyone else is dropped from its
+    /// participants (`participant_update`).
+    LeaveSession {
+        session_id: String,
+    },
 }
 
 // Durable Object for managing devices
@@ -584,6 +599,81 @@ impl DurableObject for Devices {
                                                     }
                                                 }
                                             }
+                                        }
+                                    }
+                                    Ok(ClientMsg::LeaveSession { session_id }) => {
+                                        let Some(me) = device_id.clone() else {
+                                            continue;
+                                        };
+                                        let session_key = format!("session:{}", session_id);
+                                        let Ok(Some(mut session_data)) = state
+                                            .storage()
+                                            .get::<serde_json::Value>(&session_key)
+                                            .await
+                                        else {
+                                            continue;
+                                        };
+                                        let is_proposer = session_data
+                                            .get("session_info")
+                                            .and_then(|i| i.get("proposer_id"))
+                                            .and_then(|v| v.as_str())
+                                            == Some(me.as_str());
+                                        let broadcast = if is_proposer {
+                                            let _ = state.storage().delete(&session_key).await;
+                                            ServerMsg::SessionRemoved {
+                                                session_id: session_id.clone(),
+                                                reason: "Cancelled by creator".to_string(),
+                                            }
+                                        } else {
+                                            let not_me = |p: &serde_json::Value| {
+                                                p.as_str() != Some(me.as_str())
+                                            };
+                                            if let Some(list) = session_data
+                                                .get_mut("session_info")
+                                                .and_then(|i| i.get_mut("participants"))
+                                                .and_then(|v| v.as_array_mut())
+                                            {
+                                                list.retain(not_me);
+                                            }
+                                            if let Some(list) = session_data
+                                                .get_mut("active_participants")
+                                                .and_then(|v| v.as_array_mut())
+                                            {
+                                                list.retain(not_me);
+                                            }
+                                            let _ = state
+                                                .storage()
+                                                .put(&session_key, &session_data)
+                                                .await;
+                                            ServerMsg::Relay {
+                                                from: "server".to_string(),
+                                                data: serde_json::json!({
+                                                    "type": "participant_update",
+                                                    "session_id": session_id,
+                                                    "session_info": session_data
+                                                        .get("session_info")
+                                                        .cloned()
+                                                        .unwrap_or_default(),
+                                                }),
+                                            }
+                                        };
+
+                                        let device_sessions_key = format!("device_sessions:{}", me);
+                                        if let Ok(Some(mut ids)) = state
+                                            .storage()
+                                            .get::<Vec<String>>(&device_sessions_key)
+                                            .await
+                                        {
+                                            ids.retain(|id| id != &session_id);
+                                            let _ = state
+                                                .storage()
+                                                .put(&device_sessions_key, &ids)
+                                                .await;
+                                        }
+
+                                        let msg = serde_json::to_string(&broadcast).unwrap();
+                                        for ws in devices.borrow().values() {
+                                            let _ = ws.send_with_str(&msg);
                                         }
                                     }
                                     Err(_) => {

@@ -1635,8 +1635,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         Message::CancelDKG => {
             info!("🛑 CancelDKG requested by user");
 
-            // Clear DKG state
-            model.active_session = None;
+            // Clear DKG state (the executor tells the server we left).
+            let session_id = model.active_session.take().map(|s| s.session_id);
             model.pending_operations.clear();
             model.wallet_state.creating_wallet = None;
             model.wallet_state.joining_session = None;
@@ -1652,7 +1652,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .entry(crate::elm::model::ComponentId::MainMenu)
                 .or_insert(0);
 
-            Some(Command::CancelDKG)
+            Some(Command::CancelDKG { session_id })
         }
 
         Message::StartDKGProtocol => {
@@ -3315,6 +3315,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         Message::RemoveSession { session_id } => {
+            // The creator withdrew the invite we're waiting on: we're no
+            // longer in a ceremony.
+            if model.wallet_state.joining_session.as_deref() == Some(session_id.as_str()) {
+                model.wallet_state.joining_session = None;
+                model.active_session = None;
+            }
             let before = model.session_invites.len();
             model.session_invites.retain(|s| s.session_id != session_id);
             if model.session_invites.len() != before {
@@ -3790,6 +3796,32 @@ mod tests {
             },
         );
         assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn cancel_dkg_leaves_the_active_session_on_the_server() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        let cmd = update(&mut model, Message::CancelDKG);
+        assert!(matches!(
+            cmd,
+            Some(Command::CancelDKG { session_id: Some(ref id) }) if id == "s1"
+        ));
+    }
+
+    #[test]
+    fn creator_withdrawing_invite_unblocks_waiting_joiner() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        join(&mut model, "s1");
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "s1".to_string(),
+            },
+        );
+        assert!(model.wallet_state.joining_session.is_none() && model.active_session.is_none());
     }
 
     #[test]
