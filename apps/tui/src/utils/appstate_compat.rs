@@ -34,8 +34,14 @@ pub struct AppState<C: Ciphersuite> {
         std::collections::HashMap<String, Arc<dyn webrtc::data_channel::DataChannel>>,
     pub device_statuses:
         std::collections::HashMap<String, webrtc::peer_connection::RTCPeerConnectionState>,
+    /// Remote ICE candidates that arrived before their peer's remote
+    /// description was applied (each signal runs on its own task, so a
+    /// candidate can outrun the offer/answer). Flushed by the SDP handler.
     pub pending_ice_candidates:
         std::collections::HashMap<String, Vec<webrtc::peer_connection::RTCIceCandidateInit>>,
+    /// Peers whose remote description has been applied; candidates from these
+    /// go straight to the peer connection instead of `pending_ice_candidates`.
+    pub remote_description_set: std::collections::HashSet<String>,
     pub making_offer: std::collections::HashMap<String, bool>,
     pub mesh_status: MeshStatus,
     pub dkg_state: DkgState,
@@ -146,12 +152,6 @@ pub struct AppState<C: Ciphersuite> {
     // knowing about each other.
     pub server_msg_broadcast_tx:
         Option<tokio::sync::broadcast::Sender<Arc<starlab_signal_server::ServerMsg>>>,
-    // ICE candidate queue for handling race conditions
-    pub ice_candidate_queue: Arc<
-        tokio::sync::Mutex<
-            std::collections::HashMap<String, Vec<webrtc::peer_connection::RTCIceCandidateInit>>,
-        >,
-    >,
 
     // --- Unified DKG (ed25519 + secp256k1 from one ceremony) ---
     /// True when this node is running a UNIFIED ceremony (curve_type == "unified").
@@ -185,6 +185,16 @@ where
     <<<C as Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar:
         Send + Sync,
 {
+    /// A peer can carry protocol messages once its connection is `Connected`
+    /// AND its data channel has opened. With webrtc 0.21 the channel's
+    /// `OnOpen` can land after the connection-state event, so `Connected`
+    /// alone would start a ceremony whose first frames have nowhere to go.
+    pub fn peer_ready(&self, device_id: &str) -> bool {
+        self.device_statuses.get(device_id)
+            == Some(&webrtc::peer_connection::RTCPeerConnectionState::Connected)
+            && self.data_channels.contains_key(device_id)
+    }
+
     pub fn new() -> Self {
         Self {
             device_id: String::new(),
@@ -205,6 +215,7 @@ where
             data_channels: std::collections::HashMap::new(),
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
+            remote_description_set: std::collections::HashSet::new(),
             making_offer: std::collections::HashMap::new(),
             mesh_status: MeshStatus::Incomplete,
             dkg_state: DkgState::Idle,
@@ -258,9 +269,6 @@ where
             websocket_internal_cmd_tx: None,
             websocket_msg_tx: None,
             server_msg_broadcast_tx: None,
-            ice_candidate_queue: Arc::new(
-                tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            ),
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
@@ -291,6 +299,7 @@ where
             data_channels: std::collections::HashMap::new(),
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
+            remote_description_set: std::collections::HashSet::new(),
             making_offer: std::collections::HashMap::new(),
             mesh_status: MeshStatus::Incomplete,
             dkg_state: DkgState::Idle,
@@ -344,9 +353,6 @@ where
             websocket_internal_cmd_tx: None,
             websocket_msg_tx: None,
             server_msg_broadcast_tx: None,
-            ice_candidate_queue: Arc::new(
-                tokio::sync::Mutex::new(std::collections::HashMap::new()),
-            ),
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,

@@ -178,6 +178,20 @@ struct Cluster {
     elapsed_ms: u128,
 }
 
+/// Quit every runner and give the runtime a beat to reclaim their WebRTC/ICE
+/// sockets. Clusters run back to back in one process (the conformance matrix,
+/// reshare, reload); runners left alive accumulate ICE agents on loopback and
+/// the next cluster's mesh intermittently fails ("WebRTC connection FAILED").
+/// Keystore TempDirs must outlive this call.
+async fn shut_down(senders: Vec<UnboundedSender<Message>>, receivers: Vec<UnboundedReceiver<Evt>>) {
+    for tx in &senders {
+        let _ = tx.send(Message::Quit);
+    }
+    drop(senders);
+    drop(receivers);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+}
+
 /// Spawn an embedded signal server on an ephemeral loopback port and return
 /// its `ws://` URL. The server task runs until the process exits.
 async fn embedded_signal_server() -> anyhow::Result<String> {
@@ -350,6 +364,7 @@ pub async fn run_simulation(opts: SimulateOpts) -> anyhow::Result<SimulationResu
     let nodes = opts.nodes;
     let threshold = opts.threshold;
     let c = dkg_cluster(&opts).await?;
+    shut_down(c.senders, c.receivers).await;
     Ok(SimulationResult {
         nodes,
         threshold,
@@ -394,9 +409,10 @@ pub async fn run_signing_simulation_enc(
         opts.timeout_secs,
     )
     .await?;
+    shut_down(c.senders, c.receivers).await;
 
     let verified =
-        verify_signature(&opts.curve, &c.group_key, &signed_message, &signature).unwrap_or(false);
+        verify_account0_signature(&opts.curve, &c.group_key, &signed_message, &signature);
 
     Ok(SigningResult {
         nodes,
@@ -472,19 +488,8 @@ pub async fn run_reshare_e2e(
     let device_ids = c.device_ids.clone();
     let keystores = c.keystores; // move: must outlive the fresh runners
 
-    // Tear the DKG cluster DOWN before bringing the reshare cluster up: send
-    // Quit so each runner exits its loop and drops its `AppState` (closing the
-    // WebRTC peer connections + releasing their ICE/UDP sockets), then drop the
-    // handles and give the runtime a beat to reclaim those sockets. Without this
-    // the DKG cluster's ~N WebRTC agents stay alive alongside the reshare
-    // cluster's, and across a sequential e2e suite the accumulated ICE agents
-    // exhaust loopback sockets → "WebRTC connection FAILED" in the reshare mesh.
-    for tx in &c.senders {
-        let _ = tx.send(Message::Quit);
-    }
-    drop(c.senders);
-    drop(c.receivers);
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Tear the DKG cluster down before bringing the reshare cluster up.
+    shut_down(c.senders, c.receivers).await;
 
     let mut senders = Vec::new();
     let mut receivers = Vec::new();
@@ -568,8 +573,9 @@ pub async fn run_reshare_e2e(
         opts.timeout_secs,
     )
     .await?;
+    shut_down(senders, receivers).await;
     let signed_after_reshare =
-        verify_signature(&opts.curve, &dkg_group_key, &signed_message, &signature).unwrap_or(false);
+        verify_account0_signature(&opts.curve, &dkg_group_key, &signed_message, &signature);
 
     Ok(ReshareE2eResult {
         nodes,
@@ -630,12 +636,7 @@ pub async fn run_reload_list_simulation(opts: SimulateOpts) -> anyhow::Result<Re
 
     // Tear down the original runners; keep the TempDirs (in `c`) alive so the
     // on-disk keystores persist for the fresh runner to read.
-    for tx in &c.senders {
-        let _ = tx.send(Message::Quit);
-    }
-    drop(c.senders);
-    drop(c.receivers);
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    shut_down(c.senders, c.receivers).await;
 
     // Fresh runner on node 0's keystore. The runner auto-sends ListWallets on
     // startup (see HeadlessRunner::run), so the persisted wallets land in the
@@ -714,12 +715,7 @@ pub async fn run_reload_unlock_simulation(
     let device_id = c.device_ids[0].clone();
     let keystore_path = c.keystores[0].path().to_string_lossy().into_owned();
 
-    for tx in &c.senders {
-        let _ = tx.send(Message::Quit);
-    }
-    drop(c.senders);
-    drop(c.receivers);
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    shut_down(c.senders, c.receivers).await;
 
     // (unlocked, error) — exactly one of WalletUnlocked / WalletUnlockFailed.
     let (utx, mut urx) = unbounded_channel::<(bool, Option<String>)>();
@@ -913,6 +909,29 @@ pub async fn run_unknown_wallet_sign_simulation() -> anyhow::Result<UnlockAttemp
 }
 
 /// Verify a produced FROST signature against the group key for the given curve.
+/// Headless signing never signs with the root key ("BIP-44 all the way"): it
+/// signs with account 0 of the curve's primary chain. Verify against that
+/// child's public key, derived from the root group key.
+fn verify_account0_signature(
+    curve: &str,
+    root_key_hex: &str,
+    message_hex: &str,
+    sig_hex: &str,
+) -> bool {
+    let chain = if curve == "secp256k1" {
+        "ethereum"
+    } else {
+        "solana"
+    };
+    let Ok(root) = hex::decode(root_key_hex) else {
+        return false;
+    };
+    let Ok(child) = starlab_core::accounts::account_verifying_key(chain, curve, &root, 0) else {
+        return false;
+    };
+    verify_signature(curve, &hex::encode(child), message_hex, sig_hex).unwrap_or(false)
+}
+
 fn verify_signature(
     curve: &str,
     group_key_hex: &str,

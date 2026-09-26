@@ -13,7 +13,6 @@ use frost_ed25519::{
     keys::{KeyPackage as Ed25519KeyPackage, PublicKeyPackage as Ed25519PublicKeyPackage},
 };
 
-use starlab_core::rng::os_rng;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::Duration;

@@ -2179,24 +2179,13 @@ impl Command {
                             let connections = device_connections.lock().await;
                             let total_connections = connections.len();
 
-                            // Count how many are actually in Connected state. webrtc 0.21's
-                            // `PeerConnection` trait has no synchronous `connection_state()`
-                            // accessor (state is delivered only via
-                            // `PeerConnectionEventHandler::on_connection_state_change`), so
-                            // `SignalingHandler` mirrors each connection's last-seen state into
-                            // `device_statuses` and we read it from there instead.
-                            let mut connected_count = 0;
-                            for device_id in connections.keys() {
-                                let connection_state =
-                                    state.device_statuses.get(device_id).copied();
-                                if connection_state
-                                    == Some(
-                                        webrtc::peer_connection::RTCPeerConnectionState::Connected,
-                                    )
-                                {
-                                    connected_count += 1;
-                                }
-                            }
+                            // Count peers that can actually carry frames: connection
+                            // Connected (mirrored into `device_statuses` by
+                            // `SignalingHandler`) AND data channel open.
+                            let connected_count = connections
+                                .keys()
+                                .filter(|device_id| state.peer_ready(device_id))
+                                .count();
 
                             info!(
                                 "🔍 Mesh check: {}/{} peer connections in Connected state (total connections: {})",
@@ -2306,8 +2295,7 @@ impl Command {
                             .get(peer_id)
                             .copied()
                             .unwrap_or(webrtc::peer_connection::RTCPeerConnectionState::New);
-                        let is_connected = conn_state
-                            == webrtc::peer_connection::RTCPeerConnectionState::Connected;
+                        let is_connected = state.peer_ready(peer_id);
 
                         if is_connected {
                             connected_count += 1;
@@ -2423,9 +2411,7 @@ impl Command {
                                     state.device_statuses.get(participant).copied().unwrap_or(
                                         webrtc::peer_connection::RTCPeerConnectionState::New,
                                     );
-                                if conn_state
-                                    != webrtc::peer_connection::RTCPeerConnectionState::Connected
-                                {
+                                if !state.peer_ready(participant) {
                                     info!(
                                         "⚠️ Connection to {} is in state: {:?}",
                                         participant, conn_state
@@ -2809,6 +2795,10 @@ impl Command {
                     state.group_public_key = Some(*public_key_package.verifying_key());
                     state.public_key_package = Some(public_key_package);
                     state.current_wallet_id = Some(wallet_id.clone());
+                    // `ks` may have just materialized the account child; the
+                    // signing commands read its metadata (threshold,
+                    // participants) from the cached keystore, so refresh it.
+                    state.keystore = Some(std::sync::Arc::new(ks));
                 }
 
                 info!("✅ Wallet '{}' unlocked — ready to sign", wallet_id);

@@ -430,16 +430,6 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             password,
             label,
         } => {
-            // Idempotent: the CLI joiner retries refresh+join on a short cadence
-            // to beat the announce/connect race (the creator may announce before
-            // we connect, and `announce_session` is a one-shot broadcast). Once
-            // we've already joined this session, ignore repeat sends so we don't
-            // re-fire SubmitPassword and clobber an in-progress DKG.
-            if model.active_session.as_ref().map(|s| s.session_id.as_str())
-                == Some(session_id.as_str())
-            {
-                return None;
-            }
             match model
                 .session_invites
                 .iter()
@@ -447,6 +437,22 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .cloned()
             {
                 Some(invite) => {
+                    // Idempotent: the CLI joiner retries refresh+join on a short
+                    // cadence to beat the announce/connect race (the creator may
+                    // announce before we connect, and `announce_session` is a
+                    // one-shot broadcast). Once we've already joined this
+                    // ceremony, ignore repeat sends so we don't re-fire
+                    // SubmitPassword and clobber it in flight. Keyed on the whole
+                    // ceremony, not just the id: signing on a warm mesh reuses the
+                    // finished DKG session's id, and that invite must not be
+                    // mistaken for a repeat of the DKG join.
+                    if model.active_session.as_ref().is_some_and(|active| {
+                        active.session_id == invite.session_id
+                            && active.session_type == invite.session_type
+                            && active.signing_message_hex == invite.signing_message_hex
+                    }) {
+                        return None;
+                    }
                     if matches!(invite.session_type, SessionType::DKG) {
                         model.wallet_state.joining_session = Some(invite.session_id.clone());
                     }
@@ -3639,6 +3645,51 @@ mod tests {
             }
             other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
         }
+    }
+
+    fn headless_join(model: &mut Model, session_id: &str) -> Option<Command> {
+        update(
+            model,
+            Message::HeadlessJoinSession {
+                session_id: session_id.to_string(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn headless_join_repeat_of_active_ceremony_is_noop() {
+        let mut model = Model::new("dev".to_string());
+        model.session_invites.push(dkg_invite("s1"));
+        model.active_session = Some(dkg_invite("s1"));
+        assert!(headless_join(&mut model, "s1").is_none());
+    }
+
+    #[test]
+    fn headless_join_signing_that_reuses_the_dkg_session_id_is_joined() {
+        // Warm-path signing announces under the finished DKG session's id; the
+        // joiner's active_session still holds that DKG session.
+        let mut model = Model::new("dev".to_string());
+        model.active_session = Some(dkg_invite("s1"));
+        let signing = SessionInfo {
+            session_type: SessionType::Signing {
+                wallet_name: "w-ethereum-0".to_string(),
+                curve_type: "secp256k1".to_string(),
+                blockchain: "ethereum".to_string(),
+                group_public_key: "02ab".to_string(),
+            },
+            signing_message_hex: Some("deadbeef".to_string()),
+            ..dkg_invite("s1")
+        };
+        model.session_invites.push(signing.clone());
+        match headless_join(&mut model, "s1") {
+            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
+                assert_eq!(value, "pw");
+            }
+            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
+        }
+        assert_eq!(model.active_session, Some(signing));
     }
 
     #[test]

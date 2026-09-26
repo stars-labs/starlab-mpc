@@ -115,6 +115,32 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
     }
 }
 
+/// Account `account`'s public key on `chain` (standard BIP-44 path), derived
+/// from the root group key. PUBLIC derivation only — this is the key the
+/// account-child signing ceremony's signatures verify against.
+pub fn account_verifying_key(
+    chain: &str,
+    curve: &str,
+    group_key_bytes: &[u8],
+    account: u32,
+) -> Result<Vec<u8>> {
+    let path_s = standard_path(chain, account)
+        .ok_or_else(|| FrostError::DerivationError(format!("no path for {chain}")))?;
+    let path = DerivationPath::parse(&path_s)?;
+    match curve {
+        "ed25519" => {
+            derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(group_key_bytes, &path)
+        }
+        "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
+            group_key_bytes,
+            &path,
+        ),
+        other => Err(FrostError::DerivationError(format!(
+            "unsupported curve {other}"
+        ))),
+    }
+}
+
 /// All of account `i`'s addresses for one curve's group key:
 /// `(chain display name, path, address)` per chain. PUBLIC derivation only.
 pub fn account_addresses(
@@ -126,22 +152,7 @@ pub fn account_addresses(
     for (key, display) in chains_for_curve(curve) {
         let path_s = standard_path(key, account)
             .ok_or_else(|| FrostError::DerivationError(format!("no path for {key}")))?;
-        let path = DerivationPath::parse(&path_s)?;
-        let child = match curve {
-            "ed25519" => derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
-                group_key_bytes,
-                &path,
-            )?,
-            "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
-                group_key_bytes,
-                &path,
-            )?,
-            other => {
-                return Err(FrostError::DerivationError(format!(
-                    "unsupported curve {other}"
-                )));
-            }
-        };
+        let child = account_verifying_key(key, curve, group_key_bytes, account)?;
         out.push((
             (*display).to_string(),
             path_s,

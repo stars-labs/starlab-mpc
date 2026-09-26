@@ -281,6 +281,7 @@ fn spawn_offer_handler<C>(
             return;
         }
         info!("✅ Set remote description (offer) from {}", from_device);
+        flush_buffered_candidates(&from_device, &pc, &app_state).await;
 
         let answer = match pc.create_answer(None).await {
             Ok(a) => a,
@@ -345,6 +346,7 @@ where
                 "✅ Set remote description (answer) from {}, connection establishing",
                 from_device
             );
+            flush_buffered_candidates(&from_device, &pc, &app_state).await;
         }
     });
 }
@@ -362,20 +364,6 @@ fn spawn_ice_handler<C>(
     <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
 {
     tokio::spawn(async move {
-        info!("🎯 Adding ICE candidate from {}", from_device);
-        let device_connections = {
-            let state = app_state.lock().await;
-            state.device_connections.clone()
-        };
-        let conns = device_connections.lock().await;
-        let Some(pc) = conns.get(&from_device).cloned() else {
-            error!(
-                "❌ No peer connection found for {} when adding ICE candidate",
-                from_device
-            );
-            return;
-        };
-        drop(conns);
         let init = webrtc::peer_connection::RTCIceCandidateInit {
             candidate,
             sdp_mid: Some(sdp_mid),
@@ -383,12 +371,71 @@ fn spawn_ice_handler<C>(
             username_fragment: None,
             url: None,
         };
-        if let Err(e) = pc.add_ice_candidate(init).await {
-            error!("❌ Failed to add ICE candidate from {}: {}", from_device, e);
-        } else {
-            info!("✅ Added ICE candidate from {}", from_device);
-        }
+        // Each signal runs on its own task, so a candidate can outrun the
+        // offer/answer it belongs to (or even the peer connection's creation).
+        // Check-and-buffer under the AppState lock; the SDP handler marks the
+        // peer and drains the buffer under the same lock, so none is lost.
+        let device_connections = {
+            let mut state = app_state.lock().await;
+            if !state.remote_description_set.contains(&from_device) {
+                state
+                    .pending_ice_candidates
+                    .entry(from_device.clone())
+                    .or_default()
+                    .push(init);
+                info!(
+                    "⏳ Buffered ICE candidate from {} until its remote description is set",
+                    from_device
+                );
+                return;
+            }
+            state.device_connections.clone()
+        };
+        let Some(pc) = device_connections.lock().await.get(&from_device).cloned() else {
+            error!(
+                "❌ No peer connection found for {} when adding ICE candidate",
+                from_device
+            );
+            return;
+        };
+        add_candidate(&from_device, &pc, init).await;
     });
+}
+
+/// Mark `device_id`'s remote description as applied and feed it every
+/// candidate that arrived early.
+async fn flush_buffered_candidates<C>(
+    device_id: &str,
+    pc: &Arc<dyn PeerConnection>,
+    app_state: &Arc<Mutex<AppState<C>>>,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+    <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
+    <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
+{
+    let buffered = {
+        let mut state = app_state.lock().await;
+        state.remote_description_set.insert(device_id.to_string());
+        state
+            .pending_ice_candidates
+            .remove(device_id)
+            .unwrap_or_default()
+    };
+    for init in buffered {
+        add_candidate(device_id, pc, init).await;
+    }
+}
+
+async fn add_candidate(
+    device_id: &str,
+    pc: &Arc<dyn PeerConnection>,
+    init: webrtc::peer_connection::RTCIceCandidateInit,
+) {
+    if let Err(e) = pc.add_ice_candidate(init).await {
+        error!("❌ Failed to add ICE candidate from {}: {}", device_id, e);
+    } else {
+        info!("✅ Added ICE candidate from {}", device_id);
+    }
 }
 
 /// Get an existing peer connection for `device_id`, or create + wire a new

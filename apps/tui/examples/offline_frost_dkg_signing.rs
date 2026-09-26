@@ -9,7 +9,6 @@ use frost_secp256k1::{
     round2::SignatureShare,
 };
 use serde::{Deserialize, Serialize};
-use starlab_core::rng::os_rng;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
