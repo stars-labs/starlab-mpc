@@ -15,7 +15,7 @@
 // ===================================================================
 
 // Application-Level Messages (sent over established WebRTC Data Channel)
-// Format compatible with the TUI node (apps/tui) wire protocol
+// Format compatible with the TUI node (apps/tui-node) wire protocol
 export type WebRTCAppMessage =
   // Basic communication
   | { webrtc_msg_type: 'SimpleMessage'; text: string }
@@ -33,6 +33,14 @@ export type WebRTCAppMessage =
   | { webrtc_msg_type: 'SigningCommitment'; signing_id: string; sender_identifier: any; commitment: any } // FROST commitment
   | { webrtc_msg_type: 'SignatureShare'; signing_id: string; sender_identifier: any; share: any } // FROST signature share
   | { webrtc_msg_type: 'AggregatedSignature'; signing_id: string; signature: string } // Final signature as string
+
+  // M3 Reshare Messages (rotate shares, same group key). Packages are
+  // hex strings straight from the FrostReshare* WASM; the sender's
+  // FROST id is looked up in the wallet's stored device→id map (OLD
+  // cohort ids, gapped after a removal), not derived from any list
+  // position.
+  | { webrtc_msg_type: 'ReshareRound1Package'; session_id: string; package: string }
+  | { webrtc_msg_type: 'ReshareRound2Package'; session_id: string; package: string }
 
   // DKG Package Request Messages (for handling missing packages)
   | { webrtc_msg_type: 'DkgPackageRequest'; round: 1 | 2; requester: string } // Request a missing DKG package

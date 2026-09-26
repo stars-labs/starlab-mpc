@@ -12,6 +12,204 @@ import type { MeshStatus } from './mesh';
 import { MeshStatusType } from './mesh';
 import { DkgState } from './dkg';
 
+export type WalletCurve = 'secp256k1' | 'ed25519';
+export type ProtocolBlockchain = 'ethereum' | 'solana';
+export type EvmChain = 'ethereum' | 'polygon' | 'arbitrum' | 'optimism' | 'base';
+export type LimitedChain = 'bitcoin' | 'sui';
+export type SupportedChain = EvmChain | 'solana' | LimitedChain;
+export type KnownChain = SupportedChain;
+
+export interface ChainMetadata {
+  id: KnownChain;
+  label: string;
+  shortLabel: string;
+  family: 'EVM' | 'Solana' | 'Bitcoin' | 'Sui';
+  curve: WalletCurve;
+  protocolBlockchain: ProtocolBlockchain;
+  enabled: boolean;
+  status: 'enabled' | 'limited';
+  note?: string;
+}
+
+export const CHAIN_METADATA: Record<KnownChain, ChainMetadata> = {
+  ethereum: {
+    id: 'ethereum',
+    label: 'Ethereum',
+    shortLabel: 'Ethereum',
+    family: 'EVM',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'enabled',
+  },
+  polygon: {
+    id: 'polygon',
+    label: 'Polygon',
+    shortLabel: 'Polygon',
+    family: 'EVM',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'enabled',
+  },
+  arbitrum: {
+    id: 'arbitrum',
+    label: 'Arbitrum',
+    shortLabel: 'Arbitrum',
+    family: 'EVM',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'enabled',
+  },
+  optimism: {
+    id: 'optimism',
+    label: 'Optimism',
+    shortLabel: 'Optimism',
+    family: 'EVM',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'enabled',
+  },
+  base: {
+    id: 'base',
+    label: 'Base',
+    shortLabel: 'Base',
+    family: 'EVM',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'enabled',
+  },
+  solana: {
+    id: 'solana',
+    label: 'Solana',
+    shortLabel: 'Solana',
+    family: 'Solana',
+    curve: 'ed25519',
+    protocolBlockchain: 'solana',
+    enabled: true,
+    status: 'enabled',
+  },
+  bitcoin: {
+    id: 'bitcoin',
+    label: 'Bitcoin',
+    shortLabel: 'Bitcoin',
+    family: 'Bitcoin',
+    curve: 'secp256k1',
+    protocolBlockchain: 'ethereum',
+    enabled: true,
+    status: 'limited',
+    note: 'Address derivation and threshold signing are available; Bitcoin transaction building/broadcast is not wired yet.',
+  },
+  sui: {
+    id: 'sui',
+    label: 'Sui',
+    shortLabel: 'Sui',
+    family: 'Sui',
+    curve: 'ed25519',
+    protocolBlockchain: 'solana',
+    enabled: true,
+    status: 'limited',
+    note: 'Address derivation and threshold signing are available; Sui transaction building/broadcast is not wired yet.',
+  },
+};
+
+export const SUPPORTED_CHAINS: readonly SupportedChain[] = [
+  'ethereum',
+  'polygon',
+  'arbitrum',
+  'optimism',
+  'base',
+  'solana',
+  'bitcoin',
+  'sui',
+] as const;
+
+export const LIMITED_CHAINS: readonly LimitedChain[] = ['bitcoin', 'sui'] as const;
+export const EVM_CHAINS: readonly EvmChain[] = [
+  'ethereum',
+  'polygon',
+  'arbitrum',
+  'optimism',
+  'base',
+] as const;
+
+export const CURVE_COMPATIBLE_CHAINS: Record<WalletCurve, SupportedChain[]> = {
+  secp256k1: ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base', 'bitcoin'],
+  ed25519: ['solana', 'sui'],
+};
+
+export function isKnownChain(chain: unknown): chain is KnownChain {
+  return (
+    typeof chain === 'string' &&
+    Object.prototype.hasOwnProperty.call(CHAIN_METADATA, chain)
+  );
+}
+
+export function isSupportedChain(chain: unknown): chain is SupportedChain {
+  return isKnownChain(chain) && CHAIN_METADATA[chain].enabled;
+}
+
+export function isEvmChain(chain: unknown): chain is EvmChain {
+  return typeof chain === 'string' && (EVM_CHAINS as readonly string[]).includes(chain);
+}
+
+export function getChainLabel(chain: string | undefined | null): string {
+  return isKnownChain(chain) ? CHAIN_METADATA[chain].label : 'Unknown chain';
+}
+
+export function getChainShortLabel(chain: string | undefined | null): string {
+  return isKnownChain(chain) ? CHAIN_METADATA[chain].shortLabel : 'Unknown';
+}
+
+export function getCompatibleChains(curveType: string): SupportedChain[] {
+  return CURVE_COMPATIBLE_CHAINS[curveType as WalletCurve] || [];
+}
+
+export function getRequiredCurve(chain: SupportedChain): WalletCurve {
+  return CHAIN_METADATA[chain].curve;
+}
+
+export function getProtocolBlockchainForChain(chain: SupportedChain): ProtocolBlockchain {
+  return CHAIN_METADATA[chain].protocolBlockchain;
+}
+
+export function getDefaultChainForCurve(curve: WalletCurve): SupportedChain {
+  return curve === 'ed25519' ? 'solana' : 'ethereum';
+}
+
+export function normalizeDerivedAddressChain(chain: string | undefined | null): SupportedChain | null {
+  const normalized = String(chain ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  switch (normalized) {
+    case 'eth':
+    case 'ethereum':
+      return 'ethereum';
+    case 'btc':
+    case 'bitcoin':
+      return 'bitcoin';
+    case 'sol':
+    case 'solana':
+      return 'solana';
+    case 'sui':
+      return 'sui';
+    case 'polygon':
+    case 'matic':
+      return 'polygon';
+    case 'arbitrum':
+    case 'arbitrumone':
+      return 'arbitrum';
+    case 'optimism':
+    case 'op':
+      return 'optimism';
+    case 'base':
+      return 'base';
+    default:
+      return null;
+  }
+}
+
 export interface AppState {
   deviceId: string;
   connecteddevices: string[];
@@ -59,7 +257,7 @@ export interface AppState {
   meshStatus: MeshStatus;
   dkgState: DkgState;
   webrtcConnections: Record<string, boolean>;
-  blockchain?: "ethereum" | "solana";
+  blockchain?: ProtocolBlockchain;
   /**
    * FROST ciphersuite selection for the current wallet. Historically
    * tracked alongside `blockchain` for legacy code paths; setters
@@ -67,13 +265,13 @@ export interface AppState {
    * Writers: StateManager.setBlockchain / setCurve.
    * Readers: StateManager.getCurve / getBlockchain.
    */
-  curve?: "secp256k1" | "ed25519";
+  curve?: WalletCurve;
   /**
    * User-facing "chain" alias for blockchain. Some older code paths
    * persist + read this key; kept as an alias field so both work.
    * New code should prefer `blockchain`.
    */
-  chain?: "ethereum" | "solana";
+  chain?: SupportedChain;
 
   // --- Popup UI state (persisted in appState so a popup reopen
   // sees the same form / toggle values) ---
@@ -114,7 +312,8 @@ export interface AppState {
   dkgLastResult?: {
     groupPublicKey: string;
     address: string | null;
-    blockchain: "ethereum" | "solana";
+    blockchain: ProtocolBlockchain;
+    chain?: SupportedChain;
     sessionId: string | null;
     threshold: number;
     total: number;
@@ -144,7 +343,7 @@ export interface AppState {
     signingId: string;
     signature: string;
     messageHex: string;
-    blockchain: "ethereum" | "solana";
+    blockchain: ProtocolBlockchain;
     sessionId: string;
     completedAt: number;
   };
@@ -164,41 +363,6 @@ export const INITIAL_APP_STATE: AppState = {
   totalParticipants: 3,
   threshold: 2,
 };
-
-/**
- * All chain names the wallet recognizes. secp256k1-family (ethereum
- * + its L2s like polygon/arbitrum/optimism/base) and ed25519-family
- * (solana, sui). Routing to underlying blockchain infrastructure
- * happens via CHAIN_TO_BLOCKCHAIN in networkService.ts.
- */
-export type SupportedChain =
-  | 'ethereum'
-  | 'polygon'
-  | 'arbitrum'
-  | 'optimism'
-  | 'base'
-  | 'solana'
-  | 'sui';
-
-export const CURVE_COMPATIBLE_CHAINS: Record<string, SupportedChain[]> = {
-  'secp256k1': ['ethereum', 'polygon', 'arbitrum', 'optimism', 'base'],
-  'ed25519': ['solana', 'sui'],
-};
-
-export function getCompatibleChains(curveType: string): SupportedChain[] {
-  return CURVE_COMPATIBLE_CHAINS[curveType] || [];
-}
-
-export function getRequiredCurve(chain: SupportedChain): 'secp256k1' | 'ed25519' {
-  for (const [curve, chains] of Object.entries(CURVE_COMPATIBLE_CHAINS)) {
-    if (chains.includes(chain)) {
-      // CURVE_COMPATIBLE_CHAINS keys are hardcoded 'secp256k1' / 'ed25519';
-      // Object.entries widens to `string`, hence the cast.
-      return curve as 'secp256k1' | 'ed25519';
-    }
-  }
-  return 'secp256k1';
-}
 
 /** EVM chains whose standard EOA transactions verify with ECDSA, not Schnorr. */
 const EVM_EOA_CHAINS: ReadonlySet<string> = new Set([

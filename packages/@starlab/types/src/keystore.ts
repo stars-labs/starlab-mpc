@@ -1,3 +1,5 @@
+import type { SupportedChain } from './appstate';
+
 // ===================================================================
 // KEYSTORE TYPES - FROST KEY SHARE STORAGE
 // ===================================================================
@@ -107,19 +109,27 @@ export interface WalletFile {
  * Core FROST key share data for extension operations
  */
 export interface KeyShareData {
-    // Core FROST key material
-    key_package: string; // Serialized FROST KeyPackage (encrypted)
-    group_public_key: string; // The group's public key
-    
+    // Core FROST key material — exactly the engine keystore's
+    // (export_keystore / finalize_dkg / finalize_reshare) fields, so
+    // the canonical engine JSON can be rebuilt losslessly.
+    key_package: string; // Engine KeyPackage (base64) — SECRET share
+    public_key_package: string; // Engine PublicKeyPackage (base64)
+    group_public_key: string; // Group verifying key, hex (NEVER the keystore JSON)
+
     // Session information
     session_id: string; // DKG session identifier
     device_id: string; // This device's identifier in the group
-    participant_index: number; // This participant's index (1-based)
-    
+    participant_index: number; // This device's FROST identifier (1-based)
+
     // Threshold configuration
     threshold: number; // Required signers (t)
     total_participants: number; // Total participants (n)
     participants: string[]; // List of all participant device IDs
+    /** device id → FROST identifier for every current shareholder.
+     *  Explicit because ids are NOT sorted positions after a removal
+     *  reshare (e.g. cohort {1,3}); signing and resharing must look
+     *  ids up here instead of recomputing them. */
+    participant_identifiers: Record<string, number>;
     
     // Blockchain specific
     curve: 'secp256k1' | 'ed25519'; // Ethereum or Solana
@@ -237,7 +247,7 @@ export interface KeyDerivationParams {
 export interface NewAccountSession {
     session_id: string;
     name: string;
-    blockchain: 'ethereum' | 'solana';
+    blockchain: SupportedChain;
     threshold: number;
     total_participants: number;
     participants: string[];

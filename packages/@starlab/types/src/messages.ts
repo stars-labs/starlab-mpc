@@ -1,7 +1,7 @@
 import type { SessionInfo, SessionProposal, SessionResponse } from './session';
 import type { DkgState } from './dkg';
 import type { MeshStatus } from './mesh';
-import type { AppState } from './appstate';
+import type { AppState, ProtocolBlockchain, SupportedChain } from './appstate';
 import type { WebRTCAppMessage as DataChannelMessage } from './webrtc';
 import type { Account as WalletAccount } from './account';
 import { ServerMsg, ClientMsg, WebSocketMessagePayload, WebRTCSignal } from './websocket';
@@ -58,11 +58,11 @@ export type PopupToBackgroundMessage = BaseMessage & (
     | { type: 'getWebRTCStatus' }
     | { type: 'getEthereumAddress' }
     | { type: 'getSolanaAddress' }
-    | { type: 'setBlockchain'; blockchain: "ethereum" | "solana" }
+    | { type: 'setBlockchain'; blockchain: SupportedChain }
 
     // session management
     | { type: 'proposeSession'; session_id: string; total: number; threshold: number; participants: string[] }
-    | { type: 'acceptSession'; session_id: string; accepted: boolean; blockchain?: "ethereum" | "solana" }
+    | { type: 'acceptSession'; session_id: string; accepted: boolean; blockchain?: ProtocolBlockchain }
     
     // MPC signing operations
     | { type: 'requestSigning'; signingId: string; transactionData: string; requiredSigners: number }
@@ -90,29 +90,34 @@ export type BackgroundToOffscreenMessage = BaseMessage & (
     | { type: 'getWebRTCStatus' }
     | { type: 'init'; deviceId: string; wsUrl: string }
     | { type: 'relayViaWs'; to: string; data: any }
-    | { type: 'sessionAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: "ethereum" | "solana" }
-    | { type: 'sessionAllAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: "ethereum" | "solana" }
+    | { type: 'sessionAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: ProtocolBlockchain }
+    | { type: 'sessionAllAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: ProtocolBlockchain }
     | { type: 'sessionResponseUpdate'; sessionInfo: SessionInfo; currentdeviceId: string }
     | { type: 'getEthereumAddress' }
     | { type: 'getSolanaAddress' }
     | { type: 'getDkgStatus' }
     | { type: 'getGroupPublicKey' }
-    | { type: 'setBlockchain'; blockchain: "ethereum" | "solana" }
+    | { type: 'setBlockchain'; blockchain: ProtocolBlockchain }
     | { type: 'requestSigning'; signingId: string; transactionData: string; requiredSigners: number }
     | { type: 'requestMessageSignature'; signingId: string; message: string; fromAddress: string }
     | { type: 'requestTransactionSignature'; signingId: string; transactionData: string; fromAddress: string }
     // Ext-2d-offscreen: signing-ceremony trigger. Fires when a
     // session reaches threshold (see webSocketManager.maybeTriggerCeremony);
     // offscreen loads keystore + kicks off FROST round 1.
-    | { type: 'sessionReadyForSigning'; sessionInfo: SessionInfo; blockchain?: "ethereum" | "solana" }
+    | { type: 'sessionReadyForSigning'; sessionInfo: SessionInfo; blockchain?: ProtocolBlockchain }
+    // M3 reshare: ceremony trigger. Fires when a reshare session's
+    // full NEW cohort has joined (maybeTriggerCeremony); offscreen
+    // fetches the wallet's keystore (getWalletKeystore) and runs
+    // the FROST reshare rounds over the mesh.
+    | { type: 'sessionReadyForReshare'; sessionInfo: SessionInfo; blockchain?: ProtocolBlockchain; walletId: string }
     // Keystore WASM export: background requests offscreen dump the
     // serialized keystore JSON after DKG finalize or import, so it
     // can be encrypted + persisted via KeystoreManager.
-    | { type: 'exportKeystore'; chain?: "ethereum" | "solana" }
+    | { type: 'exportKeystore'; chain?: ProtocolBlockchain }
     // Keystore WASM import: background hands offscreen raw keystore
     // JSON (e.g. from CLI .dat conversion) to load into the FROST
     // instance before signing.
-    | { type: 'importKeystore'; chain: "ethereum" | "solana"; keystoreData: string }
+    | { type: 'importKeystore'; chain: ProtocolBlockchain; keystoreData: string }
 );
 
 // --- Offscreen to Background Message Types (Offscreen sends to Background) ---
@@ -134,7 +139,7 @@ export type OffscreenToBackgroundMessage = BaseMessage & (
         type: 'dkgComplete';
         groupPublicKey: string;
         address: string | null;
-        blockchain: 'ethereum' | 'solana';
+        blockchain: ProtocolBlockchain;
         sessionId: string | null;
         threshold: number;
         total: number;
@@ -169,6 +174,34 @@ export type OffscreenToBackgroundMessage = BaseMessage & (
         sessionId?: string;
       }
     | { type: 'signingError'; signingId: string; error: string }
+    // M3 reshare: per-round progress. `state` is the ReshareState
+    // string name; received counts let the popup render "round N
+    // (k/n packages)".
+    | {
+        type: 'reshareStateUpdate';
+        sessionId: string;
+        walletId: string;
+        state: string;
+        round1Received: string[];
+        round2Received: string[];
+        participants: string[];
+        error?: string;
+      }
+    // M3 reshare: ceremony finalized. Carries the NEW keystore JSON
+    // (same group public key, fresh shares) — stateManager replaces
+    // the wallet's stored encrypted share with this.
+    | {
+        type: 'reshareComplete';
+        sessionId: string;
+        walletId: string;
+        newKeystoreJson: string;
+        groupPublicKey: string;
+        threshold: number;
+        total: number;
+        participants: string[];
+        participantIndex: number | null;
+        blockchain: ProtocolBlockchain;
+      }
     | { type: 'messageSignatureComplete'; signingId: string; signature: string }
     | { type: 'messageSignatureError'; signingId: string; error: string }
 );
@@ -206,7 +239,7 @@ export type BackgroundToPopupMessage =
     // Ext-1d: account list changed (wallet saved / removed). Popup
     // re-fetches the relevant blockchain's accounts to refresh the
     // picker. Emitted by completeAccountCreation and similar flows.
-    | { type: "accountsUpdated"; blockchain: "ethereum" | "solana"; accounts: WalletAccount[] } & BaseMessage;
+    | { type: "accountsUpdated"; blockchain: ProtocolBlockchain; accounts: WalletAccount[] } & BaseMessage;
 
 // --- Wrapper Message Types for Communication Direction ---
 export type BackgroundToOffscreenWrapper = {
@@ -288,7 +321,7 @@ export function validateSessionProposal(msg: PopupToBackgroundMessage): msg is P
         'participants' in msg && Array.isArray(msg.participants);
 }
 
-export function validateSessionAcceptance(msg: PopupToBackgroundMessage): msg is PopupToBackgroundMessage & { session_id: string; accepted: boolean; blockchain?: "ethereum" | "solana" } {
+export function validateSessionAcceptance(msg: PopupToBackgroundMessage): msg is PopupToBackgroundMessage & { session_id: string; accepted: boolean; blockchain?: ProtocolBlockchain } {
     return msg.type === 'acceptSession' &&
         'session_id' in msg && typeof msg.session_id === 'string' &&
         'accepted' in msg && typeof msg.accepted === 'boolean' &&
@@ -336,6 +369,19 @@ export const MESSAGE_TYPES = {
     // the signal server to the proposer so they see a toast
     // (not a silent timeout). Payload: {session_id}.
     DECLINE_SIGNING_SESSION: "declineSigningSession",
+    // M3 reshare: rotate / redistribute an existing wallet's key
+    // shares without changing the group public key. Mirror of
+    // CREATE_SIGNING_SESSION on the announce side: builds
+    // session_info with session_type="reshare", wallet_name,
+    // group_public_key, blockchain, and reshare_old_participants,
+    // then announces. Payload:
+    // {walletId, newThreshold?, removeDeviceIds?}.
+    CREATE_RESHARE_SESSION: "createReshareSession",
+    // M3 reshare: popup → background "what cohort does wallet X
+    // have?" — returns {threshold, total, participants, deviceId,
+    // groupPublicKey, curve} from the decrypted key share (keystore
+    // must be unlocked). Payload: {walletId}.
+    GET_WALLET_COHORT: "getWalletCohort",
     RELAY: "relay",
     FROM_OFFSCREEN: "fromOffscreen",
     OFFSCREEN_READY: "offscreenReady",
