@@ -18,9 +18,9 @@ crate-type = ["cdylib"]
 wasm-bindgen = "0.2.129"
 
 # JSON <-> FROST round1/round2/commitment/share serialization.
-# (`serde` itself isn't a direct dep — serde_json re-exports the
-# traits it needs, and lib.rs has no custom #[derive(Serialize)].)
 serde_json = "1.0.151"
+# `DeserializeOwned` bound for `decode_wire` (JSON-or-FROST-binary peers).
+serde = "1"
 
 # Optional panic-hook wired via `default = ["console_error_panic_hook"]`;
 # call site is `console_error_panic_hook::set_once()` inside the gated

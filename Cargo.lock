@@ -5669,6 +5669,7 @@ dependencies = [
  "frost-secp256k1-tr",
  "getrandom 0.4.3",
  "hex",
+ "serde",
  "serde_json",
  "starlab-core",
  "wasm-bindgen",
