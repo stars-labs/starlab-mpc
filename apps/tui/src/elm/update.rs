@@ -109,7 +109,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 Screen::MainMenu | Screen::Welcome => {
                     model.ui_state.focus = crate::elm::model::ComponentId::MainMenu;
                 }
-                Screen::DKGProgress { .. } => {
+                Screen::DKGProgress { .. } | Screen::SigningProgress { .. } => {
                     model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
                     model
                         .ui_state
@@ -195,7 +195,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         model.ui_state.focus = crate::elm::model::ComponentId::ThresholdConfig;
                         debug!("🎯 Focus set to ThresholdConfig");
                     }
-                    Screen::DKGProgress { .. } => {
+                    Screen::DKGProgress { .. } | Screen::SigningProgress { .. } => {
                         model.ui_state.focus = crate::elm::model::ComponentId::DKGProgress;
                         debug!("🎯 Focus set to DKGProgress");
                     }
@@ -1645,11 +1645,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         Message::CancelDKG => {
             info!("🛑 CancelDKG requested by user");
 
-            // Clear DKG state (the executor tells the server we left).
+            // Clear DKG / signing state (the executor tells the server we left).
             let session_id = model.active_session.take().map(|s| s.session_id);
             model.pending_operations.clear();
             model.wallet_state.creating_wallet = None;
             model.wallet_state.joining_session = None;
+            model.wallet_state.pending_sign_message = None;
+            model.wallet_state.pending_sign_wallet_id = None;
+            model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.signing_commitments_received.clear();
+            model.wallet_state.signing_shares_received.clear();
             model.ui_state.modal = None;
 
             // Navigate back to main menu
@@ -2500,7 +2505,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         debug!("Already on Participants field");
                     }
                 }
-                Screen::DKGProgress { .. } => {
+                Screen::DKGProgress { .. } | Screen::SigningProgress { .. } => {
                     // Switch between Cancel DKG and Copy Session ID buttons
                     let current_idx = model
                         .ui_state
@@ -2561,7 +2566,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         debug!("Already on Threshold field");
                     }
                 }
-                Screen::DKGProgress { .. } => {
+                Screen::DKGProgress { .. } | Screen::SigningProgress { .. } => {
                     // Switch between Cancel DKG and Copy Session ID buttons
                     let current_idx = model
                         .ui_state
@@ -2924,7 +2929,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         None
                     }
                 }
-                Screen::DKGProgress { .. } => {
+                Screen::DKGProgress { .. } | Screen::SigningProgress { .. } => {
                     let selected_action = model
                         .ui_state
                         .selected_indices
@@ -3841,6 +3846,33 @@ mod tests {
         let mut model = Model::new("dev".to_string());
         join(&mut model, "nope");
         assert!(model.wallet_state.joining_session.is_none());
+    }
+
+    #[test]
+    fn enter_on_the_signing_screen_cancels_the_ceremony() {
+        let mut model = Model::new("dev".to_string());
+        model.push_screen(Screen::SigningProgress {
+            request_id: "inline".to_string(),
+        });
+        match update(&mut model, Message::SelectItem { index: 0 }) {
+            Some(Command::SendMessage(Message::CancelDKG)) => {}
+            other => panic!("expected SendMessage(CancelDKG), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cancel_drops_an_in_flight_signing_request() {
+        let mut model = Model::new("dev".to_string());
+        model.wallet_state.pending_sign_message = Some(vec![1; 32]);
+        model.wallet_state.pending_sign_wallet_id = Some("w-ethereum-0".to_string());
+        model
+            .wallet_state
+            .signing_commitments_received
+            .insert("peer".to_string());
+        update(&mut model, Message::CancelDKG);
+        assert!(model.wallet_state.pending_sign_message.is_none());
+        assert!(model.wallet_state.pending_sign_wallet_id.is_none());
+        assert!(model.wallet_state.signing_commitments_received.is_empty());
     }
 
     #[test]

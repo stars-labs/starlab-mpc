@@ -13,9 +13,10 @@ use tracing::info;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Log file location
-    #[arg(long, default_value = "~/.frost_keystore/logs/starlab-mpc.log")]
-    log_location: String,
+    /// Log file location (`~/` is expanded). Truncated on each start.
+    /// [default: ~/.frost_keystore/logs/starlab-mpc-<device-id>.log]
+    #[arg(long)]
+    log_location: Option<String>,
 
     /// Log level (error, warn, info, debug, trace)
     #[arg(long, default_value = "info")]
@@ -110,21 +111,26 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_else(|_| "default-node".to_string())
     });
 
-    // Setup logging to file (since TUI takes over terminal)
-    let log_filename = format!("starlab-mpc-{}.log", device_id);
-    println!("Logging to: {}", log_filename);
-    println!(
-        "Current directory: {:?}",
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    // Setup logging to file (since TUI takes over terminal). The default is
+    // per device so several instances sharing a home don't clobber each other.
+    let log_path = expand_home(
+        &args
+            .log_location
+            .clone()
+            .unwrap_or_else(|| format!("~/.frost_keystore/logs/starlab-mpc-{device_id}.log")),
     );
+    if let Some(dir) = log_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    println!("Logging to: {}", log_path.display());
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(true) // Start fresh each run
-        .open(&log_filename)
+        .open(&log_path)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to create log file {}: {}", log_filename, e);
+            eprintln!("Failed to create log file {}: {}", log_path.display(), e);
             std::fs::File::create("/dev/null").unwrap()
         });
 
@@ -140,7 +146,7 @@ async fn main() -> anyhow::Result<()> {
         "Working directory: {:?}",
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
     );
-    info!("Log file: {}", log_filename);
+    info!("Log file: {}", log_path.display());
     info!("Signal server: {}", args.signal_server);
     info!("Offline mode: {}", args.offline);
 
@@ -256,5 +262,38 @@ async fn run_elm_tui(
             tracing::error!("❌ TUI error: {}", e);
             Err(e)
         }
+    }
+}
+
+/// Expand a leading `~/` to `$HOME` (same home resolution as the keystore).
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+                .join(rest)
+        }
+        None => std::path::PathBuf::from(path),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_home;
+
+    #[test]
+    fn expands_leading_tilde_only() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        assert_eq!(
+            expand_home("~/logs/x.log"),
+            std::path::Path::new(&home).join("logs/x.log")
+        );
+        assert_eq!(
+            expand_home("/tmp/x.log"),
+            std::path::PathBuf::from("/tmp/x.log")
+        );
+        assert_eq!(
+            expand_home("rel/~/x.log"),
+            std::path::PathBuf::from("rel/~/x.log")
+        );
     }
 }

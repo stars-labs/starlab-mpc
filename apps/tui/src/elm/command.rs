@@ -3323,11 +3323,15 @@ impl Command {
             }
 
             Command::CancelDKG { session_id } => {
-                let ws_tx = {
+                let (session_id, ws_tx) = {
                     let mut state = app_state.lock().await;
+                    // A signing creator has no Model-side session; the one it
+                    // announced lives only on AppState.
+                    let session_id =
+                        session_id.or_else(|| state.session.as_ref().map(|s| s.session_id.clone()));
                     state.session = None;
                     state.dkg_in_progress = false;
-                    state.websocket_msg_tx.clone()
+                    (session_id, state.websocket_msg_tx.clone())
                 };
                 if let (Some(session_id), Some(ws_tx)) = (session_id, ws_tx) {
                     let leave = starlab_signal_server::ClientMsg::LeaveSession { session_id };

@@ -594,8 +594,8 @@ methods that serialize to JSON — none exist. Persistence surface:
   `Keystore::load_wallet_file(wallet_id, password)` at
   `src/keystore/storage.rs:251` — earlier drafts called the
   re-read method `load_wallet` which does not exist.
-- **Tracing log file**: append-only at `--log-location` (default
-  `~/.frost_keystore/logs/starlab-mpc.log`).
+- **Tracing log file**: per-run (truncated on start) at `--log-location` (default
+  `~/.frost_keystore/logs/starlab-mpc-<device-id>.log`).
 
 That's the full durable state. On crash, anything in-memory on
 `Model` / `AppState<C>` that hasn't been written through the

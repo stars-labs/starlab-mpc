@@ -142,6 +142,14 @@ impl DKGProgressComponent {
         denom.saturating_sub(1) as usize
     }
 
+    /// Label of the leave-this-ceremony action.
+    fn cancel_label(&self) -> &'static str {
+        match self.ceremony {
+            Ceremony::Dkg => " Cancel DKG ",
+            Ceremony::Signing { .. } => " Cancel Signing ",
+        }
+    }
+
     /// Title text for the outer block — branches on ceremony.
     fn ceremony_title(&self) -> &'static str {
         match self.ceremony {
@@ -792,7 +800,7 @@ impl DKGProgressComponent {
         let actions_text = vec![
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled(" Cancel DKG ", cancel_style),
+                Span::styled(self.cancel_label(), cancel_style),
                 Span::raw("    "),
                 Span::styled(" Copy Session ID ", copy_style),
             ]),
@@ -893,6 +901,7 @@ mod tests {
         let component = DKGProgressComponent::new("session".into(), 3, 2);
         assert_eq!(component.expected_other_participants(), 2);
         assert_eq!(component.ceremony_title(), "🔐 DKG");
+        assert_eq!(component.cancel_label(), " Cancel DKG ");
     }
 
     #[test]
@@ -907,6 +916,7 @@ mod tests {
             "2-of-3 signing must wait on threshold-1 = 1 peer, not total-1 = 2",
         );
         assert_eq!(component.ceremony_title(), "🖊️  Signing");
+        assert_eq!(component.cancel_label(), " Cancel Signing ");
     }
 
     #[test]

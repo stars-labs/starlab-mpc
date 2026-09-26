@@ -553,7 +553,17 @@ where
                 progress.set_ceremony(
                     crate::elm::components::dkg_progress::Ceremony::Signing { chain },
                 );
-                progress.set_round(self.model.wallet_state.dkg_round.clone());
+                // FROST signing has the same two rounds the component models:
+                // Round1 = commitments, Round2 = shares. Derive it from what
+                // co-signers have sent — `dkg_round` belongs to the DKG and
+                // still reads `Complete` after one.
+                let co_signers = usize::from(threshold.saturating_sub(1));
+                let commitments = self.model.wallet_state.signing_commitments_received.len();
+                progress.set_round(if co_signers > 0 && commitments >= co_signers {
+                    crate::elm::message::DKGRound::Round2
+                } else {
+                    crate::elm::message::DKGRound::Round1
+                });
                 progress.set_websocket_connected(self.model.network_state.connected);
                 if let Some(ref session) = self.model.active_session {
                     for p in &session.participants {

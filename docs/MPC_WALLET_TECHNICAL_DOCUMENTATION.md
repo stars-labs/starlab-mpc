@@ -1101,7 +1101,7 @@ OPTIONS:
                                Default: wss://xiongchenyu.dpdns.org
     --offline                  Run in offline (SD-card air-gap) mode.
     --log-location <PATH>      Log file path.
-                               Default: ~/.frost_keystore/logs/starlab-mpc.log
+                               Default: ~/.frost_keystore/logs/starlab-mpc-<device-id>.log
     --log-level <LEVEL>        error | warn | info | debug | trace
                                Default: info
 ```
@@ -1308,7 +1308,7 @@ messages in a trace, which is not backed by any real type in source.
 The practical tools are:
 
 - `RUST_LOG=starlab_client=debug` (or a finer scope like `starlab_client::protocal::dkg=trace`)
-  + the session log at `~/.frost_keystore/logs/starlab-mpc.log`
+  + the session log at `~/.frost_keystore/logs/starlab-mpc-<device-id>.log`
 - `chrome://webrtc-internals` for the browser side
 - `wscat -c wss://xiongchenyu.dpdns.org/` + `Register` / `ListDevices`
   ClientMsg payloads for manual signal-server probes

@@ -430,10 +430,10 @@ persistence:
   retraction as f4fc866 for other docs). Written on DKG
   completion, re-read on startup (scan the keystore directory +
   cache metadata; the encrypted share only decrypts on unlock).
-- **TUI tracing log**: append-only `tracing` output from the TUI
+- **TUI tracing log**: per-run (truncated on start) `tracing` output from the TUI
   itself (not the signal server) at the path passed to
   `--log-location` (default
-  `~/.frost_keystore/logs/starlab-mpc.log`). Earlier drafts
+  `~/.frost_keystore/logs/starlab-mpc-<device-id>.log`). Earlier drafts
   labelled this the "signal-server log" — it's not; the signal
   server is a separate process with its own stderr. This is the
   local TUI binary's structured-log file.

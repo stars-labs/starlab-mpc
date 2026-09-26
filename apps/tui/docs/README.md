@@ -198,7 +198,7 @@ passed as CLI flags. Keystore location is fixed at `~/.frost_keystore`.
                             Default: wss://xiongchenyu.dpdns.org
 --offline                   Run without network (SD-card DKG mode).
 --log-location <PATH>       Log file path.
-                            Default: ~/.frost_keystore/logs/starlab-mpc.log
+                            Default: ~/.frost_keystore/logs/starlab-mpc-<device-id>.log
 --log-level <LEVEL>         error | warn | info | debug | trace
                             Default: info
 ```

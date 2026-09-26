@@ -24,7 +24,7 @@ The FROST MPC TUI Wallet implements defense-in-depth security architecture, comb
 4. **Fail Secure**: System fails to a secure state
 5. **Observability via tracing**: Ceremony-level events land in
    the `tracing`-subscribed log (path via `--log-location`,
-   default `~/.frost_keystore/logs/starlab-mpc.log`). This is
+   default `~/.frost_keystore/logs/starlab-mpc-<device-id>.log`). This is
    unstructured informational logging, NOT a tamper-evident
    audit log — earlier drafts of this principle claimed
    "All security-relevant events are logged" with audit-grade

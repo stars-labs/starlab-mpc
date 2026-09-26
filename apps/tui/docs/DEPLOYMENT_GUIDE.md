@@ -101,7 +101,7 @@ Accepts these CLI flags (authoritative:
 | `--device-id <ID>`        | hostname                          |
 | `--signal-server <URL>`   | `wss://xiongchenyu.dpdns.org`     |
 | `--offline`               | (off)                             |
-| `--log-location <PATH>`   | `~/.frost_keystore/logs/starlab-mpc.log` |
+| `--log-location <PATH>`   | `~/.frost_keystore/logs/starlab-mpc-<device-id>.log` |
 | `--log-level <LEVEL>`     | `info`                            |
 
 Environment: only `HOME` (to compute the keystore path), `RUST_LOG`
