@@ -140,8 +140,7 @@ pub async fn handle_start_signing<C>(
     };
 
     // ---- FROST Round 1: commit
-    use frost_ed25519::rand_core::OsRng;
-    let mut rng = OsRng;
+    let mut rng = starlab_core::rng::os_rng();
     let (nonces, commitments) = frost_core::round1::commit(key_package.signing_share(), &mut rng);
 
     let commitment_bytes = match commitments.serialize() {
@@ -672,14 +671,13 @@ mod tests {
     use frost_secp256k1::{
         Identifier, Secp256K1Sha256,
         keys::{IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer},
-        rand_core::OsRng,
     };
     use std::collections::BTreeMap;
 
     type KeyPkgMap = BTreeMap<Identifier, KP>;
 
     fn trusted_2_of_3() -> (KeyPkgMap, PKP) {
-        let rng = OsRng;
+        let rng = starlab_core::rng::os_rng();
         let (shares, pkp) =
             generate_with_dealer(3, 2, IdentifierList::Default, rng).expect("keygen");
         let mut kps = KeyPkgMap::new();
@@ -701,7 +699,7 @@ mod tests {
         let signers: Vec<Identifier> = kps.keys().take(2).copied().collect();
 
         // Round 1
-        let mut rng = OsRng;
+        let mut rng = starlab_core::rng::os_rng();
         let mut nonces_map = BTreeMap::new();
         let mut commitments_map = BTreeMap::new();
         for id in &signers {
@@ -742,7 +740,7 @@ mod tests {
 
         // Signers produce valid shares for message_a
         let signers: Vec<Identifier> = kps.keys().take(2).copied().collect();
-        let mut rng = OsRng;
+        let mut rng = starlab_core::rng::os_rng();
         let mut nonces_map = BTreeMap::new();
         let mut commitments_map = BTreeMap::new();
         for id in &signers {

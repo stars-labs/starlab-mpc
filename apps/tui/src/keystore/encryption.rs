@@ -4,13 +4,10 @@
 //! using AES-256-GCM with either Argon2id (CLI default) or PBKDF2 (browser compatible).
 
 use aes_gcm::{
-    Aes256Gcm, Key, Nonce,
-    aead::{Aead, KeyInit},
+    Aes256Gcm,
+    aead::{Aead, KeyInit, Nonce},
 };
-use argon2::{
-    Argon2, Params,
-    password_hash::{PasswordHasher, SaltString},
-};
+use argon2::{Argon2, Params};
 use pbkdf2::pbkdf2_hmac_array;
 use sha2::Sha256;
 
@@ -43,6 +40,34 @@ impl KeyDerivation {
     }
 }
 
+/// Derives the AES-256 key. Argon2id runs over the raw salt bytes with
+/// m=4096 KiB, t=3, p=1 (unchanged from the argon2 0.5 password-hash path,
+/// which also hashed the decoded salt bytes — existing keystores still open).
+fn derive_key(
+    password: &str,
+    salt: &[u8],
+    method: KeyDerivation,
+) -> crate::keystore::Result<[u8; KEY_LEN]> {
+    match method {
+        KeyDerivation::Argon2id => {
+            let params = Params::new(4096, 3, 1, Some(KEY_LEN))
+                .map_err(|e| KeystoreError::EncryptionError(format!("Argon2 params: {}", e)))?;
+            let mut key = [0u8; KEY_LEN];
+            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
+                .hash_password_into(password.as_bytes(), salt, &mut key)
+                .map_err(|e| {
+                    KeystoreError::EncryptionError(format!("Password hashing error: {}", e))
+                })?;
+            Ok(key)
+        }
+        KeyDerivation::Pbkdf2 => Ok(pbkdf2_hmac_array::<Sha256, KEY_LEN>(
+            password.as_bytes(),
+            salt,
+            PBKDF2_ITERATIONS,
+        )),
+    }
+}
+
 /// Encrypts data with a password using AES-256-GCM with the specified key derivation method.
 ///
 /// The output format is: `salt (16 bytes) + nonce (12 bytes) + ciphertext`
@@ -56,45 +81,18 @@ pub fn encrypt_data_with_method(
     getrandom::fill(&mut salt)
         .map_err(|e| KeystoreError::General(format!("getrandom failed for salt: {}", e)))?;
 
-    // Derive key using the specified method
-    let key = match method {
-        KeyDerivation::Argon2id => {
-            let salt_string = SaltString::encode_b64(&salt)
-                .map_err(|e| KeystoreError::General(format!("Salt encoding error: {}", e)))?;
-
-            let argon2 = Argon2::new(
-                argon2::Algorithm::Argon2id,
-                argon2::Version::V0x13,
-                Params::new(4096, 3, 1, Some(KEY_LEN)).unwrap(),
-            );
-
-            let password_hash = argon2
-                .hash_password(password.as_bytes(), &salt_string)
-                .map_err(|e| {
-                    KeystoreError::EncryptionError(format!("Password hashing error: {}", e))
-                })?;
-
-            let binding = password_hash.hash.unwrap();
-            let hash_bytes = binding.as_bytes();
-            *Key::<Aes256Gcm>::from_slice(hash_bytes)
-        }
-        KeyDerivation::Pbkdf2 => {
-            let key_bytes: [u8; KEY_LEN] =
-                pbkdf2_hmac_array::<Sha256, KEY_LEN>(password.as_bytes(), &salt, PBKDF2_ITERATIONS);
-            *Key::<Aes256Gcm>::from_slice(&key_bytes)
-        }
-    };
+    let key = derive_key(password, &salt, method)?;
 
     // Generate a random nonce (fresh for every encryption; critical for AES-GCM safety).
     let mut nonce_bytes = [0u8; NONCE_LEN];
     getrandom::fill(&mut nonce_bytes)
         .map_err(|e| KeystoreError::General(format!("getrandom failed for nonce: {}", e)))?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::<Aes256Gcm>::from(nonce_bytes);
 
     // Encrypt the data
-    let cipher = Aes256Gcm::new(&key);
+    let cipher = Aes256Gcm::new(&key.into());
     let ciphertext = cipher
-        .encrypt(nonce, data)
+        .encrypt(&nonce, data)
         .map_err(|e| KeystoreError::EncryptionError(format!("Encryption error: {}", e)))?;
 
     // Combine salt, nonce, and ciphertext
@@ -141,42 +139,49 @@ pub fn decrypt_data_with_method(
     let nonce_bytes = &encrypted_data[SALT_LEN..SALT_LEN + NONCE_LEN];
     let ciphertext = &encrypted_data[SALT_LEN + NONCE_LEN..];
 
-    // Derive key using the specified method
-    let key = match method {
-        KeyDerivation::Argon2id => {
-            let salt_string = SaltString::encode_b64(salt).map_err(|e| {
-                KeystoreError::DecryptionError(format!("Salt decoding error: {}", e))
-            })?;
-
-            let argon2 = Argon2::new(
-                argon2::Algorithm::Argon2id,
-                argon2::Version::V0x13,
-                Params::new(4096, 3, 1, Some(KEY_LEN)).unwrap(),
-            );
-
-            let password_hash = argon2
-                .hash_password(password.as_bytes(), &salt_string)
-                .map_err(|e| {
-                    KeystoreError::DecryptionError(format!("Password hashing error: {}", e))
-                })?;
-
-            let binding = password_hash.hash.unwrap();
-            let hash_bytes = binding.as_bytes();
-            *Key::<Aes256Gcm>::from_slice(hash_bytes)
-        }
-        KeyDerivation::Pbkdf2 => {
-            let key_bytes: [u8; KEY_LEN] =
-                pbkdf2_hmac_array::<Sha256, KEY_LEN>(password.as_bytes(), salt, PBKDF2_ITERATIONS);
-            *Key::<Aes256Gcm>::from_slice(&key_bytes)
-        }
-    };
+    let key = derive_key(password, salt, method)?;
 
     // Decrypt the data
-    let nonce = Nonce::from_slice(nonce_bytes);
-    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::<Aes256Gcm>::try_from(nonce_bytes)
+        .map_err(|_| KeystoreError::DecryptionError("Invalid nonce length".to_string()))?;
+    let cipher = Aes256Gcm::new(&key.into());
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|_| KeystoreError::InvalidPassword)?;
 
     Ok(plaintext)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Ciphertexts produced by the pre-upgrade stack (argon2 0.5 password-hash
+    // API / aes-gcm 0.10). Existing keystores must keep opening.
+    const LEGACY_ARGON2ID: &str = "cfa71f93f25efafab3d4ee0093c49715836eec5e6bff1b2d5e1c4282aa4e362570c2a696b948a7e78d8ca527ad84eca4959c7fc19dff5b008514dcc0a005d341f0f4";
+    const LEGACY_PBKDF2: &str = "cd6f9de9bc9b12cca490745126b39e5e99bedead9d3e3ace15c7266e99a286d96160d580847db67193aaa82f3df602cb5769d7f6294fca3366d264972647a5db06fd";
+    const PLAINTEXT: &[u8] = b"starlab-compat-fixture";
+    const PASSWORD: &str = "hunter2";
+
+    #[test]
+    fn decrypts_legacy_argon2id_ciphertext() {
+        let blob = hex::decode(LEGACY_ARGON2ID).unwrap();
+        let out = decrypt_data_with_method(&blob, PASSWORD, KeyDerivation::Argon2id).unwrap();
+        assert_eq!(out, PLAINTEXT);
+    }
+
+    #[test]
+    fn decrypts_legacy_pbkdf2_ciphertext() {
+        let blob = hex::decode(LEGACY_PBKDF2).unwrap();
+        assert_eq!(decrypt_data(&blob, PASSWORD).unwrap(), PLAINTEXT);
+    }
+
+    #[test]
+    fn both_methods_round_trip() {
+        for method in [KeyDerivation::Argon2id, KeyDerivation::Pbkdf2] {
+            let blob = encrypt_data_with_method(PLAINTEXT, PASSWORD, method).unwrap();
+            let out = decrypt_data_with_method(&blob, PASSWORD, method).unwrap();
+            assert_eq!(out, PLAINTEXT);
+        }
+    }
 }

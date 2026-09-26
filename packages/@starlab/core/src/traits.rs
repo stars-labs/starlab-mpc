@@ -1,5 +1,5 @@
 use crate::errors::Result;
-use rand_core::OsRng;
+use crate::rng::OsRng;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 

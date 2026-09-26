@@ -1,3 +1,4 @@
+use crate::rng::{OsRng, os_rng};
 use crate::{
     errors::{FrostError, Result},
     traits::FrostCurve,
@@ -9,7 +10,6 @@ use frost_secp256k1::{
     round2::SignatureShare,
 };
 use k256::ecdsa::VerifyingKey as K256VerifyingKey;
-use rand_core::OsRng;
 use sha3::{Digest, Keccak256};
 use std::collections::BTreeMap;
 
@@ -84,7 +84,7 @@ impl FrostCurve for Secp256k1Curve {
     fn generate_signing_commitment(
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (nonces, commitments) =
             frost_secp256k1::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))
@@ -136,7 +136,7 @@ impl Secp256k1Curve {
 
         // Try to interpret as SEC1 uncompressed key
         if let Ok(k256_key) = K256VerifyingKey::from_sec1_bytes(&pubkey_bytes) {
-            let uncompressed = k256_key.to_encoded_point(false);
+            let uncompressed = k256_key.to_sec1_point(false);
             let uncompressed_bytes = uncompressed.as_bytes();
 
             // Skip the 0x04 prefix for uncompressed keys

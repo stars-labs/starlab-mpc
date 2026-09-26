@@ -145,7 +145,7 @@ The FROST (Flexible Round-Optimized Schnorr Threshold) protocol provides:
 The illustrative snippet earlier in this section showed a generic
 `Scalar::random(&mut rng)` + `VerifiableSecretSharing::commit(...)`
 API that is NOT what this workspace uses. The real DKG API comes
-from the upstream ZCash `frost-core 2.2` crates:
+from the upstream ZCash `frost-core 3.0` crates:
 
 ```rust
 // Real FROST DKG round 1 (see frost-core::keys::dkg::part1 docs)
@@ -594,7 +594,7 @@ Hardening subsection above).
 ## Conclusion
 
 Security is a continuous process. This codebase gives you threshold
-cryptography (FROST t-of-n, upstream ZCash `frost-core 2.2`) and
+cryptography (FROST t-of-n, upstream ZCash `frost-core 3.0`) and
 encrypted keystores (AES-256-GCM + PBKDF2). It does not give you
 RBAC, MFA, audit logs, a compliance framework, or a formal
 response SLA — those live outside this doc and, if needed, must

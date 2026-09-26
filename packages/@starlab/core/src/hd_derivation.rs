@@ -190,7 +190,7 @@ fn scalar_from_seed<C: Ciphersuite>(
     seed: &[u8; 32],
 ) -> Result<<<C::Group as frost_core::Group>::Field as frost_core::Field>::Scalar> {
     // Try direct deserialization
-    if let Ok(serialization) = seed.to_vec().try_into()
+    if let Ok(serialization) = seed.as_slice().try_into()
         && let Ok(scalar) =
             <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                 &serialization,
@@ -206,7 +206,7 @@ fn scalar_from_seed<C: Ciphersuite>(
         hasher.update([counter]);
         let hash = hasher.finalize();
 
-        if let Ok(serialization) = hash.to_vec().try_into()
+        if let Ok(serialization) = hash.as_slice().try_into()
             && let Ok(scalar) =
                 <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(
                     &serialization,
@@ -226,7 +226,6 @@ fn bytes_to_scalar<C: Ciphersuite>(
     bytes: &[u8],
 ) -> Result<<<C::Group as frost_core::Group>::Field as frost_core::Field>::Scalar> {
     let serialization = bytes
-        .to_vec()
         .try_into()
         .map_err(|_| FrostError::DerivationError("scalar size mismatch".into()))?;
     <<C::Group as frost_core::Group>::Field as frost_core::Field>::deserialize(&serialization)
@@ -238,7 +237,6 @@ fn bytes_to_element<C: Ciphersuite>(
     bytes: &[u8],
 ) -> Result<<C::Group as frost_core::Group>::Element> {
     let serialization = bytes
-        .to_vec()
         .try_into()
         .map_err(|_| FrostError::DerivationError("element size mismatch".into()))?;
     <C::Group as frost_core::Group>::deserialize(&serialization)
@@ -341,8 +339,11 @@ pub fn derive_child_key<C: Ciphersuite>(
         *key_package.min_signers(),
     );
 
-    let child_public_key_package =
-        frost_core::keys::PublicKeyPackage::<C>::new(child_verifying_shares, child_verifying_key);
+    let child_public_key_package = frost_core::keys::PublicKeyPackage::<C>::new(
+        child_verifying_shares,
+        child_verifying_key,
+        Some(*key_package.min_signers()),
+    );
 
     Ok(DerivedKeys {
         key_package: child_key_package,
@@ -395,7 +396,7 @@ pub fn derive_child_verifying_key_path<C: Ciphersuite>(
     use frost_core::Group;
 
     let deserialize = |bytes: &[u8]| -> Result<<C::Group as Group>::Element> {
-        let ser = <C::Group as Group>::Serialization::try_from(bytes.to_vec())
+        let ser = <C::Group as Group>::Serialization::try_from(bytes)
             .map_err(|_| FrostError::DerivationError("bad group element length".into()))?;
         <C::Group as Group>::deserialize(&ser)
             .map_err(|e| FrostError::DerivationError(format!("bad group element: {e}")))
@@ -635,7 +636,8 @@ mod tests {
 
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
-            let (n, c) = frost_ed25519::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
+            let (n, c) =
+                frost_ed25519::round1::commit(kp.signing_share(), &mut crate::rng::os_rng());
             let id = *kp.identifier();
             nonces.insert(id, n);
             commitments.insert(id, c);
@@ -689,7 +691,8 @@ mod tests {
 
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
-            let (n, c) = frost_secp256k1::round1::commit(kp.signing_share(), &mut rand_core::OsRng);
+            let (n, c) =
+                frost_secp256k1::round1::commit(kp.signing_share(), &mut crate::rng::os_rng());
             let id = *kp.identifier();
             nonces.insert(id, n);
             commitments.insert(id, c);

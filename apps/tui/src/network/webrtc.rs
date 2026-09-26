@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
-use webrtc::peer_connection::RTCPeerConnection;
+use webrtc::data_channel::{DataChannel, DataChannelEvent};
+use webrtc::peer_connection::PeerConnection;
 
 /// Parse and react to a single frame received on a WebRTC data channel.
 ///
@@ -339,11 +340,143 @@ pub async fn dispatch_data_channel_msg<C>(
     }
 }
 
+/// Poll loop for a data channel WE created via `create_data_channel` (the
+/// offerer side). webrtc 0.21 replaced `dc.on_open` / `dc.on_message`
+/// closures with `DataChannel::poll()`, consumed here in a loop. Mirrored by
+/// `elm::webrtc_signaling::run_answer_side_data_channel` for the answerer
+/// side, which skips the `channel_open` / `mesh_ready` sends below — only
+/// the side that created the channel emits those.
+async fn run_offer_side_data_channel<C>(
+    dc: Arc<dyn DataChannel>,
+    device_id: String,
+    self_device_id: String,
+    app_state: Arc<Mutex<AppState<C>>>,
+    ui_msg_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::elm::message::Message>>,
+) where
+    C: frost_core::Ciphersuite + 'static + Send + Sync,
+    <<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Element: Send + Sync,
+    <<<C as frost_core::Ciphersuite>::Group as frost_core::Group>::Field as frost_core::Field>::Scalar: Send + Sync,
+{
+    while let Some(event) = dc.poll().await {
+        match event {
+            DataChannelEvent::OnOpen => {
+                info!("📂 Data channel OPENED with {}", device_id);
+
+                // Store the data channel in AppState for DKG messaging
+                {
+                    let mut state = app_state.lock().await;
+                    state.data_channels.insert(device_id.clone(), dc.clone());
+                    info!("📦 Stored data channel for {} in AppState", device_id);
+                }
+
+                // Send UI update for data channel open
+                if let Some(tx) = ui_msg_tx.clone() {
+                    let _ = tx.send(
+                        crate::elm::message::Message::UpdateParticipantWebRTCStatus {
+                            device_id: device_id.clone(),
+                            webrtc_connected: true,
+                            data_channel_open: true,
+                        },
+                    );
+                }
+
+                // Send channel_open message to peer
+                let channel_open_msg = serde_json::json!({
+                    "type": "channel_open",
+                    "payload": {
+                        "device_id": self_device_id
+                    }
+                });
+
+                if let Ok(msg_str) = serde_json::to_string(&channel_open_msg) {
+                    let _ = dc.send_text(&msg_str).await;
+                    info!("📤 Sent channel_open message to {}", device_id);
+                }
+
+                // Check if all channels are open and send mesh_ready if so
+                let state = app_state.lock().await;
+                let session = state.session.clone();
+                let participants = session
+                    .as_ref()
+                    .map(|s| s.participants.clone())
+                    .unwrap_or_default();
+                let device_conns = state.device_connections.clone();
+                let own_mesh_ready_sent = state.own_mesh_ready_sent;
+                drop(state);
+
+                // Check if all expected connections are established
+                let conns = device_conns.lock().await;
+                let expected_count = participants.len().saturating_sub(1); // Exclude self
+                let connected_count = conns.len();
+                drop(conns);
+
+                if connected_count >= expected_count && expected_count > 0 && !own_mesh_ready_sent {
+                    info!(
+                        "✅ All {} peer connections established, sending mesh_ready",
+                        connected_count
+                    );
+
+                    // Send mesh_ready to all peers
+                    let mesh_ready_msg = serde_json::json!({
+                        "type": "mesh_ready",
+                        "payload": {
+                            "session_id": session.as_ref().map(|s| s.session_id.clone()).unwrap_or_default(),
+                            "device_id": self_device_id
+                        }
+                    });
+
+                    if let Ok(msg_str) = serde_json::to_string(&mesh_ready_msg) {
+                        let _ = dc.send_text(&msg_str).await;
+                        info!("📤 Sent mesh_ready signal via data channel");
+
+                        // Mark as sent and check if all participants are ready
+                        let mut state = app_state.lock().await;
+                        state.own_mesh_ready_sent = true;
+
+                        // Since we're sending mesh_ready, check if we've received mesh_ready from all others
+                        let ready_peers = state.pending_mesh_ready_signals.len();
+                        let expected_peers = expected_count;
+
+                        if ready_peers >= expected_peers {
+                            info!("🎉 All peers ready - triggering DKG protocol!");
+                            state.mesh_status = crate::utils::state::MeshStatus::Ready;
+
+                            // Trigger DKG protocol start
+                            if let Some(tx) = &ui_msg_tx {
+                                info!("🚀 Sending StartDKGProtocol message!");
+                                let _ = tx.send(crate::elm::message::Message::StartDKGProtocol);
+                            }
+                        }
+                    }
+                }
+            }
+            DataChannelEvent::OnMessage(msg) => {
+                // Delegate to the shared dispatcher so initiator + answerer DCs both
+                // run the same protocol handling (previously the answerer's on_message
+                // was a log-only stub — DKG Round 1 packages went into the void on one
+                // direction of every peer pair).
+                dispatch_data_channel_msg::<C>(
+                    msg.data.to_vec(),
+                    device_id.clone(),
+                    app_state.clone(),
+                    ui_msg_tx.clone(),
+                )
+                .await;
+            }
+            DataChannelEvent::OnClose => {
+                info!("📪 Data channel CLOSED with {}", device_id);
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
 /// WebRTC connection initiation using existing WebSocket channel
 pub async fn initiate_webrtc_with_channel<C>(
     self_device_id: String,
     participants: Vec<String>,
-    device_connections: Arc<Mutex<HashMap<String, Arc<RTCPeerConnection>>>>,
+    device_connections: Arc<Mutex<HashMap<String, Arc<dyn PeerConnection>>>>,
     app_state: Arc<Mutex<AppState<C>>>,
     ui_msg_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::elm::message::Message>>,
 ) where
@@ -396,6 +529,19 @@ pub async fn initiate_webrtc_with_channel<C>(
         return;
     }
 
+    // webrtc 0.21's `PeerConnectionEventHandler` is installed once at construction
+    // (`PeerConnectionBuilder::with_handler`), so it needs a concrete `UnboundedSender<Message>`
+    // rather than the `Option` this function threads through historically. When `ui_msg_tx` is
+    // `None`, hand the handler a channel whose receiver is immediately dropped — every send on
+    // it silently no-ops, reproducing the old `if let Some(tx) = ui_msg_tx { ... }` behavior.
+    let tx_for_handler = match ui_msg_tx.clone() {
+        Some(tx) => tx,
+        None => {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            tx
+        }
+    };
+
     // Pre-create PCs ONLY for peers we're going to initiate to (self_id < peer_id
     // in perfect-negotiation terms). For the "wait for offer" side we MUST NOT
     // create the PC here — if we do, the later offer arrives, `ensure_peer_connection`
@@ -427,29 +573,32 @@ pub async fn initiate_webrtc_with_channel<C>(
                 self_device_id, participant
             );
 
-            // Create a simple peer connection using webrtc crate directly
-            let config = webrtc::peer_connection::configuration::RTCConfiguration {
-                ice_servers: vec![],
-                ..Default::default()
-            };
-
-            match webrtc::api::APIBuilder::new()
-                .build()
-                .new_peer_connection(config)
-                .await
+            // Build the peer connection with the shared `SignalingHandler` installed
+            // (webrtc 0.21: the handler is constructor-only, see `build_peer_connection`'s
+            // doc comment). Both this offerer path and the answerer path in
+            // `webrtc_signaling::ensure_peer_connection` go through the same helper so
+            // every PC in the mesh gets identical ICE / connection-state / data-channel
+            // wiring regardless of which side created it.
+            match crate::elm::webrtc_signaling::build_peer_connection(
+                participant.clone(),
+                app_state.clone(),
+                &tx_for_handler,
+                &ws_msg_tx,
+            )
+            .await
             {
-                Ok(pc) => {
+                Some(pc) => {
                     let mut conns = device_connections.lock().await;
-                    conns.insert(participant.clone(), Arc::new(pc));
+                    conns.insert(participant.clone(), pc);
                     info!(
                         "✅ [{}] Successfully created peer connection for {}",
                         self_device_id, participant
                     );
                 }
-                Err(e) => {
+                None => {
                     error!(
-                        "❌ [{}] Failed to create peer connection for {}: {}",
-                        self_device_id, participant, e
+                        "❌ [{}] Failed to create peer connection for {}",
+                        self_device_id, participant
                     );
                 }
             }
@@ -517,224 +666,39 @@ pub async fn initiate_webrtc_with_channel<C>(
         }
 
         let conns = device_connections.lock().await;
-        if let Some(pc) = conns.get(&device_id) {
+        let pc = conns.get(&device_id).cloned();
+        drop(conns);
+        if let Some(pc) = pc {
             info!("🎯 [{}] Creating offer for {}", self_device_id, device_id);
 
-            // Create data channel first
-            // Set up connection state handler
-            let device_id_state = device_id.clone();
-            let ui_msg_tx_state = ui_msg_tx.clone();
-            pc.on_peer_connection_state_change(Box::new(move |state: webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState| {
-                let device_id_state = device_id_state.clone();
-                let ui_msg_tx_state = ui_msg_tx_state.clone();
-                Box::pin(async move {
-                    let is_connected = matches!(state, webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected);
-
-                    // Send UI update
-                    if let Some(tx) = ui_msg_tx_state {
-                        let _ = tx.send(crate::elm::message::Message::UpdateParticipantWebRTCStatus {
-                            device_id: device_id_state.clone(),
-                            webrtc_connected: is_connected,
-                            data_channel_open: false, // Will be updated when data channel opens
-                        });
-                    }
-
-                    match state {
-                        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
-                            info!("✅ WebRTC connection ESTABLISHED with {}", device_id_state);
-                        }
-                        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed => {
-                            error!("❌ WebRTC connection FAILED with {}", device_id_state);
-                        }
-                        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Disconnected => {
-                            warn!("⚠️ WebRTC connection DISCONNECTED from {}", device_id_state);
-                        }
-                        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Closed => {
-                            info!("🔒 WebRTC connection CLOSED with {}", device_id_state);
-                        }
-                        _ => {
-                            info!("WebRTC connection state with {}: {:?}", device_id_state, state);
-                        }
-                    }
-                })
-            }));
-
-            // Set up ICE candidate handler before creating offer
-            let device_id_ice = device_id.clone();
-            let ws_msg_tx_ice = ws_msg_tx.clone();
-            let _pc_weak = Arc::downgrade(pc);
-
-            pc.on_ice_candidate(Box::new(
-                move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
-                    let device_id_ice = device_id_ice.clone();
-                    let ws_msg_tx_ice = ws_msg_tx_ice.clone();
-                    let _pc_weak = _pc_weak.clone();
-
-                    Box::pin(async move {
-                        if let Some(candidate) = candidate {
-                            info!("🧊 Generated ICE candidate for {}", device_id_ice);
-
-                            // Send ICE candidate to peer
-                            let candidate_json = candidate.to_json().unwrap();
-                            let ice_signal = crate::protocal::signal::WebRTCSignal::Candidate(
-                                crate::protocal::signal::CandidateInfo {
-                                    candidate: candidate_json.candidate,
-                                    sdp_mid: candidate_json.sdp_mid,
-                                    sdp_mline_index: candidate_json.sdp_mline_index,
-                                },
-                            );
-
-                            let websocket_message =
-                                crate::protocal::signal::WebSocketMessage::WebRTCSignal(ice_signal);
-
-                            if let Ok(json_val) = serde_json::to_value(websocket_message) {
-                                let relay_msg = starlab_signal_server::ClientMsg::Relay {
-                                    to: device_id_ice.clone(),
-                                    data: json_val,
-                                };
-
-                                if let Ok(json) = serde_json::to_string(&relay_msg) {
-                                    info!(
-                                        "📤 Sending ICE candidate to {} via WebSocket",
-                                        device_id_ice
-                                    );
-                                    let _ = ws_msg_tx_ice.send(json);
-                                }
-                            }
-                        }
-                    })
-                },
-            ));
+            // Connection-state / ICE-candidate handling is installed once, at PC
+            // construction time, via the shared `SignalingHandler` — see
+            // `elm::webrtc_signaling::build_peer_connection`. webrtc 0.21 has no
+            // post-construction `pc.on_*` registration, so there is nothing to attach
+            // here anymore.
 
             match pc.create_data_channel("data", None).await {
                 Ok(dc) => {
                     info!("✅ Created data channel for {}", device_id);
 
-                    // Set up data channel handlers
-                    let device_id_dc = device_id.clone();
-                    let self_device_id_dc = self_device_id.clone();
-                    let dc_for_open = dc.clone();
-                    let app_state_for_mesh = app_state.clone();
-
-                    let ui_msg_tx_open = ui_msg_tx.clone();
-                    dc.on_open(Box::new(move || {
-                        let device_id_open = device_id_dc.clone();
-                        let self_id = self_device_id_dc.clone();
-                        let dc_open = dc_for_open.clone();
-                        let app_state_mesh = app_state_for_mesh.clone();
-                        let ui_msg_tx_open = ui_msg_tx_open;
-
-                        Box::pin(async move {
-                            info!("📂 Data channel OPENED with {}", device_id_open);
-
-                            // Store the data channel in AppState for DKG messaging
-                            {
-                                let mut state = app_state_mesh.lock().await;
-                                state.data_channels.insert(device_id_open.clone(), dc_open.clone());
-                                info!("📦 Stored data channel for {} in AppState", device_id_open);
-                            }
-
-                            // Send UI update for data channel open
-                            if let Some(tx) = ui_msg_tx_open.clone() {
-                                let _ = tx.send(crate::elm::message::Message::UpdateParticipantWebRTCStatus {
-                                    device_id: device_id_open.clone(),
-                                    webrtc_connected: true,
-                                    data_channel_open: true,
-                                });
-                            }
-
-                            // Send channel_open message to peer
-                            let channel_open_msg = serde_json::json!({
-                                "type": "channel_open",
-                                "payload": {
-                                    "device_id": self_id
-                                }
-                            });
-
-                            if let Ok(msg_str) = serde_json::to_string(&channel_open_msg) {
-                                let _ = dc_open.send_text(msg_str).await;
-                                info!("📤 Sent channel_open message to {}", device_id_open);
-                            }
-
-                            // Check if all channels are open and send mesh_ready if so
-                            // Note: Cannot use tokio::spawn due to Send constraints
-                            // Small delay to allow other channels to open
-
-                            let state = app_state_mesh.lock().await;
-                            let session = state.session.clone();
-                            let participants = session.as_ref().map(|s| s.participants.clone()).unwrap_or_default();
-                            let device_conns = state.device_connections.clone();
-                            let own_mesh_ready_sent = state.own_mesh_ready_sent;
-                            drop(state);
-
-                            // Check if all expected connections are established
-                            let conns = device_conns.lock().await;
-                            let expected_count = participants.len().saturating_sub(1); // Exclude self
-                            let connected_count = conns.len();
-
-                            if connected_count >= expected_count && expected_count > 0 && !own_mesh_ready_sent {
-                                info!("✅ All {} peer connections established, sending mesh_ready", connected_count);
-
-                                // Send mesh_ready to all peers
-                                let mesh_ready_msg = serde_json::json!({
-                                    "type": "mesh_ready",
-                                    "payload": {
-                                        "session_id": session.as_ref().map(|s| s.session_id.clone()).unwrap_or_default(),
-                                        "device_id": self_id
-                                    }
-                                });
-
-                                if let Ok(msg_str) = serde_json::to_string(&mesh_ready_msg) {
-                                    let _ = dc_open.send_text(msg_str).await;
-                                    info!("📤 Sent mesh_ready signal via data channel");
-
-                                    // Mark as sent and check if all participants are ready
-                                    let mut state = app_state_mesh.lock().await;
-                                    state.own_mesh_ready_sent = true;
-
-                                    // Since we're sending mesh_ready, check if we've received mesh_ready from all others
-                                    let ready_peers = state.pending_mesh_ready_signals.len();
-                                    let expected_peers = expected_count;
-
-                                    if ready_peers >= expected_peers {
-                                        info!("🎉 All peers ready - triggering DKG protocol!");
-                                        state.mesh_status = crate::utils::state::MeshStatus::Ready;
-
-                                        // Trigger DKG protocol start
-                                        if let Some(tx) = &ui_msg_tx_open {
-                                            info!("🚀 Sending StartDKGProtocol message!");
-                                            let _ = tx.send(crate::elm::message::Message::StartDKGProtocol);
-                                        }
-                                    }
-                                }
-                            }
-                        })
-                    }));
-
-                    let device_id_msg = device_id.clone();
-                    let app_state_for_msg = app_state.clone();
-                    let ui_msg_tx_for_msg = ui_msg_tx.clone();
-                    // Delegate to the shared dispatcher so initiator + answerer DCs
-                    // both run the same protocol handling (previously the answerer's
-                    // on_message was a log-only stub — DKG Round 1 packages went into
-                    // the void on one direction of every peer pair).
-                    dc.on_message(Box::new(move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
-                        let device_id_recv = device_id_msg.clone();
-                        let app_state_msg = app_state_for_msg.clone();
-                        let ui_msg_tx_msg = ui_msg_tx_for_msg.clone();
-                        Box::pin(async move {
-                            crate::network::webrtc::dispatch_data_channel_msg::<C>(
-                                msg.data.to_vec(),
-                                device_id_recv,
-                                app_state_msg,
-                                ui_msg_tx_msg,
-                            )
-                            .await;
-                        })
-                    }));
-
-                    // TODO: Store the data channel for sending messages
-                    // Note: Cannot access AppState here due to Ciphersuite Send constraint
+                    // Poll loop replaces the old `dc.on_open` / `dc.on_message` closures
+                    // (webrtc 0.21: `DataChannel` events are consumed via `poll()` in a
+                    // loop rather than registered callbacks).
+                    let dc_for_poll = dc.clone();
+                    let device_id_poll = device_id.clone();
+                    let self_device_id_poll = self_device_id.clone();
+                    let app_state_poll = app_state.clone();
+                    let ui_msg_tx_poll = ui_msg_tx.clone();
+                    tokio::spawn(async move {
+                        run_offer_side_data_channel::<C>(
+                            dc_for_poll,
+                            device_id_poll,
+                            self_device_id_poll,
+                            app_state_poll,
+                            ui_msg_tx_poll,
+                        )
+                        .await;
+                    });
 
                     // Now create offer
                     match pc.create_offer(None).await {

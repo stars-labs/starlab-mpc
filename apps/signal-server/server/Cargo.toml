@@ -15,11 +15,11 @@ categories = [
 ]
 
 [dependencies]
-serde_json = "1.0.143"
-serde = { version = "1.0.217", features = ["derive"] }
-tokio = { version = "1.42.0", features = ["full"] }
-tokio-tungstenite = "0.29.0"
-futures-util = "0.3.31"
+serde_json = "1.0.151"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["full"] }
+tokio-tungstenite = "0.30.0"
+futures-util = "0.3.34"
 
 [lib]
 name = "starlab_signal_server"

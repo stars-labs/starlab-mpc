@@ -26,7 +26,7 @@
 
 ## Executive Summary
 
-The MPC (Multi-Party Computation) Wallet is a distributed cryptographic wallet system that enables secure key generation and transaction signing across multiple parties without any single party having access to the complete private key. Built on the FROST (Flexible Round-Optimized Schnorr Threshold) signature scheme via the ZCash Foundation's `frost-core 2.2` crates, the system splits signing authority across `t`-of-`n` participants — compromise of fewer than `t` key shares cannot produce a signature.
+The MPC (Multi-Party Computation) Wallet is a distributed cryptographic wallet system that enables secure key generation and transaction signing across multiple parties without any single party having access to the complete private key. Built on the FROST (Flexible Round-Optimized Schnorr Threshold) signature scheme via the ZCash Foundation's `frost-core 3.0` crates, the system splits signing authority across `t`-of-`n` participants — compromise of fewer than `t` key shares cannot produce a signature.
 
 ### Key Features
 
@@ -193,7 +193,7 @@ errors.rs                # Typed error variants
 ```
 
 The actual DKG + signing primitives come from upstream
-`frost-core 2.2` / `frost-ed25519 2.2` / `frost-secp256k1 2.2` crates.
+`frost-core 3.0` / `frost-ed25519 3.0` / `frost-secp256k1 3.0` crates.
 `unified_dkg` wraps them to run both curves simultaneously from a
 single root secret. There is no custom `DKGSession` / `SigningSession`
 struct in this crate — you interact with upstream types.
@@ -662,7 +662,7 @@ section listed "Version compatibility check / Supported features
 exchange / Session parameters agreement" as a post-connection
 phase; no such handshake exists. Session parameters are fixed at
 AnnounceSession time; version compatibility is managed by
-matching the `frost-core 2.2` dependency across all clients
+matching the `frost-core 3.0` dependency across all clients
 (hand-coordinated, not wire-negotiated).
 
 ### Signal Server Architecture

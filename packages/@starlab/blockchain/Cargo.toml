@@ -12,7 +12,7 @@ categories = ["cryptography::cryptocurrencies"]
 
 [dependencies]
 # Error types via #[derive(thiserror::Error)] on BlockchainError.
-thiserror = "2.0.9"
+thiserror = "2.0.21"
 
 # Hex + base58 encoding used by ethereum.rs / solana.rs / bitcoin.rs for
 # transaction-hash display + signature serialization.
@@ -21,7 +21,7 @@ hex = "0.4.3"
 # serde_json::Value is the metadata type in ParsedTransaction /
 # SignatureData. No direct `serde` use — `serde` is pulled in
 # transitively via serde_json.
-serde_json = "1.0.143"
+serde_json = "1.0.151"
 
 # Solana SDK is imported as `use solana_sdk::bs58;` in solana.rs, but
 # the bs58::decode/encode methods actually called (.into_vec,
@@ -30,14 +30,14 @@ serde_json = "1.0.143"
 # other solana-* crate is touched by this library's source (an old
 # ethers/web3/k256/spl-token layer existed only for example code that
 # has since been removed).
-solana-sdk = "4.0.1"
+solana-sdk = "5.0.0"
 bs58 = "0.5.1"
 
 # Hashing for transaction hashes:
 #   sha2 (Sha256) — bitcoin.rs, solana.rs
 #   sha3 (Keccak256) — ethereum.rs
 sha2 = "0.11.0"
-sha3 = "0.11.0"
+sha3 = "0.12.0"
 
 [lib]
 name = "starlab_mpc_blockchain"

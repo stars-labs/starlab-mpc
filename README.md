@@ -15,7 +15,7 @@ Starlab MPC enables threshold signatures where the private key is split across m
 
 ### Key Features
 
-- **Real FROST DKG**: Distributed key generation via the ZCash Foundation's `frost-core 2.2` crates
+- **Real FROST DKG**: Distributed key generation via the ZCash Foundation's `frost-core 3.0` crates
 - **Threshold Signatures**: Configurable t-of-n threshold signing
 - **Unified multi-chain wallet**: One DKG → addresses on **Ethereum & Bitcoin** (secp256k1) plus **Solana & Sui** (ed25519)
 - **Multi-Platform**: Browser extension, desktop GUI, terminal UI, and a headless CLI
@@ -203,7 +203,7 @@ The MPC Wallet is designed around threshold cryptography primitives:
 - Keystore at rest is PBKDF2 + AES-256-GCM (see `packages/@starlab/core/src/keystore.rs`)
 - Peer-to-peer traffic rides WebRTC (DTLS-SRTP); signaling over WSS
 - FROST implementation comes from the [ZCash Foundation](https://github.com/ZcashFoundation/frost)
-  crates (`frost-core 2.2`, `frost-ed25519 2.2`, `frost-secp256k1 2.2`)
+  crates (`frost-core 3.0`, `frost-ed25519 3.0`, `frost-secp256k1 3.0`)
 
 No third-party security audit has been performed on this codebase as a
 whole. Report vulnerabilities via [GitHub Security Advisories](https://github.com/stars-labs/starlab-mpc/security/advisories/new).

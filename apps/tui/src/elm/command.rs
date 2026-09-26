@@ -2179,11 +2179,21 @@ impl Command {
                             let connections = device_connections.lock().await;
                             let total_connections = connections.len();
 
-                            // Count how many are actually in Connected state
+                            // Count how many are actually in Connected state. webrtc 0.21's
+                            // `PeerConnection` trait has no synchronous `connection_state()`
+                            // accessor (state is delivered only via
+                            // `PeerConnectionEventHandler::on_connection_state_change`), so
+                            // `SignalingHandler` mirrors each connection's last-seen state into
+                            // `device_statuses` and we read it from there instead.
                             let mut connected_count = 0;
-                            for (_device_id, pc) in connections.iter() {
-                                let connection_state = pc.connection_state();
-                                if connection_state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
+                            for device_id in connections.keys() {
+                                let connection_state =
+                                    state.device_statuses.get(device_id).copied();
+                                if connection_state
+                                    == Some(
+                                        webrtc::peer_connection::RTCPeerConnectionState::Connected,
+                                    )
+                                {
                                     connected_count += 1;
                                 }
                             }
@@ -2290,9 +2300,14 @@ impl Command {
                     let mut connected_count = 0;
                     let mut failed_count = 0;
 
-                    for (peer_id, pc) in connections.iter() {
-                        let conn_state = pc.connection_state();
-                        let is_connected = conn_state == webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected;
+                    for peer_id in connections.keys() {
+                        let conn_state = state
+                            .device_statuses
+                            .get(peer_id)
+                            .copied()
+                            .unwrap_or(webrtc::peer_connection::RTCPeerConnectionState::New);
+                        let is_connected = conn_state
+                            == webrtc::peer_connection::RTCPeerConnectionState::Connected;
 
                         if is_connected {
                             connected_count += 1;
@@ -2403,10 +2418,18 @@ impl Command {
                         }
 
                         match connections.get(participant) {
-                            Some(pc) => {
-                                let conn_state = pc.connection_state();
-                                if conn_state != webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected {
-                                    info!("⚠️ Connection to {} is in state: {:?}", participant, conn_state);
+                            Some(_pc) => {
+                                let conn_state =
+                                    state.device_statuses.get(participant).copied().unwrap_or(
+                                        webrtc::peer_connection::RTCPeerConnectionState::New,
+                                    );
+                                if conn_state
+                                    != webrtc::peer_connection::RTCPeerConnectionState::Connected
+                                {
+                                    info!(
+                                        "⚠️ Connection to {} is in state: {:?}",
+                                        participant, conn_state
+                                    );
                                     missing_connections.push(participant.clone());
                                 }
                             }
@@ -3350,9 +3373,8 @@ mod tests {
             keys::{
                 IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer,
             },
-            rand_core::OsRng,
         };
-        let rng = OsRng;
+        let rng = starlab_core::rng::os_rng();
         let (secret_shares, pubkey_package): (std::collections::BTreeMap<Identifier, _>, PKP) =
             generate_with_dealer(3, 2, IdentifierList::Default, rng)
                 .expect("trusted-dealer keygen");

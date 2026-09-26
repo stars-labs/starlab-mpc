@@ -523,8 +523,8 @@ pub fn encrypt_for_extension(
     wallet_id: &str,
 ) -> Result<ExtensionEncryptedKeyShare> {
     use aes_gcm::{
-        Aes256Gcm, Key, Nonce,
-        aead::{Aead, KeyInit},
+        Aes256Gcm,
+        aead::{Aead, KeyInit, Nonce},
     };
     use pbkdf2::pbkdf2_hmac;
     use sha2::Sha256;
@@ -543,11 +543,11 @@ pub fn encrypt_for_extension(
     let plaintext =
         serde_json::to_vec(data).map_err(|e| KeystoreError::SerializationError(e.to_string()))?;
 
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-    let nonce = Nonce::from_slice(&iv);
+    let cipher = Aes256Gcm::new(&key.into());
+    let nonce = Nonce::<Aes256Gcm>::from(iv);
 
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_ref())
+        .encrypt(&nonce, plaintext.as_ref())
         .map_err(|e| KeystoreError::EncryptionError(e.to_string()))?;
 
     Ok(ExtensionEncryptedKeyShare {
@@ -566,8 +566,8 @@ pub fn decrypt_from_extension(
     password: &str,
 ) -> Result<ExtensionKeyShareData> {
     use aes_gcm::{
-        Aes256Gcm, Key, Nonce,
-        aead::{Aead, KeyInit},
+        Aes256Gcm,
+        aead::{Aead, KeyInit, Nonce},
     };
     use pbkdf2::pbkdf2_hmac;
     use sha2::Sha256;
@@ -588,11 +588,12 @@ pub fn decrypt_from_extension(
     pbkdf2_hmac::<Sha256>(password.as_bytes(), &salt, 100_000, &mut key);
 
     // Decrypt
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-    let nonce = Nonce::from_slice(&iv);
+    let cipher = Aes256Gcm::new(&key.into());
+    let nonce = Nonce::<Aes256Gcm>::try_from(iv.as_slice())
+        .map_err(|_| KeystoreError::DecryptionError("IV must be 12 bytes".to_string()))?;
 
     let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
+        .decrypt(&nonce, ciphertext.as_ref())
         .map_err(|e| KeystoreError::DecryptionError(e.to_string()))?;
 
     let data: ExtensionKeyShareData = serde_json::from_slice(&plaintext)

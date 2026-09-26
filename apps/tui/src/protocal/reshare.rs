@@ -22,11 +22,9 @@
 //! (validated in frost-core `resharing.rs` + phase 1).
 
 use frost_core::keys::dkg::{round1, round2};
-use frost_core::keys::refresh::{refresh_dkg_part_1, refresh_dkg_part2, refresh_dkg_shares};
-// frost_ed25519 / frost_secp256k1 re-export the same rand_core 0.6; OsRng is
-// curve-agnostic and satisfies frost's RngCore + CryptoRng bound for any C.
+use frost_core::keys::refresh::{refresh_dkg_part1, refresh_dkg_part2, refresh_dkg_shares};
 use frost_core::{Ciphersuite, Identifier};
-use frost_ed25519::rand_core::OsRng;
+use starlab_core::rng::os_rng;
 
 use crate::utils::appstate_compat::AppState;
 
@@ -52,8 +50,9 @@ pub fn reshare_part1<C: Ciphersuite>(
     max_signers: u16,
     min_signers: u16,
 ) -> Result<round1::Package<C>, String> {
-    let (secret, package) = refresh_dkg_part_1::<C, _>(identifier, max_signers, min_signers, OsRng)
-        .map_err(|e| format!("reshare part1: {e}"))?;
+    let (secret, package) =
+        refresh_dkg_part1::<C, _>(identifier, max_signers, min_signers, os_rng())
+            .map_err(|e| format!("reshare part1: {e}"))?;
     state.reshare_round1_secret = Some(secret);
     state.reshare_in_progress = true;
     Ok(package)

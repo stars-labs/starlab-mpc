@@ -6,6 +6,15 @@
 //! module the logic lived inline, twice, inside `Command::StartDKG` and
 //! `Command::JoinDKG` — ~400 lines of deeply nested callbacks, copy-pasted.
 //! Now both drivers just forward each `ServerMsg::Relay { from, data }` here.
+//!
+//! webrtc 0.21 replaced the callback-registration API (`pc.on_ice_candidate(...)`,
+//! `pc.on_data_channel(...)`, `pc.on_peer_connection_state_change(...)`) with a single
+//! `PeerConnectionEventHandler` installed once, at construction time, via
+//! `PeerConnectionBuilder::with_handler`. `SignalingHandler` below is that handler; it
+//! is shared by both the offerer path (`network::webrtc::initiate_webrtc_with_channel`)
+//! and the answerer path (`ensure_peer_connection` in this file) via
+//! `build_peer_connection`, so every peer connection in the mesh gets the same wiring
+//! regardless of which side created it.
 
 use crate::elm::message::Message;
 use crate::utils::appstate_compat::AppState;
@@ -13,6 +22,11 @@ use frost_core::{Ciphersuite, Field, Group};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc::UnboundedSender};
 use tracing::{error, info};
+use webrtc::data_channel::DataChannel;
+use webrtc::peer_connection::{
+    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+    RTCPeerConnectionIceEvent, RTCPeerConnectionState,
+};
 
 /// Process a `ServerMsg::Relay` frame.
 ///
@@ -252,16 +266,13 @@ fn spawn_offer_handler<C>(
             None => return,
         };
 
-        let offer =
-            match webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(
-                sdp,
-            ) {
-                Ok(s) => s,
-                Err(e) => {
-                    error!("❌ Invalid offer SDP from {}: {}", from_device, e);
-                    return;
-                }
-            };
+        let offer = match webrtc::peer_connection::RTCSessionDescription::offer(sdp) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("❌ Invalid offer SDP from {}: {}", from_device, e);
+                return;
+            }
+        };
         if let Err(e) = pc.set_remote_description(offer).await {
             error!(
                 "❌ Failed to set remote description for {}: {}",
@@ -317,16 +328,13 @@ where
         };
         drop(conns);
 
-        let answer =
-            match webrtc::peer_connection::sdp::session_description::RTCSessionDescription::answer(
-                sdp,
-            ) {
-                Ok(a) => a,
-                Err(e) => {
-                    error!("❌ Invalid answer SDP from {}: {}", from_device, e);
-                    return;
-                }
-            };
+        let answer = match webrtc::peer_connection::RTCSessionDescription::answer(sdp) {
+            Ok(a) => a,
+            Err(e) => {
+                error!("❌ Invalid answer SDP from {}: {}", from_device, e);
+                return;
+            }
+        };
         if let Err(e) = pc.set_remote_description(answer).await {
             error!(
                 "❌ Failed to set remote description (answer) for {}: {}",
@@ -368,11 +376,12 @@ fn spawn_ice_handler<C>(
             return;
         };
         drop(conns);
-        let init = webrtc::ice_transport::ice_candidate::RTCIceCandidateInit {
+        let init = webrtc::peer_connection::RTCIceCandidateInit {
             candidate,
             sdp_mid: Some(sdp_mid),
             sdp_mline_index: Some(sdp_mline_index),
             username_fragment: None,
+            url: None,
         };
         if let Err(e) = pc.add_ice_candidate(init).await {
             error!("❌ Failed to add ICE candidate from {}: {}", from_device, e);
@@ -383,13 +392,14 @@ fn spawn_ice_handler<C>(
 }
 
 /// Get an existing peer connection for `device_id`, or create + wire a new
-/// one with data-channel / connection-state / ICE handlers attached.
+/// one with a `SignalingHandler` (data-channel / connection-state / ICE
+/// handling) installed at construction time.
 async fn ensure_peer_connection<C>(
     device_id: &str,
     app_state: &Arc<Mutex<AppState<C>>>,
     tx_msg: &UnboundedSender<Message>,
     ws_tx: &UnboundedSender<String>,
-) -> Option<Arc<webrtc::peer_connection::RTCPeerConnection>>
+) -> Option<Arc<dyn PeerConnection>>
 where
     C: Ciphersuite + Send + Sync + 'static,
     <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
@@ -408,191 +418,217 @@ where
         "📱 Creating peer connection for {} (to handle offer)",
         device_id
     );
-    let config = webrtc::peer_connection::configuration::RTCConfiguration {
-        ice_servers: vec![],
-        ..Default::default()
-    };
-    let pc = match webrtc::api::APIBuilder::new()
-        .build()
-        .new_peer_connection(config)
-        .await
-    {
-        Ok(pc) => Arc::new(pc),
-        Err(e) => {
-            error!(
-                "❌ Failed to create peer connection for {}: {}",
-                device_id, e
-            );
-            return None;
-        }
-    };
-
-    attach_data_channel_handler(
-        &pc,
-        device_id.to_string(),
-        tx_msg.clone(),
-        app_state.clone(),
-    );
-    attach_connection_state_handler(&pc, device_id.to_string(), tx_msg.clone());
-    attach_ice_candidate_handler(&pc, device_id.to_string(), ws_tx.clone());
+    let pc = build_peer_connection(device_id.to_string(), app_state.clone(), tx_msg, ws_tx).await?;
 
     conns.insert(device_id.to_string(), pc.clone());
     Some(pc)
 }
 
-fn attach_data_channel_handler<C>(
-    pc: &Arc<webrtc::peer_connection::RTCPeerConnection>,
+/// Build a peer connection with a `SignalingHandler` wired in at construction
+/// time (webrtc 0.21 has no post-construction `on_*` registration — the whole
+/// event surface is one handler passed to `PeerConnectionBuilder::with_handler`).
+///
+/// Shared by both sides: the offerer (`network::webrtc::initiate_webrtc_with_channel`,
+/// which additionally calls `create_data_channel` + `create_offer` on the result) and
+/// the answerer (`ensure_peer_connection` above, which calls `set_remote_description`
+/// + `create_answer`). Both need identical ICE-candidate / connection-state / incoming
+/// data-channel handling, which now lives entirely in `SignalingHandler`.
+pub(crate) async fn build_peer_connection<C>(
+    device_id: String,
+    app_state: Arc<Mutex<AppState<C>>>,
+    tx_msg: &UnboundedSender<Message>,
+    ws_tx: &UnboundedSender<String>,
+) -> Option<Arc<dyn PeerConnection>>
+where
+    C: Ciphersuite + Send + Sync + 'static,
+    <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
+    <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
+{
+    let handler: Arc<dyn PeerConnectionEventHandler> = Arc::new(SignalingHandler {
+        device_id: device_id.clone(),
+        tx_msg: tx_msg.clone(),
+        ws_tx: ws_tx.clone(),
+        app_state,
+    });
+
+    let config = RTCConfigurationBuilder::new().build();
+    match PeerConnectionBuilder::new()
+        .with_configuration(config)
+        .with_handler(handler)
+        .with_udp_addrs(vec!["0.0.0.0:0".to_string()])
+        .build()
+        .await
+    {
+        Ok(pc) => Some(Arc::new(pc) as Arc<dyn PeerConnection>),
+        Err(e) => {
+            error!(
+                "❌ Failed to create peer connection for {}: {}",
+                device_id, e
+            );
+            None
+        }
+    }
+}
+
+/// The single `PeerConnectionEventHandler` for a mesh peer connection.
+///
+/// Replaces the old per-closure `pc.on_ice_candidate` / `pc.on_data_channel` /
+/// `pc.on_peer_connection_state_change` registrations. Installed once at
+/// construction (see `build_peer_connection`), so it applies to a connection
+/// regardless of which side (offerer or answerer) created it.
+struct SignalingHandler<C: Ciphersuite + Send + Sync + 'static>
+where
+    <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
+    <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
+{
     device_id: String,
     tx_msg: UnboundedSender<Message>,
+    ws_tx: UnboundedSender<String>,
     app_state: Arc<Mutex<AppState<C>>>,
+}
+
+#[async_trait::async_trait]
+impl<C> PeerConnectionEventHandler for SignalingHandler<C>
+where
+    C: Ciphersuite + Send + Sync + 'static,
+    <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
+    <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
+{
+    async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
+        info!("🧊 Generated ICE candidate for {}", self.device_id);
+        let Ok(c) = event.candidate.to_json() else {
+            return;
+        };
+        let signal = crate::protocal::signal::WebRTCSignal::Candidate(
+            crate::protocal::signal::CandidateInfo {
+                candidate: c.candidate,
+                sdp_mid: c.sdp_mid,
+                sdp_mline_index: c.sdp_mline_index,
+            },
+        );
+        let wrapper = crate::protocal::signal::WebSocketMessage::WebRTCSignal(signal);
+        let Ok(payload) = serde_json::to_value(wrapper) else {
+            return;
+        };
+        let relay = starlab_signal_server::ClientMsg::Relay {
+            to: self.device_id.clone(),
+            data: payload,
+        };
+        let Ok(json) = serde_json::to_string(&relay) else {
+            return;
+        };
+        info!(
+            "📤 Sending ICE candidate to {} via WebSocket",
+            self.device_id
+        );
+        let _ = self.ws_tx.send(json);
+    }
+
+    async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
+        // webrtc 0.21's `PeerConnection` trait has no synchronous/async `connection_state()`
+        // accessor anymore (state is event-delivered only, see the crate's
+        // `docs/transport-objects.md`), so callers that used to poll `pc.connection_state()`
+        // (the mesh-readiness checkers in `elm::command`) now read this map instead.
+        {
+            let mut app_state = self.app_state.lock().await;
+            app_state
+                .device_statuses
+                .insert(self.device_id.clone(), state);
+        }
+        let is_connected = matches!(state, RTCPeerConnectionState::Connected);
+        let _ = self.tx_msg.send(Message::UpdateParticipantWebRTCStatus {
+            device_id: self.device_id.clone(),
+            webrtc_connected: is_connected,
+            // Updated again when the data channel opens.
+            data_channel_open: false,
+        });
+        match state {
+            RTCPeerConnectionState::Connected => {
+                info!("✅ WebRTC connection ESTABLISHED with {}", self.device_id);
+            }
+            RTCPeerConnectionState::Failed => {
+                error!("❌ WebRTC connection FAILED with {}", self.device_id);
+            }
+            RTCPeerConnectionState::Disconnected => {
+                tracing::warn!("⚠️ WebRTC connection DISCONNECTED from {}", self.device_id);
+            }
+            RTCPeerConnectionState::Closed => {
+                info!("🔒 WebRTC connection CLOSED with {}", self.device_id);
+            }
+            other => info!(
+                "WebRTC connection state with {}: {:?}",
+                self.device_id, other
+            ),
+        }
+    }
+
+    async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
+        let device_id = self.device_id.clone();
+        let tx_msg = self.tx_msg.clone();
+        let app_state = self.app_state.clone();
+        info!("📂 Incoming data channel from {}", device_id);
+        tokio::spawn(async move {
+            run_answer_side_data_channel::<C>(dc, device_id, app_state, tx_msg).await;
+        });
+    }
+}
+
+/// Poll loop for a data channel WE received via `on_data_channel` (the
+/// answerer side). Mirrors the offerer-side loop in
+/// `network::webrtc::run_offer_side_data_channel`, minus the `channel_open` /
+/// `mesh_ready` sends — those are only emitted by the side that created the
+/// channel.
+async fn run_answer_side_data_channel<C>(
+    dc: Arc<dyn DataChannel>,
+    device_id: String,
+    app_state: Arc<Mutex<AppState<C>>>,
+    tx_msg: UnboundedSender<Message>,
 ) where
     C: Ciphersuite + Send + Sync + 'static,
     <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
     <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
 {
-    pc.on_data_channel(Box::new(
-        move |dc: Arc<webrtc::data_channel::RTCDataChannel>| {
-            let device_id = device_id.clone();
-            let tx_msg = tx_msg.clone();
-            let app_state = app_state.clone();
-            Box::pin(async move {
-                info!(
-                    "📂 Incoming data channel from {}: {}",
-                    device_id,
-                    dc.label()
-                );
+    use webrtc::data_channel::DataChannelEvent;
 
-                // on_open: stash the data channel in AppState and notify the UI.
-                let dc_for_open = dc.clone();
-                let device_open = device_id.clone();
-                let tx_open = tx_msg.clone();
-                let app_state_open = app_state.clone();
-                dc.on_open(Box::new(move || {
-                    let dc = dc_for_open.clone();
-                    let device_id = device_open.clone();
-                    let tx_msg = tx_open.clone();
-                    let app_state = app_state_open;
-                    Box::pin(async move {
-                        info!("📂 Data channel OPENED from {}", device_id);
-                        {
-                            let mut state = app_state.lock().await;
-                            state.data_channels.insert(device_id.clone(), dc.clone());
-                            info!(
-                                "📦 Stored incoming data channel for {} in AppState",
-                                device_id
-                            );
-                        }
-                        let _ = tx_msg.send(Message::UpdateParticipantWebRTCStatus {
-                            device_id,
-                            webrtc_connected: true,
-                            data_channel_open: true,
-                        });
-                    })
-                }));
-
+    while let Some(event) = dc.poll().await {
+        match event {
+            DataChannelEvent::OnOpen => {
+                info!("📂 Data channel OPENED from {}", device_id);
+                {
+                    let mut state = app_state.lock().await;
+                    state.data_channels.insert(device_id.clone(), dc.clone());
+                    info!(
+                        "📦 Stored incoming data channel for {} in AppState",
+                        device_id
+                    );
+                }
+                let _ = tx_msg.send(Message::UpdateParticipantWebRTCStatus {
+                    device_id: device_id.clone(),
+                    webrtc_connected: true,
+                    data_channel_open: true,
+                });
+            }
+            DataChannelEvent::OnMessage(msg) => {
                 // Delegate to the shared dispatcher. This is the answerer path
                 // (PC created via `on_data_channel` on the passive side); previously
                 // this was a log-only stub, so any DKG package the initiator sent
                 // across this DC direction was silently dropped. DKG Round 1 only
                 // completed one-way and the protocol stalled at "Initialization".
-                let device_msg = device_id.clone();
-                let app_state_msg = app_state.clone();
-                let tx_for_msg = tx_msg.clone();
-                dc.on_message(Box::new(
-                    move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
-                        let device_id_recv = device_msg.clone();
-                        let app_state_msg = app_state_msg.clone();
-                        let tx_for_msg = tx_for_msg.clone();
-                        Box::pin(async move {
-                            crate::network::webrtc::dispatch_data_channel_msg::<C>(
-                                msg.data.to_vec(),
-                                device_id_recv,
-                                app_state_msg,
-                                Some(tx_for_msg),
-                            )
-                            .await;
-                        })
-                    },
-                ));
-            })
-        },
-    ));
-}
-
-fn attach_connection_state_handler(
-    pc: &Arc<webrtc::peer_connection::RTCPeerConnection>,
-    device_id: String,
-    tx_msg: UnboundedSender<Message>,
-) {
-    pc.on_peer_connection_state_change(Box::new(
-        move |state: webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState| {
-            let device_id = device_id.clone();
-            let tx_msg = tx_msg.clone();
-            Box::pin(async move {
-                let is_connected = matches!(
-                    state,
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected
-                );
-                let _ = tx_msg.send(Message::UpdateParticipantWebRTCStatus {
-                    device_id: device_id.clone(),
-                    webrtc_connected: is_connected,
-                    // Updated again when the data channel opens.
-                    data_channel_open: false,
-                });
-                match state {
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Connected => {
-                        info!("✅ WebRTC connection ESTABLISHED with {} (from answer)", device_id);
-                    }
-                    webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState::Failed => {
-                        error!("❌ WebRTC connection FAILED with {} (from answer)", device_id);
-                    }
-                    other => info!("WebRTC connection state with {} (from answer): {:?}", device_id, other),
-                }
-            })
-        },
-    ));
-}
-
-fn attach_ice_candidate_handler(
-    pc: &Arc<webrtc::peer_connection::RTCPeerConnection>,
-    device_id: String,
-    ws_tx: UnboundedSender<String>,
-) {
-    pc.on_ice_candidate(Box::new(
-        move |candidate: Option<webrtc::ice_transport::ice_candidate::RTCIceCandidate>| {
-            let device_id = device_id.clone();
-            let ws_tx = ws_tx.clone();
-            Box::pin(async move {
-                let Some(candidate) = candidate else {
-                    return;
-                };
-                info!("🧊 Generated ICE candidate for {}", device_id);
-                let Ok(c) = candidate.to_json() else {
-                    return;
-                };
-                let signal = crate::protocal::signal::WebRTCSignal::Candidate(
-                    crate::protocal::signal::CandidateInfo {
-                        candidate: c.candidate,
-                        sdp_mid: c.sdp_mid,
-                        sdp_mline_index: c.sdp_mline_index,
-                    },
-                );
-                let wrapper = crate::protocal::signal::WebSocketMessage::WebRTCSignal(signal);
-                let Ok(payload) = serde_json::to_value(wrapper) else {
-                    return;
-                };
-                let relay = starlab_signal_server::ClientMsg::Relay {
-                    to: device_id.clone(),
-                    data: payload,
-                };
-                let Ok(json) = serde_json::to_string(&relay) else {
-                    return;
-                };
-                info!("📤 Sending ICE candidate to {} via WebSocket", device_id);
-                let _ = ws_tx.send(json);
-            })
-        },
-    ));
+                crate::network::webrtc::dispatch_data_channel_msg::<C>(
+                    msg.data.to_vec(),
+                    device_id.clone(),
+                    app_state.clone(),
+                    Some(tx_msg.clone()),
+                )
+                .await;
+            }
+            DataChannelEvent::OnClose => {
+                info!("📪 Data channel CLOSED from {}", device_id);
+                break;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Serialize + enqueue a WebRTC answer back to the peer that sent the offer.

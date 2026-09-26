@@ -12,64 +12,54 @@ categories = ["cryptography"]
 
 [dependencies]
 # FROST dependencies
-frost-core = { version = "2.2.0", features = ["serde"] }
-frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
-frost-secp256k1-tr = { version = "2.2.0", features = ["serde"] }
-frost-ed25519 = { version = "2.2.0", features = ["serde"] }
+frost-core = { version = "3.0.0", features = ["serde"] }
+frost-secp256k1 = { version = "3.0.0", features = ["serde"] }
+frost-secp256k1-tr = { version = "3.0.0", features = ["serde"] }
+frost-ed25519 = { version = "3.0.0", features = ["serde"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.143"
+serde_json = "1.0.151"
 hex = "0.4.3"
-base64 = "0.22.1"
+base64 = "0.23.1"
 
 # Cryptography
 sha2 = "0.11.0"
-sha3 = "0.11.0"
-k256 = "0.13.4"
-# Random number stack constraints:
-#   - FROST 2.2 (frost-core / frost-ed25519 / frost-secp256k1) publicly
-#     exposes `rand_core 0.6` in its API (`impl RngCore for ...`). Any RNG
-#     we pass into FROST must implement rand_core 0.6's `RngCore` /
-#     `CryptoRng`. rand_core 0.10 defines different traits — not
-#     convertible — so we pin rand_core + rand_chacha to the 0.6-compatible
-#     line here. This is NOT a security downgrade: rand_chacha's API
-#     version just mirrors rand_core's; the underlying ChaCha20 PRNG is
-#     unchanged. We can revisit when the FROST 2.x line ships a release
-#     using rand_core 0.9+.
-#   - `rand` itself (the higher-level convenience crate) isn't used in
-#     this crate's hot paths; we skip it entirely and use `rand_core`'s
-#     OsRng + `rand_chacha::ChaCha20Rng` directly.
-rand_core = { version = "0.6", features = ["getrandom"] }
-rand_chacha = "0.3"
+sha3 = "0.12.0"
+k256 = "0.14.0"
+# RNG stack: rand_core/rand_chacha 0.10 + getrandom 0.4 (SysRng). frost-core
+# 3.0 still takes rand_core 0.6 traits; `src/rng.rs` bridges at that boundary
+# via frost's own `rand_core` re-export.
+rand_core = "0.10"
+rand_chacha = "0.10"
 # Inherits workspace-level version + wasm_js feature. This crate is
 # compiled into both native (TUI) and wasm32 (core-wasm) targets, so
 # the js backend needs to be activated centrally to avoid rebuilding
 # with inconsistent features per target.
-getrandom.workspace = true
+getrandom = { workspace = true, features = ["sys_rng"] }
 hkdf = "0.13"
 
 # Encryption for keystore
-aes-gcm = "0.10.3"
-argon2 = { version = "0.5", features = ["password-hash"] }
-pbkdf2 = { version = "0.12", features = ["simple"] }
+aes-gcm = "0.11.1"
+argon2 = "0.6"
+pbkdf2 = "0.13"
 hmac = "0.13"
 password-hash = "0.6"
 
 # Other
 bs58 = "0.5"
-ripemd = "0.1"
-bech32 = "0.11"
-thiserror = "2.0.9"
+ripemd = "0.2"
+bech32 = "0.12"
+thiserror = "2.0.21"
 
 [dev-dependencies]
 # Only examples/dkg.rs uses clap (argument parsing). No tests in this
 # crate currently; no async in the examples either.
-clap = { version = "4.5.21", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive"] }
 # Third FROST ciphersuite used ONLY in curve_registry tests, to prove a curve
 # beyond ed25519/secp256k1 registers and runs DKG with zero engine edits (#35).
-# Same ZCash FROST 2.2 line as the production curves.
-frost-ristretto255 = { version = "2.2.0", features = ["serde"] }
+# Same ZCash FROST 3.0 line as the production curves.
+frost-ristretto255 = { version = "3.0.0", features = ["serde"] }
 # (bincode removed: the examples don't use it and bincode 3.x reshuffled the
 # serde integration. If a future example needs binary encoding, pull in
 # `bincode_serde` or ciborium explicitly at that point.)

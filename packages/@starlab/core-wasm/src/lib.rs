@@ -1,3 +1,4 @@
+use starlab_core::rng::os_rng;
 use starlab_core::{
     FrostCurve, FrostError,
     ed25519::Ed25519Curve,
@@ -6,12 +7,8 @@ use starlab_core::{
     secp256k1::Secp256k1Curve,
     unified_dkg::{UnifiedDkg, UnifiedRound1Package},
 };
-use wasm_bindgen::prelude::*;
-// In rand 0.9+ `rngs::OsRng` moved to `rand_core` (it's the same type;
-// the `rand` crate's re-export was dropped). Match frost-core's usage
-// for consistency.
-use rand_core::OsRng;
 use std::collections::BTreeMap;
+use wasm_bindgen::prelude::*;
 
 // Re-export specific FROST types needed by WASM
 use frost_ed25519::{
@@ -154,7 +151,7 @@ impl FrostDkgEd25519 {
 
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Ed25519Curve::identifier_from_u16(self.participant_index)?;
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let (round1_secret, round1_package) =
             Ed25519Curve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;
@@ -504,7 +501,7 @@ impl FrostDkgSecp256k1 {
 
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let (round1_secret, round1_package) =
             Secp256k1Curve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;
@@ -1043,7 +1040,7 @@ macro_rules! frost_reshare_impl {
                     .session
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
-                let pkg = session.round1(&mut OsRng).map_err(WasmError::from)?;
+                let pkg = session.round1(&mut os_rng()).map_err(WasmError::from)?;
                 let json =
                     serde_json::to_string(&pkg).map_err(|e| WasmError::new(&e.to_string()))?;
                 Ok(hex::encode(json))
@@ -1297,7 +1294,7 @@ impl FrostDkgSecp256k1Tr {
 
     pub fn generate_round1(&mut self) -> Result<String, WasmError> {
         let identifier = Secp256k1TrCurve::identifier_from_u16(self.participant_index)?;
-        let mut rng = OsRng;
+        let mut rng = os_rng();
 
         let (round1_secret, round1_package) =
             Secp256k1TrCurve::dkg_part1(identifier, self.total, self.threshold, &mut rng)?;

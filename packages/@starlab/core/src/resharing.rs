@@ -28,11 +28,11 @@
 //! CLI) layers on top, exactly as the DKG client does over `keys::dkg`.
 
 use crate::errors::{FrostError, Result};
+use crate::rng::{ChaCha20Rng, CryptoRng, RngCore};
 use frost_core::keys::dkg::{part1 as dkg_part1, part2 as dkg_part2, part3 as dkg_part3};
-use frost_core::keys::refresh::{refresh_dkg_part_1, refresh_dkg_part2, refresh_dkg_shares};
+use frost_core::keys::refresh::{refresh_dkg_part1, refresh_dkg_part2, refresh_dkg_shares};
 use frost_core::keys::{KeyPackage, PublicKeyPackage};
 use frost_core::{Ciphersuite, Identifier};
-use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use std::collections::BTreeMap;
 
@@ -127,7 +127,7 @@ pub fn refresh<C: Ciphersuite>(
     let mut r1_pkgs: BTreeMap<Identifier<C>, _> = BTreeMap::new();
     for &i in new_ids {
         let mut rng = ChaCha20Rng::from_seed([seed_base.wrapping_add(i as u8); 32]);
-        let (s, p) = refresh_dkg_part_1::<C, _>(ident::<C>(i)?, total, threshold, &mut rng)
+        let (s, p) = refresh_dkg_part1::<C, _>(ident::<C>(i)?, total, threshold, &mut rng)
             .map_err(|e| FrostError::DkgError(e.to_string()))?;
         r1_secret.insert(i, s);
         r1_pkgs.insert(ident::<C>(i)?, p);
@@ -299,11 +299,11 @@ impl<C: Ciphersuite> ReshareSession<C> {
     }
 
     /// Generate this participant's round-1 package (broadcast it to all peers).
-    pub fn round1<R: rand_core::RngCore + rand_core::CryptoRng>(
+    pub fn round1<R: RngCore + CryptoRng>(
         &mut self,
         rng: &mut R,
     ) -> Result<frost_core::keys::dkg::round1::Package<C>> {
-        let (secret, pkg) = refresh_dkg_part_1::<C, _>(
+        let (secret, pkg) = refresh_dkg_part1::<C, _>(
             ident::<C>(self.my_id)?,
             self.new_ids.len() as u16,
             self.threshold,

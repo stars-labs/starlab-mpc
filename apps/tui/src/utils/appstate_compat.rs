@@ -27,18 +27,15 @@ pub struct AppState<C: Ciphersuite> {
     pub current_wallet_id: Option<String>,
     pub device_connections: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, Arc<webrtc::peer_connection::RTCPeerConnection>>,
+            std::collections::HashMap<String, Arc<dyn webrtc::peer_connection::PeerConnection>>,
         >,
     >,
-    pub data_channels: std::collections::HashMap<String, Arc<webrtc::data_channel::RTCDataChannel>>,
-    pub device_statuses: std::collections::HashMap<
-        String,
-        webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState,
-    >,
-    pub pending_ice_candidates: std::collections::HashMap<
-        String,
-        Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>,
-    >,
+    pub data_channels:
+        std::collections::HashMap<String, Arc<dyn webrtc::data_channel::DataChannel>>,
+    pub device_statuses:
+        std::collections::HashMap<String, webrtc::peer_connection::RTCPeerConnectionState>,
+    pub pending_ice_candidates:
+        std::collections::HashMap<String, Vec<webrtc::peer_connection::RTCIceCandidateInit>>,
     pub making_offer: std::collections::HashMap<String, bool>,
     pub mesh_status: MeshStatus,
     pub dkg_state: DkgState,
@@ -152,10 +149,7 @@ pub struct AppState<C: Ciphersuite> {
     // ICE candidate queue for handling race conditions
     pub ice_candidate_queue: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<
-                String,
-                Vec<webrtc::ice_transport::ice_candidate::RTCIceCandidateInit>,
-            >,
+            std::collections::HashMap<String, Vec<webrtc::peer_connection::RTCIceCandidateInit>>,
         >,
     >,
 

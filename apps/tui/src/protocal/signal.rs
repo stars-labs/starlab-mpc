@@ -1,8 +1,8 @@
 use frost_core::Ciphersuite;
 use serde::{Deserialize, Serialize};
 
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use webrtc::peer_connection::RTCIceCandidateInit;
+use webrtc::peer_connection::RTCSessionDescription;
 
 /// Curve type for cryptographic operations
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

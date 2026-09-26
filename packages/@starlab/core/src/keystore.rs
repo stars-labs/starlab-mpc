@@ -107,167 +107,158 @@ impl Keystore {
 pub mod encryption {
     use super::*;
     use aes_gcm::{
-        Aes256Gcm, Key, Nonce,
-        aead::{Aead, KeyInit, OsRng},
+        Aes256Gcm,
+        aead::{Aead, KeyInit, Nonce},
     };
-    use argon2::{
-        Argon2,
-        password_hash::{PasswordHasher, SaltString, rand_core::RngCore},
-    };
-    use pbkdf2::{Params, Pbkdf2};
+    use argon2::{Algorithm, Argon2, Params, Version};
+    use base64::engine::general_purpose::STANDARD_NO_PAD as B64;
+    use sha2::Sha256;
 
-    /// Encrypt data using Argon2id (CLI compatible)
+    const SALT_LEN: usize = 16;
+    const NONCE_LEN: usize = 12;
+    const KEY_LEN: usize = 32;
+    const PBKDF2_ROUNDS: u32 = 100_000;
+
+    fn enc_err(e: impl std::fmt::Display) -> FrostError {
+        FrostError::EncryptionError(e.to_string())
+    }
+
+    fn random<const N: usize>() -> Result<[u8; N]> {
+        let mut buf = [0u8; N];
+        getrandom::fill(&mut buf).map_err(enc_err)?;
+        Ok(buf)
+    }
+
+    /// Argon2id v0x13, m=19456 KiB, t=2, p=1, 32-byte output. Pinned
+    /// explicitly (these were argon2 0.5's defaults) so existing ciphertexts
+    /// keep decrypting even if the crate's defaults ever move.
+    fn argon2_key(password: &str, salt: &[u8]) -> Result<[u8; KEY_LEN]> {
+        let params = Params::new(19 * 1024, 2, 1, Some(KEY_LEN)).map_err(enc_err)?;
+        let mut key = [0u8; KEY_LEN];
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+            .hash_password_into(password.as_bytes(), salt, &mut key)
+            .map_err(enc_err)?;
+        Ok(key)
+    }
+
+    fn pbkdf2_key(password: &str, salt: &[u8]) -> [u8; KEY_LEN] {
+        let mut key = [0u8; KEY_LEN];
+        pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ROUNDS, &mut key);
+        key
+    }
+
+    fn seal(key: &[u8; KEY_LEN], nonce: &[u8; NONCE_LEN], data: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(enc_err)?;
+        cipher
+            .encrypt(&Nonce::<Aes256Gcm>::from(*nonce), data)
+            .map_err(enc_err)
+    }
+
+    fn open(key: &[u8; KEY_LEN], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>> {
+        let nonce = Nonce::<Aes256Gcm>::try_from(nonce).map_err(enc_err)?;
+        let cipher = Aes256Gcm::new_from_slice(key).map_err(enc_err)?;
+        cipher.decrypt(&nonce, ciphertext).map_err(enc_err)
+    }
+
+    /// Encrypt data using Argon2id (CLI compatible).
+    ///
+    /// Format: `b64(salt)` (PHC-style unpadded base64) `‖ 0x00 ‖ nonce(12) ‖ ciphertext`.
+    /// The KDF runs over the *decoded* salt bytes.
     pub fn encrypt_argon2(data: &[u8], password: &str) -> Result<Vec<u8>> {
-        // Generate salt
-        let salt = SaltString::generate(&mut OsRng);
+        let salt = random::<SALT_LEN>()?;
+        let nonce = random::<NONCE_LEN>()?;
+        let ciphertext = seal(&argon2_key(password, &salt)?, &nonce, data)?;
 
-        // Derive key using Argon2id
-        let argon2 = Argon2::default();
-        let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        let hash_bytes = password_hash
-            .hash
-            .ok_or_else(|| FrostError::EncryptionError("Failed to get hash bytes".to_string()))?;
-        let key = Key::<Aes256Gcm>::from_slice(&hash_bytes.as_bytes()[0..32]);
-
-        // Generate nonce
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt
-        let cipher = Aes256Gcm::new(key);
-        let ciphertext = cipher
-            .encrypt(nonce, data)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        // Combine salt + nonce + ciphertext
-        let mut result = Vec::new();
-        result.extend_from_slice(salt.as_str().as_bytes());
+        let mut result = B64.encode(salt).into_bytes();
         result.push(0); // null terminator for salt
-        result.extend_from_slice(&nonce_bytes);
+        result.extend_from_slice(&nonce);
         result.extend_from_slice(&ciphertext);
-
         Ok(result)
     }
 
     /// Decrypt data using Argon2id (CLI compatible)
     pub fn decrypt_argon2(encrypted_data: &[u8], password: &str) -> Result<Vec<u8>> {
-        // Extract salt (find null terminator)
-        let salt_end = encrypted_data.iter().position(|&b| b == 0).ok_or_else(|| {
-            FrostError::EncryptionError("Invalid encrypted data format".to_string())
-        })?;
-        let salt_str = std::str::from_utf8(&encrypted_data[..salt_end])
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-        let salt = SaltString::from_b64(salt_str)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        // Extract nonce and ciphertext
+        let salt_end = encrypted_data
+            .iter()
+            .position(|&b| b == 0)
+            .ok_or_else(|| enc_err("Invalid encrypted data format"))?;
+        let salt = B64.decode(&encrypted_data[..salt_end]).map_err(enc_err)?;
         let nonce_start = salt_end + 1;
-        let nonce_end = nonce_start + 12;
-        let nonce = Nonce::from_slice(&encrypted_data[nonce_start..nonce_end]);
-        let ciphertext = &encrypted_data[nonce_end..];
-
-        // Derive key
-        let argon2 = Argon2::default();
-        let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        let hash_bytes = password_hash
-            .hash
-            .ok_or_else(|| FrostError::EncryptionError("Failed to get hash bytes".to_string()))?;
-        let key = Key::<Aes256Gcm>::from_slice(&hash_bytes.as_bytes()[0..32]);
-
-        // Decrypt
-        let cipher = Aes256Gcm::new(key);
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))
+        let nonce_end = nonce_start + NONCE_LEN;
+        if encrypted_data.len() < nonce_end {
+            return Err(enc_err("Invalid encrypted data length"));
+        }
+        open(
+            &argon2_key(password, &salt)?,
+            &encrypted_data[nonce_start..nonce_end],
+            &encrypted_data[nonce_end..],
+        )
     }
 
-    /// Encrypt data using PBKDF2 (browser compatible)
+    /// Encrypt data using PBKDF2-SHA256 (browser compatible).
+    ///
+    /// Format: `salt(16) ‖ nonce(12) ‖ ciphertext`.
     pub fn encrypt_pbkdf2(data: &[u8], password: &str) -> Result<Vec<u8>> {
-        // Generate salt (16 bytes)
-        let mut salt = [0u8; 16];
-        OsRng.fill_bytes(&mut salt);
+        let salt = random::<SALT_LEN>()?;
+        let nonce = random::<NONCE_LEN>()?;
+        let ciphertext = seal(&pbkdf2_key(password, &salt), &nonce, data)?;
 
-        // Derive key using PBKDF2
-        let params = Params {
-            rounds: 100_000,
-            output_length: 32,
-        };
-        let pbkdf2 = Pbkdf2;
-        let salt_string = SaltString::encode_b64(&salt)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        let password_hash = pbkdf2
-            .hash_password_customized(password.as_bytes(), None, None, params, &salt_string)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        let hash_bytes = password_hash
-            .hash
-            .ok_or_else(|| FrostError::EncryptionError("Failed to get hash bytes".to_string()))?;
-        let key = Key::<Aes256Gcm>::from_slice(hash_bytes.as_bytes());
-
-        // Generate nonce
-        let mut nonce_bytes = [0u8; 12];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Encrypt
-        let cipher = Aes256Gcm::new(key);
-        let ciphertext = cipher
-            .encrypt(nonce, data)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
-
-        // Combine salt + nonce + ciphertext
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(SALT_LEN + NONCE_LEN + ciphertext.len());
         result.extend_from_slice(&salt);
-        result.extend_from_slice(&nonce_bytes);
+        result.extend_from_slice(&nonce);
         result.extend_from_slice(&ciphertext);
-
         Ok(result)
     }
 
     /// Decrypt data using PBKDF2 (browser compatible)
     pub fn decrypt_pbkdf2(encrypted_data: &[u8], password: &str) -> Result<Vec<u8>> {
-        if encrypted_data.len() < 28 {
-            // 16 (salt) + 12 (nonce) + at least some ciphertext
-            return Err(FrostError::EncryptionError(
-                "Invalid encrypted data length".to_string(),
-            ));
+        if encrypted_data.len() < SALT_LEN + NONCE_LEN {
+            return Err(enc_err("Invalid encrypted data length"));
         }
+        let (salt, rest) = encrypted_data.split_at(SALT_LEN);
+        let (nonce, ciphertext) = rest.split_at(NONCE_LEN);
+        open(&pbkdf2_key(password, salt), nonce, ciphertext)
+    }
+}
 
-        // Extract components
-        let salt = &encrypted_data[..16];
-        let nonce = Nonce::from_slice(&encrypted_data[16..28]);
-        let ciphertext = &encrypted_data[28..];
+#[cfg(test)]
+mod tests {
+    use super::encryption::*;
 
-        // Derive key
-        let params = Params {
-            rounds: 100_000,
-            output_length: 32,
-        };
-        let pbkdf2 = Pbkdf2;
-        let salt_string =
-            SaltString::encode_b64(salt).map_err(|e| FrostError::EncryptionError(e.to_string()))?;
+    // Ciphertexts produced by the pre-upgrade stack (argon2 0.5 / pbkdf2 0.12
+    // password-hash API / aes-gcm 0.10). Existing keystores must keep opening.
+    const LEGACY_ARGON2: &str = "796d70362b363462596e5062426473676c4f37546251000c6a30f2e70b9533f34a00ae48e51d1193a8bf5cb44b8ea0b678950795ea2c99b774577278349b4288a0a8ca7f68ae1da819";
+    const LEGACY_PBKDF2: &str = "9df35b2f6e3c2903c517c36b28e1ec643b25a433a06b523db9bacf8457618fa08e49b1f8ecb665ec927376e13d68bf02fce8367aca6315ab34cf6d9bbff46321e411";
+    const PLAINTEXT: &[u8] = b"starlab-compat-fixture";
+    const PASSWORD: &str = "hunter2";
 
-        let password_hash = pbkdf2
-            .hash_password_customized(password.as_bytes(), None, None, params, &salt_string)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))?;
+    #[test]
+    fn decrypts_legacy_argon2_ciphertext() {
+        let blob = hex::decode(LEGACY_ARGON2).unwrap();
+        assert_eq!(decrypt_argon2(&blob, PASSWORD).unwrap(), PLAINTEXT);
+    }
 
-        let hash_bytes = password_hash
-            .hash
-            .ok_or_else(|| FrostError::EncryptionError("Failed to get hash bytes".to_string()))?;
-        let key = Key::<Aes256Gcm>::from_slice(hash_bytes.as_bytes());
+    #[test]
+    fn decrypts_legacy_pbkdf2_ciphertext() {
+        let blob = hex::decode(LEGACY_PBKDF2).unwrap();
+        assert_eq!(decrypt_pbkdf2(&blob, PASSWORD).unwrap(), PLAINTEXT);
+    }
 
-        // Decrypt
-        let cipher = Aes256Gcm::new(key);
-        cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|e| FrostError::EncryptionError(e.to_string()))
+    #[test]
+    fn argon2_round_trips() {
+        let blob = encrypt_argon2(PLAINTEXT, PASSWORD).unwrap();
+        assert_eq!(decrypt_argon2(&blob, PASSWORD).unwrap(), PLAINTEXT);
+    }
+
+    #[test]
+    fn pbkdf2_round_trips() {
+        let blob = encrypt_pbkdf2(PLAINTEXT, PASSWORD).unwrap();
+        assert_eq!(decrypt_pbkdf2(&blob, PASSWORD).unwrap(), PLAINTEXT);
+    }
+
+    #[test]
+    fn wrong_password_is_rejected() {
+        let blob = hex::decode(LEGACY_PBKDF2).unwrap();
+        assert!(decrypt_pbkdf2(&blob, "wrong").is_err());
     }
 }

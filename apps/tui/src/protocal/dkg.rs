@@ -166,9 +166,7 @@ pub async fn handle_trigger_dkg_round1<C>(
     );
 
     // Generate real FROST DKG round 1
-    // Use the frost_ed25519 rand_core for compatibility
-    use frost_ed25519::rand_core::OsRng;
-    let rng = OsRng;
+    let rng = starlab_core::rng::os_rng();
     let (round1_secret_package, round1_public_package) =
         match frost_core::keys::dkg::part1(my_identifier, session.total, session.threshold, rng) {
             Ok(pair) => pair,
@@ -241,20 +239,27 @@ pub async fn handle_trigger_dkg_round1<C>(
 
     let mut all_ready = false;
     for attempt in 1..=10 {
-        let state_guard = state.lock().await;
-        let ready_count = participants_to_check
-            .iter()
-            .filter(|&device_id| {
-                state_guard
-                    .data_channels
-                    .get(device_id)
-                    .map(|dc| {
-                        dc.ready_state()
-                            == webrtc::data_channel::data_channel_state::RTCDataChannelState::Open
-                    })
-                    .unwrap_or(false)
-            })
-            .count();
+        // webrtc 0.21's `DataChannel::ready_state()` is async (a round-trip to the
+        // connection's background driver), so it can't live inside a sync `.filter()`
+        // closure anymore. Snapshot the channel handles under the lock, drop it, then
+        // await each readiness check.
+        let channels: Vec<Option<Arc<dyn webrtc::data_channel::DataChannel>>> = {
+            let state_guard = state.lock().await;
+            participants_to_check
+                .iter()
+                .map(|device_id| state_guard.data_channels.get(device_id).cloned())
+                .collect()
+        };
+
+        let mut ready_count = 0;
+        for dc in &channels {
+            if let Some(dc) = dc
+                && dc.ready_state().await.ok()
+                    == Some(webrtc::data_channel::RTCDataChannelState::Open)
+            {
+                ready_count += 1;
+            }
+        }
 
         if ready_count == participants_to_check.len() {
             all_ready = true;
@@ -262,10 +267,8 @@ pub async fn handle_trigger_dkg_round1<C>(
                 "✅ All {} data channels verified ready for DKG broadcast",
                 ready_count
             );
-            drop(state_guard);
             break;
         } else {
-            drop(state_guard);
             info!(
                 "⏳ Data channels readiness: {}/{} (attempt {}/10)",
                 ready_count,

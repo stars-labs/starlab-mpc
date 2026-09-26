@@ -7,6 +7,7 @@
 //! generic signing. Existing secp256k1 keystores are untouched — this is an
 //! ADDITIONAL curve, not a replacement.
 
+use crate::rng::{OsRng, os_rng};
 use crate::{
     errors::{FrostError, Result},
     traits::FrostCurve,
@@ -17,7 +18,6 @@ use frost_secp256k1_tr::{
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
 };
-use rand_core::OsRng;
 use std::collections::BTreeMap;
 
 pub struct Secp256k1TrCurve;
@@ -92,7 +92,7 @@ impl FrostCurve for Secp256k1TrCurve {
     fn generate_signing_commitment(
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (nonces, commitments) =
             frost_secp256k1_tr::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))

@@ -13,7 +13,7 @@ use frost_ed25519::{
     keys::{KeyPackage as Ed25519KeyPackage, PublicKeyPackage as Ed25519PublicKeyPackage},
 };
 
-use frost_ed25519::rand_core::OsRng;
+use starlab_core::rng::os_rng;
 use std::collections::BTreeMap;
 use std::thread;
 use std::time::Duration;
@@ -73,7 +73,7 @@ fn perform_hybrid_dkg_secp256k1(
     println!("╚════════════════════════════════════════╝");
 
     let total = participants.len() as u16;
-    let rng = OsRng;
+    let mut rng = starlab_core::rng::os_rng();
 
     // Round 1: Generate commitments
     println!("\n📝 Round 1: Generating commitments");
@@ -84,7 +84,7 @@ fn perform_hybrid_dkg_secp256k1(
 
     for p in participants.iter() {
         let (secret, public_pkg) =
-            secp256k1_dkg::part1(p.secp256k1_identifier, total, threshold, rng)
+            secp256k1_dkg::part1(p.secp256k1_identifier, total, threshold, &mut rng)
                 .expect("DKG part1 failed");
 
         round1_secrets.push(secret);
@@ -203,7 +203,7 @@ fn perform_hybrid_dkg_ed25519(
     println!("╚════════════════════════════════════════╝");
 
     let total = participants.len() as u16;
-    let rng = OsRng;
+    let mut rng = starlab_core::rng::os_rng();
 
     // Similar to secp256k1 but using ed25519
     println!("\n📝 Round 1: Generating commitments");
@@ -213,8 +213,9 @@ fn perform_hybrid_dkg_ed25519(
     let mut round1_packages = BTreeMap::new();
 
     for p in participants.iter() {
-        let (secret, public_pkg) = ed25519_dkg::part1(p.ed25519_identifier, total, threshold, rng)
-            .expect("DKG part1 failed");
+        let (secret, public_pkg) =
+            ed25519_dkg::part1(p.ed25519_identifier, total, threshold, &mut rng)
+                .expect("DKG part1 failed");
 
         round1_secrets.push(secret);
         round1_packages.insert(p.ed25519_identifier, public_pkg.clone());

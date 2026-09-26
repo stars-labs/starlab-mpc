@@ -8,9 +8,8 @@ use frost_secp256k1::{
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
 };
-// Use OsRng from frost_ed25519 for compatibility
-use frost_ed25519::rand_core::OsRng;
 use serde::{Deserialize, Serialize};
+use starlab_core::rng::os_rng;
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::PathBuf;
@@ -130,7 +129,7 @@ impl FrostParticipant {
     fn dkg_round1(&mut self, threshold: u16, total_participants: u16) {
         println!("\n[P{}] 🔑 DKG Round 1: Generating commitments", self.id);
 
-        let rng = OsRng;
+        let rng = starlab_core::rng::os_rng();
 
         // Generate round 1 packages using real FROST
         let (secret_package, public_package) =
@@ -318,7 +317,7 @@ impl FrostParticipant {
     fn generate_signing_nonces(&mut self) -> SigningCommitments {
         println!("\n[P{}] 🎲 Generating signing nonces", self.id);
 
-        let mut rng = OsRng;
+        let mut rng = starlab_core::rng::os_rng();
         let (nonces, commitments) = frost_secp256k1::round1::commit(
             self.key_package
                 .as_ref()

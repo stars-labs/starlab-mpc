@@ -15,13 +15,13 @@ jobs:
     name: Rust tests + real-DKG e2e
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.2
 
       - name: System deps
         run: sudo apt-get update && sudo apt-get install -y pkg-config
@@ -73,7 +73,7 @@ jobs:
     name: core-wasm + types build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The extension lives in stars-labs/starlab-wallet now; this job keeps
       # the artifacts it consumes (@stars-labs/core-wasm pkg + @stars-labs/types
@@ -83,15 +83,15 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@v2.9.2
       # Install the wasm-pack BINARY onto PATH. We can't rely on the npm
       # wasm-pack package because the next step installs with --ignore-scripts
       # (so its binary-download postinstall wouldn't run).
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
         with:
-          version: 'v0.13.1'
-      - uses: oven-sh/setup-bun@v2
+          version: 'v0.15.0'
+      - uses: oven-sh/setup-bun@v2.2.0
 
       - run: bun install --frozen-lockfile --ignore-scripts
 

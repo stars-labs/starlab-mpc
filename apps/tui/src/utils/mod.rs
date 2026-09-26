@@ -2,7 +2,6 @@ pub mod appstate_compat;
 pub mod device;
 pub mod erc20_encoder;
 pub mod eth_helper;
-pub mod negotiation;
 pub mod performance;
 pub mod solana_encoder;
 pub mod state;

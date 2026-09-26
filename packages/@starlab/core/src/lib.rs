@@ -7,6 +7,7 @@ pub mod errors;
 pub mod hd_derivation;
 pub mod keystore;
 pub mod resharing;
+pub mod rng;
 pub mod root_secret;
 pub mod secp256k1;
 pub mod secp256k1_tr;

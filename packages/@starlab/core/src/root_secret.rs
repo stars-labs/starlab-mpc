@@ -52,10 +52,9 @@
 //! per-deployment salt **and** bump [`DERIVATION_VERSION`].
 
 use crate::errors::{FrostError, Result};
+use crate::rng::ChaCha20Rng;
 use hkdf::Hkdf;
-use rand_chacha::ChaCha20Rng;
-// rand_core 0.6 is the version FROST accepts; `rand` crate isn't used here.
-use rand_core::{OsRng, RngCore, SeedableRng};
+use rand_core::SeedableRng;
 use sha2::Sha256;
 
 const ROOT_SECRET_LEN: usize = 32;
@@ -88,7 +87,7 @@ impl RootSecret {
     /// Generate a new root secret from OS randomness.
     pub fn generate() -> Self {
         let mut bytes = [0u8; ROOT_SECRET_LEN];
-        OsRng.fill_bytes(&mut bytes);
+        getrandom::fill(&mut bytes).expect("OS RNG failure");
         Self(bytes)
     }
 
@@ -164,6 +163,7 @@ impl Drop for RootSecret {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rng::RngCore;
 
     fn first_bytes(rng: &mut ChaCha20Rng) -> [u8; 32] {
         let mut buf = [0u8; 32];

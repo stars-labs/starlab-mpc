@@ -855,7 +855,7 @@ Notes:
 ### FROST Protocol API
 
 This crate does NOT define its own `FrostProtocol` trait —
-DKG and signing primitives come from upstream `frost-core 2.2`
+DKG and signing primitives come from upstream `frost-core 3.0`
 (plus `frost-ed25519` / `frost-secp256k1`). Earlier drafts
 (and 49360fa caught similar cases) sketched a local trait with
 `start_dkg` / `process_round1` / `process_round2` methods —
@@ -1020,7 +1020,7 @@ crates are at 0.1.x, no third-party audit has been performed,
 no benchmarks ship. What DOES ship:
 
 - Real FROST t-of-n DKG + threshold signing via upstream
-  `frost-core 2.2` (secp256k1 for Ethereum, ed25519 for Solana).
+  `frost-core 3.0` (secp256k1 for Ethereum, ed25519 for Solana).
 - Encrypted per-share keystore (PBKDF2 100k + AES-256-GCM) that
   round-trips with the browser extension.
 - Online (WebRTC mesh) and offline (SD-card air-gap) ceremony

@@ -37,7 +37,8 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 - `accounts.rs` — BIP-44 account model, the single source of truth for ALL clients: `Wallet → Account(index) → per-chain address`, derivation paths pinned here; address derivation is public-only (no key share / password needed)
 - `curve_registry.rs` — Tag → ciphersuite table; object-safe `CurveDkg` so multi-curve DKG loops over registered curves instead of hard-coded arms
 - `resharing.rs` — Share refresh via `frost_core::keys::refresh`: rotate shares / drop a device WITHOUT changing the group public key (see `docs/RECOVERY_AND_RESHARING.md`)
-- `keystore.rs` — Encrypted key share storage (PBKDF2 + AES-256-GCM)
+- `keystore.rs` — Encrypted key share storage (PBKDF2 + AES-256-GCM); legacy-ciphertext fixtures in its tests pin the on-disk format
+- `rng.rs` — RNG bridge: rand_core 0.10 RNGs → the rand_core 0.6 traits frost 3.0 takes
 - `root_secret.rs` — Root entropy → deterministic per-curve RNGs via HKDF
 
 ### Applications
@@ -99,7 +100,7 @@ When changing `starlab-client::core` (`WalletManager`, `SessionManager`, `DkgMan
 
 ## Dependencies
 
-FROST: `frost-core` 2.2.0, `frost-ed25519` 2.2.0, `frost-secp256k1` 2.2.0, `frost-secp256k1-tr` 2.2.0 (ZCash implementations).
+FROST: `frost-core` 3.0, `frost-ed25519` 3.0, `frost-secp256k1` 3.0, `frost-secp256k1-tr` 3.0 (ZCash implementations). frost 3.0 still bounds its APIs on `rand_core 0.6`, while our own RNG stack is `rand_core`/`rand_chacha` 0.10 + `getrandom` 0.4 — always pass RNGs via `starlab_core::rng` (`os_rng()`, `ChaCha20Rng`, `FrostRng<R>` bridge), never a direct old `rand_core`.
 Crypto: `sha2`, `sha3`, `k256`, `aes-gcm`, `argon2`, `pbkdf2` (keystore KDF — used in both `starlab-client::keystore::encryption` and `starlab-core::keystore`), `hkdf` (root-secret expansion in `starlab-core`), `hmac` (both HKDF and BIP-32-style HD derivation in `starlab-core`'s `hd_derivation.rs`). No direct `ed25519-dalek` — ed25519 curve ops go through `frost-ed25519` which pulls `curve25519-dalek` transitively.
 Dev environment: Nix flake (`nix develop`) provides all system deps including graphics libs.
 

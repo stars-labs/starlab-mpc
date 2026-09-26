@@ -5,8 +5,7 @@ use frost_core::keys::dkg::{part1, part2, part3};
 use frost_core::keys::{KeyPackage, PublicKeyPackage};
 use frost_ed25519::Ed25519Sha512;
 use frost_secp256k1::Secp256K1Sha256;
-// Import rand_core directly from frost_ed25519 to ensure version compatibility
-use frost_ed25519::rand_core::{CryptoRng, OsRng, RngCore};
+use starlab_core::rng::{CryptoRng, RngCore, os_rng};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
@@ -190,8 +189,7 @@ fn run_dkg<C>(max_signers: u16, min_signers: u16) -> Result<(), frost_core::Erro
 where
     C: Ciphersuite, // Updated bound
 {
-    // Use OsRng from the same rand_core version that frost uses
-    let mut rng = OsRng;
+    let mut rng = os_rng();
 
     println!(
         "\nStarting DKG with max_signers={}, min_signers={}",

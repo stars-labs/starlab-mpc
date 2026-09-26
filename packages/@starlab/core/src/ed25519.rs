@@ -1,3 +1,4 @@
+use crate::rng::{OsRng, os_rng};
 use crate::{
     errors::{FrostError, Result},
     traits::FrostCurve,
@@ -8,7 +9,6 @@ use frost_ed25519::{
     round1::{SigningCommitments, SigningNonces},
     round2::SignatureShare,
 };
-use rand_core::OsRng;
 use std::collections::BTreeMap;
 
 pub struct Ed25519Curve;
@@ -80,7 +80,7 @@ impl FrostCurve for Ed25519Curve {
     fn generate_signing_commitment(
         key_package: &Self::KeyPackage,
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
-        let mut rng = OsRng;
+        let mut rng = os_rng();
         let (nonces, commitments) =
             frost_ed25519::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))

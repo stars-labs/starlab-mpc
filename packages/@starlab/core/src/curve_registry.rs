@@ -23,10 +23,10 @@
 //! participants of a run.
 
 use crate::errors::{FrostError, Result};
+use crate::rng::ChaCha20Rng;
 use crate::root_secret::RootSecret;
 use frost_core::keys::dkg::{part1, part2, part3, round1, round2};
 use frost_core::{Ciphersuite, Identifier};
-use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use std::any::Any;
 use std::collections::BTreeMap;

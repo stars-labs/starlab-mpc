@@ -73,7 +73,7 @@ per-component dispatch.
 ### Multi-party computation
 
 - **DKG**: FROST distributed key generation for t-of-n schemes
-  (2-of-3, 3-of-5, etc.) via the ZCash `frost-core 2.2` crates.
+  (2-of-3, 3-of-5, etc.) via the ZCash `frost-core 3.0` crates.
 - **Threshold signing**: any `t`-subset of participants can
   collaboratively produce a valid signature — no single device ever
   holds the complete private key.

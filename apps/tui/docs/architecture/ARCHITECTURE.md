@@ -14,7 +14,7 @@
 
 ## System Overview
 
-The MPC Wallet TUI is a modular, event-driven Ratatui application that wraps the FROST threshold-signature protocol (via `frost-core 2.2`) in a keyboard-driven terminal interface. The architecture aims for clear separation between the tui-realm Elm loop, the protocol state machines in `src/protocal/`, and the shared `*Manager` business-logic types in `src/core/` that are reused by native-node.
+The MPC Wallet TUI is a modular, event-driven Ratatui application that wraps the FROST threshold-signature protocol (via `frost-core 3.0`) in a keyboard-driven terminal interface. The architecture aims for clear separation between the tui-realm Elm loop, the protocol state machines in `src/protocal/`, and the shared `*Manager` business-logic types in `src/core/` that are reused by native-node.
 
 ### High-Level Architecture
 
@@ -343,7 +343,7 @@ and [`../OFFLINE_DKG_GUIDE.md`](../OFFLINE_DKG_GUIDE.md).
 
 This crate does NOT define its own `FrostProtocol<C>` type — all
 DKG and signing primitives come from the upstream ZCash Foundation
-`frost-core 2.2` crate family. The TUI wraps them in:
+`frost-core 3.0` crate family. The TUI wraps them in:
 
 - `src/protocal/dkg.rs` — DKG orchestration (state machine driving
   `dkg::part1` → `part2` → `part3`)
@@ -487,7 +487,7 @@ public API today.
 ### Security Measures
 
 #### Cryptographic Security
-- FROST protocol (via upstream `frost-core 2.2`) provides
+- FROST protocol (via upstream `frost-core 3.0`) provides
   `t`-of-`n` threshold security
 - No single party ever holds the complete private key
 - Signatures require threshold participation; `aggregate` verifies
@@ -713,7 +713,7 @@ consolidated story.
    over ratatui render output).
 3. **Protocol Tests**: FROST protocol compliance — ⚠ upstream.
    The FROST primitives themselves are tested in the ZCash
-   `frost-core 2.2` crate; this workspace doesn't duplicate
+   `frost-core 3.0` crate; this workspace doesn't duplicate
    those tests. Integration-style DKG/signing coverage comes
    through the `examples/` binaries rather than a dedicated
    protocol-test harness here.

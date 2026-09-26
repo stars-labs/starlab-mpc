@@ -30,7 +30,7 @@ wasm-bindgen = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
-base64 = "0.22.1"
+base64 = "0.23.1"
 # getrandom 0.4 renamed the "js" feature to "wasm_js" (activates the
 # js-sys/wasm-bindgen backend so wasm32-unknown-unknown builds can
 # call `crypto.getRandomValues`). Without this, wasm-pack builds
@@ -42,16 +42,16 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 # inheriting from the workspace — keeping the versions here in sync so
 # that any future `frost-core.workspace = true` doesn't silently pull
 # a different version than the rest of the tree.
-frost-core = { version = "2.2.0", features = ["serde"] }
-frost-secp256k1 = { version = "2.2.0", features = ["serde"] }
-frost-secp256k1-tr = { version = "2.2.0", features = ["serde"] }
-frost-ed25519 = { version = "2.2.0", features = ["serde"] }
+frost-core = { version = "3.0.0", features = ["serde"] }
+frost-secp256k1 = { version = "3.0.0", features = ["serde"] }
+frost-secp256k1-tr = { version = "3.0.0", features = ["serde"] }
+frost-ed25519 = { version = "3.0.0", features = ["serde"] }
 
 # Async runtime
-tokio = { version = "1.42.0", features = ["full"] }
+tokio = { version = "1.53.1", features = ["full"] }
 
 # WebRTC dependencies
-webrtc = "0.17.1"
+webrtc = "0.21.0"
 
 # Logging
 tracing = "0.1"

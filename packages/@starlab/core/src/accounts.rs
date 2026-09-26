@@ -78,21 +78,21 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
             // keccak256(uncompressed X‖Y)[12..]. FROST serializes compressed,
             // so decompress first (hashing compressed bytes gives a WRONG
             // address that doesn't correspond to the signing key).
-            use k256::elliptic_curve::sec1::ToEncodedPoint;
+            use k256::elliptic_curve::sec1::ToSec1Point;
             use sha3::{Digest, Keccak256};
             let pk = k256::PublicKey::from_sec1_bytes(pubkey_bytes)
                 .map_err(|e| FrostError::SerializationError(format!("secp pubkey: {e}")))?;
-            let point = pk.to_encoded_point(false);
+            let point = pk.to_sec1_point(false);
             let hash = Keccak256::digest(&point.as_bytes()[1..]);
             Ok(format!("0x{}", hex::encode(&hash[12..32])))
         }
         ("bitcoin" | "btc", "secp256k1") => {
             // P2WPKH (BIP-84): bech32 segwit-v0 of hash160(compressed pubkey).
-            use k256::elliptic_curve::sec1::ToEncodedPoint;
+            use k256::elliptic_curve::sec1::ToSec1Point;
             use ripemd::Ripemd160;
             let pk = k256::PublicKey::from_sec1_bytes(pubkey_bytes)
                 .map_err(|e| FrostError::SerializationError(format!("secp pubkey: {e}")))?;
-            let compressed = pk.to_encoded_point(true);
+            let compressed = pk.to_sec1_point(true);
             // sha2 0.11 and ripemd 0.1 track different `digest` majors — feed
             // bytes across, never trait objects.
             let sha = <sha2::Sha256 as sha2::Digest>::digest(compressed.as_bytes());

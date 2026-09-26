@@ -222,11 +222,11 @@ pub fn generate_address_for_chain(
             // and uncompressed (65) encodings, so this is robust to either
             // input. Must stay byte-for-byte identical to
             // `starlab_core::accounts::address_for_chain("ethereum", …)`.
-            use k256::elliptic_curve::sec1::ToEncodedPoint;
+            use k256::elliptic_curve::sec1::ToSec1Point;
             use sha3::{Digest, Keccak256};
             let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
                 .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
-            let point = pk.to_encoded_point(false); // 0x04 ‖ X ‖ Y
+            let point = pk.to_sec1_point(false); // 0x04 ‖ X ‖ Y
             let xy = &point.as_bytes()[1..]; // X ‖ Y, 64 bytes
             let mut hasher = Keccak256::new();
             hasher.update(xy);

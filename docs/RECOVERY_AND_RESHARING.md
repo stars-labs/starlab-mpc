@@ -92,7 +92,7 @@ Mitigate *in advance* by choosing `t < n` and/or keeping encrypted keystore back
 
 ## 4. Design: wiring resharing into the clients
 
-The math is provided by `frost-core::keys::refresh` (v2.2). Two flows; **use the dealerless
+The math is provided by `frost-core::keys::refresh` (v3.0). Two flows; **use the dealerless
 DKG one** to match our no-trusted-dealer model:
 
 ```text
@@ -157,5 +157,5 @@ offer.
 ## 7. Cross-references
 - Seed vs share, recovery matrix: [`MULTI_CURVE_DERIVATION.md`](MULTI_CURVE_DERIVATION.md)
 - Encrypted keystore: `packages/@starlab/core/src/keystore.rs`
-- Refresh primitive: `frost-core::keys::refresh` (upstream 2.2)
+- Refresh primitive: `frost-core::keys::refresh` (upstream 3.0)
 - DKG engine the reshare path would extend: `packages/@starlab/core/src/{unified_dkg,curve_registry}.rs`
