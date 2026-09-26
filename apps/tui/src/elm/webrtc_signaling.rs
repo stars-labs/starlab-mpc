@@ -25,8 +25,26 @@ use tracing::{error, info};
 use webrtc::data_channel::DataChannel;
 use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
-    RTCPeerConnectionIceEvent, RTCPeerConnectionState,
+    RTCIceServer, RTCPeerConnectionIceEvent, RTCPeerConnectionState,
 };
+
+/// Public STUN servers, shared with the browser extension so every client
+/// gathers the same server-reflexive candidates. Without any, peers behind
+/// NAT only offer host candidates and can't reach each other across
+/// networks. STUN only — there is no public TURN; strict NATs still need a
+/// relay of our own.
+pub const STUN_SERVERS: &[&str] = &[
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun2.l.google.com:19302",
+];
+
+fn ice_servers() -> Vec<RTCIceServer> {
+    vec![RTCIceServer {
+        urls: STUN_SERVERS.iter().map(|u| u.to_string()).collect(),
+        ..Default::default()
+    }]
+}
 
 /// Process a `ServerMsg::Relay` frame.
 ///
@@ -498,7 +516,9 @@ where
         app_state,
     });
 
-    let config = RTCConfigurationBuilder::new().build();
+    let config = RTCConfigurationBuilder::new()
+        .with_ice_servers(ice_servers())
+        .build();
     match PeerConnectionBuilder::new()
         .with_configuration(config)
         .with_handler(handler)
@@ -703,5 +723,24 @@ fn send_answer(from_device: &str, sdp: String, ws_tx: &UnboundedSender<String>) 
         error!("❌ Failed to enqueue answer for {}: {}", from_device, e);
     } else {
         info!("✅ WebRTC answer sent to {}", from_device);
+    }
+}
+
+#[cfg(test)]
+mod ice_server_tests {
+    use super::*;
+
+    #[test]
+    fn stun_servers_are_valid_ice_urls() {
+        // An invalid URL here makes every peer connection fail to build.
+        for server in ice_servers() {
+            for url in &server.urls {
+                assert!(url.starts_with("stun:"), "{url}");
+            }
+        }
+        let config = RTCConfigurationBuilder::new()
+            .with_ice_servers(ice_servers())
+            .build();
+        assert_eq!(config.ice_servers().len(), 1);
     }
 }
