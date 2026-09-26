@@ -1,4 +1,7 @@
-name = "starlab-signal-server-cloudflare-worker"
+# The production Worker behind panda.qzz.io. It predates the starlab-* rename;
+# keep this name so `wrangler deploy` updates it in place (its Durable Object
+# namespace and the v2 Peers->Devices migration live on this script).
+name = "webrtc-signal-server-cloudflare-worker"
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-05-08"
 account_id = "2764ae0fd9a5cb92c9ac67708620e54c"
