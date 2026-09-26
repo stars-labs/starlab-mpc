@@ -361,6 +361,47 @@ pub async fn run(listener: TcpListener) {
                                         }
                                     }
                             }
+                            Ok(ClientMsg::LeaveSession { session_id }) => {
+                                let Some(me) = device_id.clone() else { continue };
+                                let mut sessions_guard = sessions.lock().unwrap();
+                                let Some(stored) = sessions_guard.get_mut(&session_id) else {
+                                    continue;
+                                };
+                                let is_proposer = stored.session_info.get("proposer_id")
+                                    .and_then(|v| v.as_str()) == Some(me.as_str());
+                                let broadcast = if is_proposer {
+                                    sessions_guard.remove(&session_id);
+                                    eprintln!("Session '{}' withdrawn by its proposer '{}'", session_id, me);
+                                    serde_json::to_string(&ServerMsg::SessionRemoved {
+                                        session_id: session_id.clone(),
+                                        reason: "Cancelled by creator".to_string(),
+                                    }).unwrap()
+                                } else {
+                                    if let Some(participants) = stored.session_info
+                                        .get_mut("participants")
+                                        .and_then(|v| v.as_array_mut()) {
+                                        participants.retain(|p| p.as_str() != Some(me.as_str()));
+                                    }
+                                    stored.active_participants.retain(|p| p != &me);
+                                    eprintln!("'{}' left session '{}'", me, session_id);
+                                    serde_json::to_string(&ServerMsg::Relay {
+                                        from: "server".to_string(),
+                                        data: serde_json::json!({
+                                            "type": "participant_update",
+                                            "session_id": session_id,
+                                            "session_info": stored.session_info.clone(),
+                                        }),
+                                    }).unwrap()
+                                };
+                                drop(sessions_guard);
+
+                                if let Some(ids) = device_sessions.lock().unwrap().get_mut(&me) {
+                                    ids.retain(|id| id != &session_id);
+                                }
+                                for device_tx in devices.lock().unwrap().values() {
+                                    let _ = device_tx.send(Message::Text(broadcast.clone().into()));
+                                }
+                            }
                             Ok(ClientMsg::QueryMyActiveSessions) => {
                                 if let Some(ref dev_id) = device_id {
                                     eprintln!("Device '{}' querying for active sessions", dev_id);
@@ -510,4 +551,8 @@ pub enum ClientMsg {
     SessionStatusUpdate { session_info: serde_json::Value },
     // Simple stateless rejoin support
     QueryMyActiveSessions, // Device asks: "What sessions am I in?"
+    /// Withdraw from a session: the proposer's leave removes the session for
+    /// everyone (`SessionRemoved`); anyone else is dropped from its
+    /// participants (`participant_update`).
+    LeaveSession { session_id: String },
 }

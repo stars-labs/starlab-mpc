@@ -155,7 +155,11 @@ pub enum Command {
         proposer_id: String,
         curve_type: String,
     },
-    CancelDKG,
+    /// Abandon the current ceremony locally and tell the signal server we
+    /// left `session_id` (withdraws the invite if we proposed it).
+    CancelDKG {
+        session_id: Option<String>,
+    },
     /// Encrypt the just-produced FROST key share with `password` and
     /// persist it to the keystore, then emit `Message::DKGFinalized`.
     /// Consumes the cleartext password — the update-layer handler that
@@ -3316,6 +3320,26 @@ impl Command {
                 info!("Application quit requested");
                 // Send quit message to trigger app shutdown
                 let _ = tx.send(Message::Quit);
+            }
+
+            Command::CancelDKG { session_id } => {
+                let ws_tx = {
+                    let mut state = app_state.lock().await;
+                    state.session = None;
+                    state.dkg_in_progress = false;
+                    state.websocket_msg_tx.clone()
+                };
+                if let (Some(session_id), Some(ws_tx)) = (session_id, ws_tx) {
+                    let leave = starlab_signal_server::ClientMsg::LeaveSession { session_id };
+                    match serde_json::to_string(&leave) {
+                        Ok(json) => {
+                            if let Err(e) = ws_tx.send(json) {
+                                warn!("CancelDKG: primary channel closed: {}", e);
+                            }
+                        }
+                        Err(e) => error!("CancelDKG: failed to serialize LeaveSession: {}", e),
+                    }
+                }
             }
 
             Command::None => {
