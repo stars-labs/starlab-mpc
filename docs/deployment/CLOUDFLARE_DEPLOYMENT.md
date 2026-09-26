@@ -35,14 +35,14 @@ wrangler tail
 ## wrangler.toml (as shipped)
 
 ```toml
-name = "starlab-signal-server-cloudflare-worker"
+name = "webrtc-signal-server-cloudflare-worker"          # production script; predates the starlab-* rename
 main = "build/worker/shim.mjs"
 compatibility_date = "2025-05-08"
 account_id = "…"                                     # your account ID
 workers_dev = true                                    # keeps .workers.dev fallback URL
 
 routes = [
-  { pattern = "xiongchenyu.dpdns.org", custom_domain = true }
+  { pattern = "panda.qzz.io", custom_domain = true }
 ]
 
 [build]
