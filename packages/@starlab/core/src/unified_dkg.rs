@@ -257,8 +257,12 @@ impl UnifiedDkg {
         // Serialize ed25519 round 2 packages
         let mut ed_map = BTreeMap::new();
         for (id, package) in ed_r2_packages {
-            let id_bytes = id.serialize();
-            let id_value = (id_bytes[30] as u16) << 8 | id_bytes[31] as u16;
+            // ed25519 scalars are little-endian — map back by conversion.
+            let id_value = (1..=self.total)
+                .find(|i| frost_ed25519::Identifier::try_from(*i).ok() == Some(id))
+                .ok_or_else(|| {
+                    FrostError::InvalidState("Round 2 package for an unknown participant".into())
+                })?;
             let pkg_json = serde_json::to_string(&package)
                 .map_err(|e| FrostError::SerializationError(e.to_string()))?;
             ed_map.insert(id_value, hex::encode(pkg_json));
