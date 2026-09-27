@@ -147,6 +147,21 @@ pub async fn dispatch_data_channel_msg<C>(
         && let Some(msg_text) = json_msg.get("text").and_then(|v| v.as_str())
     {
         use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+        // A peer resends its ceremony frames when our data channel reopens
+        // (`network::peer_recovery`); only the first copy reaches the protocol.
+        if crate::network::peer_recovery::is_ceremony_frame(msg_text)
+            && !app_state
+                .lock()
+                .await
+                .seen_ceremony_frames
+                .first_delivery(&device_id_recv, msg_text)
+        {
+            info!(
+                "♻️ Ignoring duplicate ceremony frame from {}",
+                device_id_recv
+            );
+            return;
+        }
         // Unified-DKG frames (ed25519 + secp256k1 in one ceremony). Same
         // SimpleMessage transport as the single-curve DKG rounds, but the
         // payload is JSON (not base64) and routes to the unified driver.
@@ -368,6 +383,8 @@ async fn run_offer_side_data_channel<C>(
                     state.data_channels.insert(device_id.clone(), dc.clone());
                     info!("📦 Stored data channel for {} in AppState", device_id);
                 }
+                crate::network::peer_recovery::resend_ceremony_frames(&app_state, &device_id, &dc)
+                    .await;
 
                 // Send UI update for data channel open
                 if let Some(tx) = ui_msg_tx.clone() {

@@ -156,6 +156,7 @@ pub fn clear_reshare_state<C: Ciphersuite>(state: &mut AppState<C>) {
     state.reshare_round1_packages.clear();
     state.reshare_round2_packages.clear();
     state.reshare_in_progress = false;
+    state.ceremony_outbox.clear();
 }
 
 // =====================================================================
@@ -207,6 +208,7 @@ pub async fn handle_trigger_reshare_round1<C>(
             guard.reshare_original_participants = session.participants.clone();
         }
         let original = guard.reshare_original_participants.clone();
+        guard.ceremony_outbox.clear();
         let my_id = match reshare_identifier::<C>(&original, &self_device_id) {
             Some(id) => id,
             None => {

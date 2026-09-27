@@ -502,7 +502,9 @@ async fn broadcast_unified_round1<C>(
     C: frost_core::Ciphersuite + Send + Sync + 'static,
 {
     let participants = {
-        let state = app_state.lock().await;
+        let mut state = app_state.lock().await;
+        // A new ceremony: forget the frames of the last one.
+        state.ceremony_outbox.clear();
         state
             .session
             .as_ref()
@@ -637,6 +639,7 @@ async fn try_finalize_unified<C>(
     )
     .await
     {
+        app_state.lock().await.ceremony_outbox.clear();
         // Both curves' ACCOUNT-0 addresses, surfaced to the UI/CLI. The
         // outcome's root-key addresses are deliberately not shown — see
         // `account0_addresses`.
@@ -3331,6 +3334,7 @@ impl Command {
                         session_id.or_else(|| state.session.as_ref().map(|s| s.session_id.clone()));
                     state.session = None;
                     state.dkg_in_progress = false;
+                    state.ceremony_outbox.clear();
                     (session_id, state.websocket_msg_tx.clone())
                 };
                 if let (Some(session_id), Some(ws_tx)) = (session_id, ws_tx) {

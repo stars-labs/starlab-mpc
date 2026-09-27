@@ -132,8 +132,9 @@ pub async fn handle_trigger_dkg_round1<C>(
         }
     };
 
-    // Start DKG Round 1
+    // Start DKG Round 1 — a new ceremony, so forget frames of the last one.
     guard.dkg_state = DkgState::Round1InProgress;
+    guard.ceremony_outbox.clear();
 
     // Compute our FROST identifier from the canonicalised (sorted) participant
     // list, so every node assigns the same identifier to the same device_id
@@ -370,7 +371,15 @@ pub async fn process_dkg_round1<C>(
             }
         };
 
-    // Store the round1 package
+    // A repeat from the same sender (a resend after a reconnect) must not
+    // re-trigger Round 2: that would regress `dkg_state` and re-run part2.
+    if guard.dkg_round1_packages.get(&sender_identifier) == Some(&round1_package) {
+        info!(
+            "DKG Round 1: already have {}'s package; ignoring repeat",
+            from_device_id
+        );
+        return;
+    }
     guard
         .dkg_round1_packages
         .insert(sender_identifier, round1_package);
@@ -771,6 +780,7 @@ pub async fn process_dkg_round2<C>(
 
         // Complete DKG
         guard.dkg_state = DkgState::Complete;
+        guard.ceremony_outbox.clear();
 
         // Generate wallet ID (shared derivation — see `wallet_id_from_session`;
         // must match the persisted id in `FinalizeWalletFromDkg`).
