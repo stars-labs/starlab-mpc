@@ -345,6 +345,73 @@ async fn auto_approve_co_signer_signs_without_manual_approval() {
     b.quit().await;
 }
 
+/// Two signings in a row on the same nodes: each must be announced under its
+/// OWN session id (co-signers dedupe requests per id — a reused id hides the
+/// second request and it hangs in round 1), and both must verify.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "spawns serve processes + real WebRTC over loopback; run with --ignored"]
+async fn consecutive_signings_get_fresh_session_ids_and_both_verify() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(starlab_signal_server::run(listener));
+    let ws_url = format!("ws://127.0.0.1:{port}");
+
+    let ks_a = tempfile::TempDir::new().unwrap();
+    let ks_b = tempfile::TempDir::new().unwrap();
+    let pw_dir = tempfile::TempDir::new().unwrap();
+    let pw_file = pw_dir.path().join("approve.pw");
+    std::fs::write(&pw_file, "pw-b").unwrap();
+    let pw_file = pw_file.to_string_lossy().to_string();
+
+    let mut a = spawn_connected("twice-a", &ks_a.path().to_string_lossy(), &ws_url)
+        .await
+        .expect("a");
+    let mut b = ServeProc::spawn_with_args(
+        "twice-b",
+        &ks_b.path().to_string_lossy(),
+        &ws_url,
+        &["--auto-approve", "--approve-password-file", &pw_file],
+    )
+    .await
+    .expect("spawn b");
+    b.wait_for("ready", 10).await.expect("b ready");
+    b.send(json!({"cmd": "connect"})).await.unwrap();
+    b.wait_connected(15).await.expect("b connected");
+
+    let (wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+
+    let mut session_ids = Vec::new();
+    for (id, message) in [(10, "first"), (11, "second")] {
+        a.send(json!({
+            "id": id, "cmd": "sign", "wallet_id": wallet_id,
+            "message": message, "encoding": "utf8", "password": "pw-a"
+        }))
+        .await
+        .unwrap();
+        let request = b
+            .wait_for("signing_request", 30)
+            .await
+            .unwrap_or_else(|e| panic!("{message}: co-signer never saw the request: {e}"));
+        session_ids.push(request["session_id"].as_str().unwrap().to_string());
+        let sc = a
+            .wait_for("signature_complete", 90)
+            .await
+            .unwrap_or_else(|e| panic!("{message}: no signature: {e}"));
+        assert!(
+            verify_secp256k1(
+                &group_key,
+                sc["message_hash"].as_str().unwrap(),
+                sc["signature"].as_str().unwrap()
+            ),
+            "{message}: signature failed to verify"
+        );
+    }
+    assert_ne!(session_ids[0], session_ids[1], "signing session id reused");
+
+    a.quit().await;
+    b.quit().await;
+}
+
 /// SEC-5: the wallet password must NEVER appear in any event emitted on
 /// stdout. Passwords enter via stdin commands only; the daemon must not echo
 /// them back in acks, announcements, errors, or any other event. Guards against

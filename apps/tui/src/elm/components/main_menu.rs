@@ -397,7 +397,7 @@ impl MainMenu {
 
         // Controls
         let controls = if self.focused {
-            "🎮 Navigation: ↑↓ Select Options • Enter: Execute • i: Import Wallet • Esc: Exit Application"
+            "🎮 Navigation: ↑↓ Select Options • Enter: Execute • i: Import Wallet • Ctrl-C: Quit"
         } else {
             "💡 Press any key to begin • Professional MPC Wallet Management System"
         };

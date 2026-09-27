@@ -182,9 +182,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             if model.navigation_stack.is_empty()
                 && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
             {
-                // At root level - Esc should quit the app
-                debug!("🚪 At root screen, Esc should quit");
-                return Some(Command::SendMessage(Message::Quit));
+                // Nothing to go back to. Esc must not quit (it's the reflex
+                // "back out" key); Ctrl-C and the Exit item quit.
+                return None;
             }
 
             // Otherwise, navigate back normally
@@ -470,15 +470,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // announce before we connect, and `announce_session` is a
                     // one-shot broadcast). Once we've already joined this
                     // ceremony, ignore repeat sends so we don't re-fire
-                    // SubmitPassword and clobber it in flight. Keyed on the whole
-                    // ceremony, not just the id: signing on a warm mesh reuses the
-                    // finished DKG session's id, and that invite must not be
-                    // mistaken for a repeat of the DKG join.
-                    if model.active_session.as_ref().is_some_and(|active| {
-                        active.session_id == invite.session_id
-                            && active.session_type == invite.session_type
-                            && active.signing_message_hex == invite.signing_message_hex
-                    }) {
+                    // SubmitPassword and clobber it in flight. Every ceremony
+                    // has its own session id, so the id identifies it.
+                    if model
+                        .active_session
+                        .as_ref()
+                        .is_some_and(|active| active.session_id == invite.session_id)
+                    {
                         return None;
                     }
                     if matches!(invite.session_type, SessionType::DKG) {
@@ -3759,6 +3757,14 @@ mod tests {
     }
 
     #[test]
+    fn back_on_the_main_menu_does_not_quit() {
+        let mut model = Model::new("test".to_string());
+        model.current_screen = Screen::MainMenu;
+        assert!(update(&mut model, Message::NavigateBack).is_none());
+        assert_eq!(model.current_screen, Screen::MainMenu);
+    }
+
+    #[test]
     fn password_submit_set_new_requires_min_length() {
         let mut model = Model::new("test".to_string());
         model.wallet_state.password_prompt_purpose =
@@ -3924,32 +3930,6 @@ mod tests {
         model.session_invites.push(dkg_invite("s1"));
         model.active_session = Some(dkg_invite("s1"));
         assert!(headless_join(&mut model, "s1").is_none());
-    }
-
-    #[test]
-    fn headless_join_signing_that_reuses_the_dkg_session_id_is_joined() {
-        // Warm-path signing announces under the finished DKG session's id; the
-        // joiner's active_session still holds that DKG session.
-        let mut model = Model::new("dev".to_string());
-        model.active_session = Some(dkg_invite("s1"));
-        let signing = SessionInfo {
-            session_type: SessionType::Signing {
-                wallet_name: "w-ethereum-0".to_string(),
-                curve_type: "secp256k1".to_string(),
-                blockchain: "ethereum".to_string(),
-                group_public_key: "02ab".to_string(),
-            },
-            signing_message_hex: Some("deadbeef".to_string()),
-            ..dkg_invite("s1")
-        };
-        model.session_invites.push(signing.clone());
-        match headless_join(&mut model, "s1") {
-            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
-                assert_eq!(value, "pw");
-            }
-            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
-        }
-        assert_eq!(model.active_session, Some(signing));
     }
 
     #[test]
@@ -4145,25 +4125,6 @@ mod tests {
         join(&mut model, "s1");
         update(&mut model, Message::CancelDKG);
         assert!(model.wallet_state.joining_session.is_none());
-    }
-
-    /// StartSigning's warm path reuses the DKG session id, so a co-signer
-    /// whose `active_session` is still the finished DKG must not treat the
-    /// signing invite as "already joined".
-    #[test]
-    fn headless_join_signing_reusing_dkg_session_id_is_not_skipped() {
-        let mut model = Model::new("dev".to_string());
-        model.active_session = Some(dkg_invite("s1"));
-        let mut signing = dkg_invite("s1");
-        signing.session_type = SessionType::Signing {
-            wallet_name: "w-ethereum-0".to_string(),
-            curve_type: "secp256k1".to_string(),
-            blockchain: "secp256k1".to_string(),
-            group_public_key: String::new(),
-        };
-        model.session_invites.push(signing.clone());
-        join(&mut model, "s1");
-        assert_eq!(model.active_session, Some(signing));
     }
 
     #[test]
