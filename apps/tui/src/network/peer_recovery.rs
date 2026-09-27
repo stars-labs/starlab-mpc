@@ -666,7 +666,7 @@ mod tests {
     }
 
     use crate::protocal::signal::WebRTCMessage;
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
 
     fn app_state_with_ws() -> (
         Arc<Mutex<AppState<Secp>>>,

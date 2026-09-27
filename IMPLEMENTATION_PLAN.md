@@ -38,7 +38,9 @@ sighash on a Bitcoin account verifies as BIP-340 against its P2TR address.
 engine; Bitcoin shows `bc1p…` everywhere.
 **Success Criteria**: TUI + desktop + extension agree on the P2TR address.
 **Tests**: extension `bun test` + check; desktop build; live 3-client DKG.
-**Status**: Not Started
+**Status**: In Progress — verified live (TUI + desktop + extension 3-of-3 DKG
+agree on `bc1pa4q7…5txc`, m/86'/0'/0'/0/0); desktop + extension PRs open once
+this lands on main (both consume engine `main`).
 
 ## Stage 4: Docs + cleanup
 **Goal**: CLAUDE.md / docs describe the Taproot model; no stale P2WPKH or
