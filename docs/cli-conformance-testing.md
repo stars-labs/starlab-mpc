@@ -565,12 +565,13 @@ on whether `portable-pty` becomes a dev-dependency of the crate or an external s
 | `rust-fast` | L1 (non-ignored) + L2 golden diff | every push | <1 min |
 | `rust-e2e` | L1 `--ignored` (full WebRTC mesh) + L3a | every push (or PR) | ~1–3 min |
 | `interop-tui` | L3b (PTY) | nightly + pre-release | ~min |
-| `interop-ext` | L3c + L4 (Playwright + real signal server) | nightly + pre-release | ~min |
+| `interop` (starlab-wallet CI) | L3c + L4 (Playwright + real signal server), both curves + netns WebRTC outage | every starlab-wallet push/PR | ~10 min |
 | `human-smoke` | 3-browser live FROST | manual, release gate | manual |
 
-The existing `.github/workflows/ci.yml` (rust job + extension bun job) is extended:
-`rust-fast`/`rust-e2e` slot into the rust job; `interop-ext` becomes a new job that
-`bun install`s, builds the extension, boots `apps/signal-server`, and runs Playwright.
+`rust-fast`/`rust-e2e` run in this repo's rust job, and the `--ignored` WebRTC suites
+gate it. The extension interop runs in starlab-wallet's CI (`interop` job): it builds
+the CLI + signal server from this repo — the branch with the PR's name when one exists,
+so a paired protocol change is tested together — and runs the Playwright specs.
 
 Golden regeneration is a deliberate, reviewed action (`BLESS=1 cargo test -p
 starlab-cli`), so a protocol change shows up as a fixture diff in the PR.
