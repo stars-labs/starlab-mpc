@@ -104,6 +104,9 @@ pub struct AppState<C: Ciphersuite> {
     pub dkg_part1_public_package: Option<Vec<u8>>,
     pub dkg_part1_secret_package: Option<Vec<u8>>,
     pub dkg_part2_secret_package: Option<Vec<u8>>,
+    /// DKG Round 1 packages that arrived before the session listed every
+    /// participant; replayed when our Round 1 starts.
+    pub pending_dkg_round1: Vec<(String, Vec<u8>)>,
     pub dkg_round1_packages: std::collections::BTreeMap<
         frost_core::Identifier<C>,
         frost_core::keys::dkg::round1::Package<C>,
@@ -285,6 +288,7 @@ where
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
+            pending_dkg_round1: Vec::new(),
             dkg_round1_packages: std::collections::BTreeMap::new(),
             dkg_round2_packages: std::collections::BTreeMap::new(),
             key_package: None,
@@ -376,6 +380,7 @@ where
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
+            pending_dkg_round1: Vec::new(),
             dkg_round1_packages: std::collections::BTreeMap::new(),
             dkg_round2_packages: std::collections::BTreeMap::new(),
             key_package: None,
