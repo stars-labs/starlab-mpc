@@ -192,14 +192,14 @@ pub fn spawn_secp256k1<F>(
 where
     F: Fn(&Model, Option<&Message>) + Send + 'static,
 {
-    use frost_secp256k1::Secp256K1Sha256;
+    use frost_secp256k1_tr::Secp256K1Sha256TR;
     let app_state = Arc::new(Mutex::new(
-        AppState::<Secp256K1Sha256>::with_device_id_and_server(
+        AppState::<Secp256K1Sha256TR>::with_device_id_and_server(
             device_id.clone(),
             signal_server_url,
         ),
     ));
-    let runner = HeadlessRunner::<Secp256K1Sha256>::new(
+    let runner = HeadlessRunner::<Secp256K1Sha256TR>::new(
         device_id,
         keystore_path,
         app_state,
@@ -241,7 +241,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256;
+    use frost_secp256k1_tr::Secp256K1Sha256TR;
     use std::sync::Mutex as StdMutex;
 
     /// The sync callback must receive the message that was just processed
@@ -251,14 +251,14 @@ mod tests {
     async fn sync_callback_receives_processed_message() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let app_state = Arc::new(Mutex::new(
-            AppState::<Secp256K1Sha256>::with_device_id_and_server("t".into(), String::new()),
+            AppState::<Secp256K1Sha256TR>::with_device_id_and_server("t".into(), String::new()),
         ));
 
         // Record a debug-string of each (msg) the callback saw.
         let seen: Arc<StdMutex<Vec<Option<String>>>> = Arc::new(StdMutex::new(Vec::new()));
         let seen_cb = seen.clone();
 
-        let runner = HeadlessRunner::<Secp256K1Sha256>::new(
+        let runner = HeadlessRunner::<Secp256K1Sha256TR>::new(
             "t".into(),
             tmp.path().to_string_lossy().into_owned(),
             app_state,

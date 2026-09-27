@@ -4,7 +4,7 @@ use frost_core::Identifier;
 use frost_core::keys::dkg::{part1, part2, part3};
 use frost_core::keys::{KeyPackage, PublicKeyPackage};
 use frost_ed25519::Ed25519Sha512;
-use frost_secp256k1::Secp256K1Sha256;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
 use starlab_core::rng::{CryptoRng, RngCore, os_rng};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -40,7 +40,7 @@ fn main() {
     println!("  Minimum signers: {}", args.min_signers);
 
     let result = match args.curve {
-        Curve::Secp256k1 => run_dkg::<Secp256K1Sha256>(args.max_signers, args.min_signers)
+        Curve::Secp256k1 => run_dkg::<Secp256K1Sha256TR>(args.max_signers, args.min_signers)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         Curve::Ed25519 => run_dkg::<Ed25519Sha512>(args.max_signers, args.min_signers)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),

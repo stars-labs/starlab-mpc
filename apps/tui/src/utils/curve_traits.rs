@@ -12,7 +12,7 @@ pub trait CurveIdentifier {
 }
 
 // Implementation for Secp256k1
-impl CurveIdentifier for frost_secp256k1::Secp256K1Sha256 {
+impl CurveIdentifier for frost_secp256k1_tr::Secp256K1Sha256TR {
     fn curve_type() -> &'static str {
         "secp256k1"
     }
@@ -42,7 +42,10 @@ mod tests {
 
     #[test]
     fn test_secp256k1_identification() {
-        assert_eq!(frost_secp256k1::Secp256K1Sha256::curve_type(), "secp256k1");
+        assert_eq!(
+            frost_secp256k1_tr::Secp256K1Sha256TR::curve_type(),
+            "secp256k1"
+        );
     }
 
     #[test]
@@ -52,10 +55,10 @@ mod tests {
 
     #[test]
     fn test_curve_matching() {
-        assert!(is_curve_type::<frost_secp256k1::Secp256K1Sha256>(
+        assert!(is_curve_type::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             "secp256k1"
         ));
-        assert!(!is_curve_type::<frost_secp256k1::Secp256K1Sha256>(
+        assert!(!is_curve_type::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             "ed25519"
         ));
 

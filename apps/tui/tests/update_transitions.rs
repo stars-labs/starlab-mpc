@@ -609,7 +609,7 @@ fn sample_dkg_finalized_msg() -> Message {
         curve_type: "secp256k1".to_string(),
         addresses: vec![
             ("ethereum".to_string(), "0xabc123".to_string()),
-            ("bitcoin".to_string(), "bc1qxyz".to_string()),
+            ("bitcoin".to_string(), "bc1pxyz".to_string()),
         ],
     }
 }

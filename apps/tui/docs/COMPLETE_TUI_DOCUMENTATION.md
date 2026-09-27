@@ -856,7 +856,7 @@ Notes:
 
 This crate does NOT define its own `FrostProtocol` trait —
 DKG and signing primitives come from upstream `frost-core 3.0`
-(plus `frost-ed25519` / `frost-secp256k1`). Earlier drafts
+(plus `frost-ed25519` / `frost-secp256k1-tr`). Earlier drafts
 (and 49360fa caught similar cases) sketched a local trait with
 `start_dkg` / `process_round1` / `process_round2` methods —
 fabricated. The TUI wraps upstream frost-core via

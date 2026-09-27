@@ -527,7 +527,7 @@ The offline DKG process enables key generation without network connectivity, usi
 │ Wallet Summary:                                     │
 │ • Name: cold-storage                               │
 │ • Type: 2-of-3 Bitcoin Wallet                      │
-│ • Address: bc1qxy2kgdygjrsqtzq2n0yrf24...         │
+│ • Address: bc1p5cyxnuxmeuwuvkw2n0yrf24...         │
 │                                                     │
 │ Security Verification:                              │
 │ ✅ No network activity detected                     │

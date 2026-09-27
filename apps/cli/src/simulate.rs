@@ -425,6 +425,61 @@ pub async fn run_signing_simulation_enc(
     })
 }
 
+/// Outcome of a Bitcoin (P2TR key-path) signing run.
+#[derive(Debug, Serialize)]
+pub struct BitcoinSigningResult {
+    /// Account-0 P2TR address the shares sign for.
+    pub address: String,
+    pub sighash: String,
+    pub signature: String,
+    /// BIP-340 verification of `signature` over `sighash` against `address`.
+    pub verified: bool,
+}
+
+/// DKG, then sign a 32-byte BIP-341 sighash with the wallet's Bitcoin
+/// account 0 and verify it the way a Bitcoin node would: BIP-340 against the
+/// output key its P2TR address commits to.
+pub async fn run_bitcoin_signing_simulation(
+    opts: SimulateOpts,
+    sighash_hex: &str,
+) -> anyhow::Result<BitcoinSigningResult> {
+    let threshold = opts.threshold;
+    let mut c = dkg_cluster(&opts).await?;
+    if !c.agreed {
+        anyhow::bail!("DKG did not agree; aborting signing");
+    }
+    let wallet_id = format!("{}-bitcoin-0", c.outcomes[0].wallet_id);
+    let (signature, signed_message) = drive_signing(
+        &c.senders,
+        &mut c.receivers,
+        wallet_id,
+        sighash_hex,
+        "hex",
+        threshold,
+        opts.timeout_secs,
+    )
+    .await?;
+    shut_down(c.senders, c.receivers).await;
+
+    let group_key = hex::decode(&c.group_key)?;
+    let address = starlab_core::accounts::account_addresses("secp256k1", &group_key, 0)?
+        .into_iter()
+        .find(|(chain, _, _)| chain == "Bitcoin")
+        .map(|(_, _, address)| address)
+        .ok_or_else(|| anyhow::anyhow!("no Bitcoin account address"))?;
+    let verified = starlab_core::accounts::verify_taproot_signature(
+        &address,
+        &hex::decode(signed_message.trim_start_matches("0x"))?,
+        &hex::decode(signature.trim_start_matches("0x"))?,
+    )?;
+    Ok(BitcoinSigningResult {
+        address,
+        sighash: signed_message,
+        signature,
+        verified,
+    })
+}
+
 /// Outcome of a networked reshare end-to-end run (#45 4b).
 #[derive(Debug, Serialize)]
 pub struct ReshareE2eResult {
@@ -935,7 +990,7 @@ fn verify_signature(
         verify_ed25519(&hex::encode(child), message_hex, sig_hex)
     } else {
         let child = starlab_core::derive_child_verifying_key_path::<
-            frost_secp256k1::Secp256K1Sha256,
+            frost_secp256k1_tr::Secp256K1Sha256TR,
         >(&group_key, &path)?;
         verify_secp256k1(&hex::encode(child), message_hex, sig_hex)
     }
@@ -943,7 +998,7 @@ fn verify_signature(
 
 /// Verify a FROST(secp256k1) signature against the group verifying key.
 fn verify_secp256k1(group_key_hex: &str, message_hex: &str, sig_hex: &str) -> anyhow::Result<bool> {
-    use frost_secp256k1::{Signature, VerifyingKey};
+    use frost_secp256k1_tr::{Signature, VerifyingKey};
     let vk_bytes = hex::decode(group_key_hex)?;
     let msg = hex::decode(message_hex)?;
     let sig_bytes = hex::decode(sig_hex)?;

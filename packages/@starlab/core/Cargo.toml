@@ -13,7 +13,6 @@ categories = ["cryptography"]
 [dependencies]
 # FROST dependencies
 frost-core = { version = "3.0.0", features = ["serde"] }
-frost-secp256k1 = { version = "3.0.0", features = ["serde"] }
 frost-secp256k1-tr = { version = "3.0.0", features = ["serde"] }
 frost-ed25519 = { version = "3.0.0", features = ["serde"] }
 
@@ -48,7 +47,6 @@ password-hash = "0.6"
 
 # Other
 bs58 = "0.5"
-ripemd = "0.2"
 bech32 = "0.12"
 thiserror = "2.0.21"
 

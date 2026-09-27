@@ -133,7 +133,7 @@ enum WalletCmd {
         common: OneShot,
     },
     /// List HD accounts (account 0..N) with their per-chain addresses, using
-    /// the PINNED standard paths (ETH m/44'/60'/0'/0/i, BTC m/84'/0'/0'/0/i,
+    /// the PINNED standard paths (ETH m/44'/60'/0'/0/i, BTC m/86'/0'/0'/0/i,
     /// SOL m/44'/501'/i'/0', Sui m/44'/784'/i'/0'/0'). Public-key derivation —
     /// NO password, NO network.
     Accounts {

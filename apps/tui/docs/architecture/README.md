@@ -27,7 +27,7 @@ not present here.
 - **Tokio** — async runtime
 - **webrtc-rs** — WebRTC mesh for peer-to-peer ceremony traffic
 - **tokio-tungstenite** — WebSocket client for signal server
-- **frost-core 3.0** (plus `frost-ed25519` / `frost-secp256k1`) —
+- **frost-core 3.0** (plus `frost-ed25519` / `frost-secp256k1-tr`) —
   threshold signature primitives from ZCash Foundation
 
 ## Key Components

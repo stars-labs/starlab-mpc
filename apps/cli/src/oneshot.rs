@@ -774,7 +774,7 @@ pub async fn wallet_accounts(
                     frost_ed25519::Ed25519Sha512,
                 >(group, &path),
                 _ => starlab_core::derive_child_verifying_key_path::<
-                    frost_secp256k1::Secp256K1Sha256,
+                    frost_secp256k1_tr::Secp256K1Sha256TR,
                 >(group, &path),
             }
             .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
@@ -817,7 +817,7 @@ fn child_wallet_id(parent: &str, path: &str) -> String {
 /// keystore blob. Returns (child blob, child group public key hex).
 /// Anyhow-flavored shim over the SHARED implementation in
 /// `starlab_client::elm::command` (one derivation for every client).
-fn derive_child_for_curve<C: frost_core::Ciphersuite>(
+fn derive_child_for_curve<C: starlab_core::hd_derivation::AccountKeyFinalize>(
     blob: &[u8],
     path: &starlab_core::DerivationPath,
 ) -> anyhow::Result<(Vec<u8>, String)> {
@@ -877,7 +877,7 @@ pub async fn wallet_derive(
         let (child_blob, child_group_hex) = match meta.curve_type.as_str() {
             "ed25519" => derive_child_for_curve::<frost_ed25519::Ed25519Sha512>(&blob, &parsed)?,
             "secp256k1" => {
-                derive_child_for_curve::<frost_secp256k1::Secp256K1Sha256>(&blob, &parsed)?
+                derive_child_for_curve::<frost_secp256k1_tr::Secp256K1Sha256TR>(&blob, &parsed)?
             }
             other => anyhow::bail!("unsupported curve in keystore: {other}"),
         };
@@ -953,7 +953,7 @@ pub async fn wallet_derive(
 #[cfg(test)]
 mod derive_tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
     use starlab_client::elm::command::encode_keystore_blob;
     use starlab_core::resharing::{dkg_keypackages, threshold_sign_verify};
     use std::collections::BTreeMap;

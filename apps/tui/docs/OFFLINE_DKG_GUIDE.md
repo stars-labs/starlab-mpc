@@ -432,7 +432,7 @@ mkdir -p /Volumes/DKG_TRANSFER/dkg_ceremony/final
    
    Generating wallet addresses:
    ETH: 0x742d35Cc6634C053...
-   BTC: bc1qxy2kgdygjrsqtzq...
+   BTC: bc1p5cyxnuxmeuwuvkw...
    ```
 
 2. **Create Verification Proof**
@@ -477,7 +477,7 @@ mkdir -p /Volumes/DKG_TRANSFER/dkg_ceremony/final
      "public_key": "0x04a7b8c9d2e3f4...",
      "addresses": {
        "ethereum": "0x742d35Cc6634C053...",
-       "bitcoin": "bc1qxy2kgdygjrsqtzq..."
+       "bitcoin": "bc1p5cyxnuxmeuwuvkw..."
      },
      "ceremony_log_hash": "sha256:7f3a9b2c4d8e..."
    }

@@ -224,9 +224,11 @@ impl CurveRegistry {
         r.register(FrostCurveDkg::<frost_ed25519::Ed25519Sha512>::boxed(
             crate::root_secret::CURVE_ED25519,
         ));
-        r.register(FrostCurveDkg::<frost_secp256k1::Secp256K1Sha256>::boxed(
-            crate::root_secret::CURVE_SECP256K1,
-        ));
+        r.register(
+            FrostCurveDkg::<frost_secp256k1_tr::Secp256K1Sha256TR>::boxed(
+                crate::root_secret::CURVE_SECP256K1,
+            ),
+        );
         r
     }
 
@@ -425,8 +427,6 @@ mod tests {
         reg.register(FrostCurveDkg::<frost_ed25519::Ed25519Sha512>::boxed(
             "ed25519",
         ));
-        reg.register(FrostCurveDkg::<frost_secp256k1::Secp256K1Sha256>::boxed(
-            "ed25519",
-        ));
+        reg.register(FrostCurveDkg::<frost_secp256k1_tr::Secp256K1Sha256TR>::boxed("ed25519"));
     }
 }

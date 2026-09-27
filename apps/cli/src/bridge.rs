@@ -113,7 +113,7 @@ impl Bridge {
                                     .ok()?
                                 } else {
                                     starlab_core::derive_child_verifying_key_path::<
-                                        frost_secp256k1::Secp256K1Sha256,
+                                        frost_secp256k1_tr::Secp256K1Sha256TR,
                                     >(&g, &parsed)
                                     .ok()?
                                 };
@@ -631,17 +631,20 @@ mod tests {
     }
 
     #[test]
-    fn golden_bitcoin_p2wpkh_for_generator_g() {
-        // BIP-173 worked example: compressed G → this mainnet P2WPKH address.
-        let g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
-        let bytes = hex::decode(g).unwrap();
+    fn golden_bitcoin_p2tr_for_bip86_output_key() {
+        // BIP-86 test vector m/86'/0'/0'/0/0: this output key → this P2TR.
+        let output_key = "02a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c";
+        let bytes = hex::decode(output_key).unwrap();
         let addr = starlab_client::blockchain_config::generate_address_for_chain(
             &bytes,
             "secp256k1",
             "bitcoin",
         )
         .expect("derive btc address");
-        assert_eq!(addr, "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4");
+        assert_eq!(
+            addr,
+            "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr"
+        );
     }
 
     #[test]

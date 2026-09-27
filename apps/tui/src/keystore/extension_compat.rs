@@ -88,7 +88,7 @@ pub struct ExtensionWalletMetadata {
 use frost_ed25519::keys::{
     KeyPackage as Ed25519KeyPackage, PublicKeyPackage as Ed25519PublicKeyPackage,
 };
-use frost_secp256k1::keys::{
+use frost_secp256k1_tr::keys::{
     KeyPackage as Secp256k1KeyPackage, PublicKeyPackage as Secp256k1PublicKeyPackage,
 };
 use starlab_core::keystore::KeystoreData as FrostKeystoreData;

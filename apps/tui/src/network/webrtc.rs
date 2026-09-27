@@ -779,7 +779,7 @@ pub async fn initiate_webrtc_with_channel<C>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256;
+    use frost_secp256k1_tr::Secp256K1Sha256TR;
 
     /// Two `InitiateWebRTCWithParticipants` commands can run at the same time (each command is
     /// its own spawned task). They must end up with ONE peer connection per peer and send ONE
@@ -789,7 +789,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_initiations_create_one_peer_connection_and_one_offer() {
         let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-        let mut state = AppState::<Secp256K1Sha256>::new();
+        let mut state = AppState::<Secp256K1Sha256TR>::new();
         state.websocket_msg_tx = Some(ws_tx);
         let device_connections = state.device_connections.clone();
         let app_state = Arc::new(Mutex::new(state));

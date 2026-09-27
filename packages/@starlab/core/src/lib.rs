@@ -10,7 +10,6 @@ pub mod resharing;
 pub mod rng;
 pub mod root_secret;
 pub mod secp256k1;
-pub mod secp256k1_tr;
 pub mod traits;
 pub mod unified_dkg;
 
@@ -22,7 +21,6 @@ pub use traits::FrostCurve;
 // Re-export curve implementations
 pub use ed25519::Ed25519Curve;
 pub use secp256k1::Secp256k1Curve;
-pub use secp256k1_tr::Secp256k1TrCurve;
 
 // Re-export unified DKG types
 pub use hd_derivation::{
