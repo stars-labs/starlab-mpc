@@ -523,7 +523,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // passed a root id (e.g. the desktop's ElmSigningBackend) gets
             // account 0 of the runner curve's primary chain; an explicit
             // child id (the CLI one-shot always sends one) passes through.
-            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            let wallet_id = account_signing_wallet_id(
+                &wallet_id,
+                sign_chain(model.wallet_state.curve_type, false),
+            );
             let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw);
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
@@ -1142,10 +1145,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // ----- SignTransaction screen input (Phase C.3) -----
         Message::SignTypeChar(c) => {
             model.wallet_state.sign_message_draft.push(c);
+            model.wallet_state.sign_error = None;
             None
         }
         Message::SignBackspace => {
             model.wallet_state.sign_message_draft.pop();
+            model.wallet_state.sign_error = None;
+            None
+        }
+        Message::SignToggleChain => {
+            if model.wallet_state.curve_type == "secp256k1" {
+                model.wallet_state.sign_on_bitcoin = !model.wallet_state.sign_on_bitcoin;
+                model.wallet_state.sign_error = None;
+            }
             None
         }
         Message::SignSubmit => {
@@ -1183,13 +1195,29 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // "BIP-44 all the way": the UI navigates with the ROOT wallet id,
             // but signing must use an ACCOUNT key — map to the account-0
-            // child of the runner curve's primary chain. (No per-account
-            // selection exists on the accounts table yet; when it does, the
-            // selected index slots in here.) The child share is materialized
-            // on demand at unlock time.
-            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            // child of the chosen chain (Tab picks Ethereum or Bitcoin for a
+            // secp256k1 wallet). (No per-account selection exists on the
+            // accounts table yet; when it does, the selected index slots in
+            // here.) The child share is materialized on demand at unlock time.
+            let chain = sign_chain(
+                model.wallet_state.curve_type,
+                model.wallet_state.sign_on_bitcoin,
+            );
+            let wallet_id = account_signing_wallet_id(&wallet_id, chain);
 
-            let raw_message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
+            // Bitcoin signs a BIP-341 sighash the user supplies as hex;
+            // every other chain signs the typed text.
+            let raw_message_bytes = if chain == "bitcoin" {
+                match parse_sighash(&model.wallet_state.sign_message_draft) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        model.wallet_state.sign_error = Some(e);
+                        return None;
+                    }
+                }
+            } else {
+                model.wallet_state.sign_message_draft.as_bytes().to_vec()
+            };
             let curve = model.wallet_state.curve_type;
             let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw_message_bytes);
 
@@ -3414,26 +3442,36 @@ fn short_session_id(id: &str) -> String {
     }
 }
 
-/// Render the multi-line body for the creator-side Confirm-Signing
-/// modal. Shows the user-typed message (UTF-8 preview), the bytes
-/// FROST will actually sign (EIP-191 hash for secp256k1, same as raw
-/// for ed25519), and the wallet's threshold so the user knows how
-/// many co-signers are being recruited.
+/// The chain a signature is made for: a secp256k1 wallet signs as its
+/// Ethereum account, or its Bitcoin account when chosen; ed25519 is Solana.
+fn sign_chain(curve_type: &str, bitcoin: bool) -> &'static str {
+    match (curve_type, bitcoin) {
+        ("secp256k1", true) => "bitcoin",
+        ("secp256k1", false) => "ethereum",
+        _ => "solana",
+    }
+}
+
+/// A Bitcoin sighash typed as hex (`0x` optional); must be exactly 32 bytes.
+fn parse_sighash(input: &str) -> Result<Vec<u8>, String> {
+    const HINT: &str = "Bitcoin signs a 32-byte sighash: enter 64 hex characters";
+    let trimmed = input.trim();
+    let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    match hex::decode(hex_str) {
+        Ok(bytes) if bytes.len() == 32 => Ok(bytes),
+        _ => Err(HINT.to_string()),
+    }
+}
+
 /// "BIP-44 all the way": signing must NEVER use the root key. Map a root
-/// wallet id to its account-0 child for the runner curve's primary chain
-/// (ethereum for secp256k1, solana for ed25519); ids that already name an
-/// account child (`{parent}-{chain}-{account}`) pass through unchanged.
-/// The child share is materialized on demand at unlock time (the user has
-/// just typed the password) by `Command::UnlockWallet`.
-fn account_signing_wallet_id(wallet_id: &str, curve_type: &str) -> String {
+/// wallet id to its account-0 child on `chain` (see [`sign_chain`]); ids
+/// that already name an account child (`{parent}-{chain}-{account}`) pass
+/// through unchanged. The child share is materialized on demand at unlock
+/// time (the user has just typed the password) by `Command::UnlockWallet`.
+fn account_signing_wallet_id(wallet_id: &str, chain: &str) -> String {
     if starlab_core::accounts::parse_child_wallet_id(wallet_id).is_some() {
         return wallet_id.to_string();
     }
-    let chain = if curve_type == "secp256k1" {
-        "ethereum"
-    } else {
-        "solana"
-    };
     format!("{wallet_id}-{chain}-0")
 }
 
@@ -3468,6 +3506,11 @@ fn signing_payload(wallet_id: &str, raw: Vec<u8>) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 }
 
+/// Render the multi-line body for the creator-side Confirm-Signing
+/// modal. Shows the user-typed message (UTF-8 preview), the bytes
+/// FROST will actually sign (EIP-191 hash for an Ethereum account, the
+/// raw bytes otherwise), and the wallet's threshold so the user knows how
+/// many co-signers are being recruited.
 fn preview_lines(
     wallet_id: &str,
     curve: &str,
@@ -4208,20 +4251,20 @@ mod tests {
     #[test]
     fn account_signing_wallet_id_maps_root_to_account0_child() {
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3", "secp256k1"),
+            account_signing_wallet_id("19caa3cf46d3", sign_chain("secp256k1", false)),
             "19caa3cf46d3-ethereum-0"
         );
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3", "ed25519"),
+            account_signing_wallet_id("19caa3cf46d3", sign_chain("ed25519", false)),
             "19caa3cf46d3-solana-0"
         );
         // Already-a-child ids pass through untouched, any chain/account.
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "secp256k1"),
+            account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "ethereum"),
             "19caa3cf46d3-bitcoin-7"
         );
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3-sui-2", "ed25519"),
+            account_signing_wallet_id("19caa3cf46d3-sui-2", "solana"),
             "19caa3cf46d3-sui-2"
         );
     }
@@ -4470,5 +4513,137 @@ mod tests {
             }
             other => panic!("expected CopyToClipboard, got {:?}", other),
         }
+    }
+
+    const ROOT: &str = "19caa3cf46d3";
+
+    /// A model on the SignTransaction screen for `ROOT`.
+    fn sign_screen(curve: &'static str) -> Model {
+        let mut model = Model::new("dev".to_string());
+        model.wallet_state.curve_type = curve;
+        model.current_screen = Screen::SignTransaction {
+            wallet_id: ROOT.to_string(),
+        };
+        model
+    }
+
+    fn type_draft(model: &mut Model, text: &str) {
+        for c in text.chars() {
+            update(model, Message::SignTypeChar(c));
+        }
+    }
+
+    #[test]
+    fn bitcoin_choice_signs_the_raw_sighash_as_the_bitcoin_account() {
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, &format!("0x{}", "5a".repeat(32)));
+        update(&mut model, Message::SignSubmit);
+
+        let preview = model
+            .wallet_state
+            .pending_sign_preview
+            .expect("SignSubmit must stash a preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-bitcoin-0"));
+        assert_eq!(preview.bytes_to_sign, vec![0x5a; 32]);
+    }
+
+    #[test]
+    fn bitcoin_choice_rejects_input_that_is_not_a_32_byte_sighash() {
+        for bad in ["hello", "0x5a5a", &"5a".repeat(33)] {
+            let mut model = sign_screen("secp256k1");
+            update(&mut model, Message::SignToggleChain);
+            type_draft(&mut model, bad);
+            assert!(update(&mut model, Message::SignSubmit).is_none());
+            assert!(model.wallet_state.pending_sign_preview.is_none(), "{bad}");
+            assert!(model.wallet_state.sign_error.is_some(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn toggling_back_signs_as_the_ethereum_account() {
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, "hello");
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-ethereum-0"));
+    }
+
+    #[test]
+    fn ed25519_wallets_have_no_bitcoin_choice() {
+        let mut model = sign_screen("ed25519");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, "hello");
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-solana-0"));
+    }
+
+    /// The Bitcoin choice's (wallet id, payload), signed by a threshold of the
+    /// account shares derived the way UnlockWallet derives them, is a BIP-340
+    /// signature valid for the account's bc1p address.
+    #[test]
+    fn bitcoin_account_signature_verifies_for_its_p2tr_address() {
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, &"a7".repeat(32));
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+
+        let (_, chain, account) =
+            starlab_core::accounts::parse_child_wallet_id(&preview.wallet_id).expect("child id");
+        let path = starlab_core::DerivationPath::parse(
+            &starlab_core::accounts::standard_path(chain, account).expect("path"),
+        )
+        .expect("valid path");
+        let (shares, root) =
+            starlab_core::resharing::dkg_keypackages::<Secp>(3, 2, 41).expect("dkg");
+        let signers: Vec<_> = [1u16, 2]
+            .iter()
+            .map(|i| {
+                let blob = crate::elm::command::encode_keystore_blob::<Secp>(&shares[i], &root)
+                    .expect("encode");
+                let (child, _) = crate::elm::command::derive_child_for_curve::<Secp>(&blob, &path)
+                    .expect("derive");
+                crate::elm::command::decode_keystore_blob::<Secp>(&child).expect("decode")
+            })
+            .collect();
+
+        let mut rng = starlab_core::rng::os_rng();
+        let mut nonces = std::collections::BTreeMap::new();
+        let mut commitments = std::collections::BTreeMap::new();
+        for (kp, _) in &signers {
+            let (n, c) = frost_core::round1::commit(kp.signing_share(), &mut rng);
+            nonces.insert(*kp.identifier(), n);
+            commitments.insert(*kp.identifier(), c);
+        }
+        let package = frost_core::SigningPackage::new(commitments, &preview.bytes_to_sign);
+        let mut sig_shares = std::collections::BTreeMap::new();
+        for (kp, _) in &signers {
+            let share =
+                frost_core::round2::sign(&package, &nonces[kp.identifier()], kp).expect("sign");
+            sig_shares.insert(*kp.identifier(), share);
+        }
+        let signature =
+            frost_core::aggregate(&package, &sig_shares, &signers[0].1).expect("aggregate");
+
+        let group = root.verifying_key().serialize().expect("group");
+        let address = starlab_core::accounts::account_addresses("secp256k1", &group, 0)
+            .expect("addresses")
+            .into_iter()
+            .find(|(chain, _, _)| chain == "Bitcoin")
+            .map(|(_, _, address)| address)
+            .expect("bitcoin address");
+        assert!(address.starts_with("bc1p"), "{address}");
+        let valid = starlab_core::accounts::verify_taproot_signature(
+            &address,
+            &preview.bytes_to_sign,
+            &signature.serialize().expect("sig"),
+        )
+        .expect("verify");
+        assert!(valid, "signature must verify for {address}");
     }
 }

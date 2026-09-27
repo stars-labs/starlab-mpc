@@ -99,6 +99,8 @@ impl WalletState {
     /// sign attempt.
     pub fn clear_sign_draft(&mut self) {
         self.sign_message_draft.clear();
+        self.sign_on_bitcoin = false;
+        self.sign_error = None;
     }
 }
 
@@ -191,6 +193,12 @@ pub struct WalletState {
     /// `SignTransaction` screen. Cleared on submit and on every exit
     /// from the screen (same discipline as `password_draft`).
     pub sign_message_draft: String,
+    /// SignTransaction chain choice for a secp256k1 wallet: `false` signs as
+    /// the Ethereum account, `true` as the Bitcoin (P2TR) account.
+    pub sign_on_bitcoin: bool,
+    /// Inline SignTransaction validation error (e.g. a Bitcoin sighash that
+    /// isn't 32 bytes of hex). Cleared on the next edit.
+    pub sign_error: Option<String>,
     /// Stashed bytes-to-sign for the signing flow that threads through
     /// PasswordPrompt → UnlockWallet → JoinSigning. Set by the
     /// SubmitPassword handler when it sees a `SessionType::Signing`;

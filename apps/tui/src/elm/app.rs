@@ -685,6 +685,8 @@ where
                 | Message::PasswordSubmitDraft
                 | Message::SignTypeChar(_)
                 | Message::SignBackspace
+                | Message::SignToggleChain
+                | Message::SignSubmit
                 // WalletDetail's accounts table derives from
                 // `ui_state.accounts_shown`, read at mount time.
                 | Message::AccountsShowMore
@@ -1074,6 +1076,7 @@ where
             match key.code {
                 KeyCode::Char(c) => return Some(Message::SignTypeChar(c)),
                 KeyCode::Backspace => return Some(Message::SignBackspace),
+                KeyCode::Tab | KeyCode::BackTab => return Some(Message::SignToggleChain),
                 KeyCode::Enter => return Some(Message::SignSubmit),
                 _ => return None,
             }

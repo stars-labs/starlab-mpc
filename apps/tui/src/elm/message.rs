@@ -354,6 +354,9 @@ pub enum Message {
     // from that draft.
     SignTypeChar(char),
     SignBackspace,
+    /// Tab on SignTransaction: a secp256k1 wallet signs as its Ethereum or
+    /// its Bitcoin account 0 (ed25519 has only Solana, so it's a no-op there).
+    SignToggleChain,
     /// Run validation + dispatch `InitiateSigning`. On failure, populate
     /// an inline error; on success, navigate forward (C.5 adds
     /// SignatureComplete; today we stay on the screen and rely on the
