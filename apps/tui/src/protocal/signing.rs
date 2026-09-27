@@ -125,6 +125,7 @@ pub async fn handle_start_signing<C>(
         guard.frost_signature_shares.clear();
         guard.frost_nonces = None;
         guard.signing_message = Some(message.clone());
+        guard.ceremony_outbox.clear();
         guard.signing_state = SigningState::CommitmentPhase {
             signing_id: INLINE_SIGNING_ID.to_string(),
             transaction_data: format!("{} bytes", message.len()),
@@ -558,6 +559,7 @@ where
         guard.frost_signature_shares.clear();
         guard.frost_nonces = None;
         guard.signing_message = None;
+        guard.ceremony_outbox.clear();
     }
 
     info!(
@@ -590,6 +592,7 @@ fn fail_and_notify<C: Ciphersuite>(
     guard.frost_signature_shares.clear();
     guard.frost_nonces = None;
     guard.signing_message = None;
+    guard.ceremony_outbox.clear();
     let _ = ui_tx.send(Message::SigningFailed {
         request_id: INLINE_SIGNING_ID.to_string(),
         error: reason,
