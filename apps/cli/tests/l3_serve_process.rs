@@ -194,7 +194,7 @@ async fn dkg_2of2(a: &mut ServeProc, b: &mut ServeProc) -> anyhow::Result<(Strin
 /// Inputs are hex (the `signature_complete` event 0x-prefixes both; group key
 /// is bare).
 fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
-    use frost_secp256k1::{Signature, VerifyingKey};
+    use frost_secp256k1_tr::{Signature, VerifyingKey};
     let strip = |s: &str| s.trim_start_matches("0x").to_string();
     let (Ok(group), Ok(msg), Ok(sigb)) = (
         hex::decode(strip(group_hex)),
@@ -207,9 +207,9 @@ fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
         &starlab_core::accounts::standard_path("ethereum", 0).expect("ethereum path"),
     )
     .expect("valid path");
-    let Ok(vkb) = starlab_core::derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
-        &group, &path,
-    ) else {
+    let Ok(vkb) = starlab_core::derive_child_verifying_key_path::<
+        frost_secp256k1_tr::Secp256K1Sha256TR,
+    >(&group, &path) else {
         return false;
     };
     match (

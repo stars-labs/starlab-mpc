@@ -112,7 +112,7 @@ pub fn run_reshare_simulation(
 
     let (gpk, key_preserved, signs, old_rejected) = match curve {
         "ed25519" => run::<frost_ed25519::Ed25519Sha512>(total, threshold, &keep)?,
-        "secp256k1" => run::<frost_secp256k1::Secp256K1Sha256>(total, threshold, &keep)?,
+        "secp256k1" => run::<frost_secp256k1_tr::Secp256K1Sha256TR>(total, threshold, &keep)?,
         other => anyhow::bail!("unsupported curve: {other}"),
     };
 

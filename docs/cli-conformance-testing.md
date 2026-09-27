@@ -431,7 +431,7 @@ For each flow and each client:
 | Curve | Group key | Chain | Expected address |
 |---|---|---|---|
 | secp256k1 | generator G | Ethereum | `0x7e5f4552091a69125d5dfcb7b8c2659029395bdf` ✅ |
-| secp256k1 | generator G | Bitcoin P2WPKH | `bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4` ✅ |
+| secp256k1 | BIP-86 output key `a60869f0…` | Bitcoin P2TR | `bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr` ✅ |
 | ed25519 | all-zero key | Solana | `11111111111111111111111111111111` ✅ |
 
 These reuse the same derivation paths as the per-chain tests already landed in
@@ -462,6 +462,14 @@ implemented", so BTC MPC wallets could not display an address. Implemented P2WPK
 segwit-v0 of `hash160(compressed pubkey)` (P2WPKH mandates the compressed key, which is
 exactly FROST's serialization), pinned against the BIP-173 worked example
 (G → `bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4`). All three address goldens now hold.
+
+**Superseded: Bitcoin is P2TR.** P2WPKH spends need ECDSA, which FROST cannot
+produce, so that address was unspendable. secp256k1 FROST now runs the BIP-340
+suite (`frost-secp256k1-tr`), Bitcoin accounts derive on `m/86'/0'/0'/0/n` as BIP-86
+output keys, and the golden is `golden_bitcoin_p2tr_for_bip86_output_key` (BIP-86
+vector → `bc1p5cyx…kedrcr`). The e2e test
+`bitcoin_account_signs_a_sighash_valid_for_its_p2tr_address` proves a 2-of-3
+signature over a sighash verifies (BIP-340) for the account's P2TR address.
 
 ---
 

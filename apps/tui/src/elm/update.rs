@@ -500,25 +500,16 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             } else {
                 message.into_bytes()
             };
-            let curve = model.wallet_state.curve_type;
-            let bytes_to_sign = if curve == "secp256k1" {
-                crate::utils::eth_helper::eip191_hash(&raw).to_vec()
-            } else {
-                raw.clone()
-            };
             // "BIP-44 all the way": never sign with the root. A caller that
             // passed a root id (e.g. the desktop's ElmSigningBackend) gets
             // account 0 of the runner curve's primary chain; an explicit
             // child id (the CLI one-shot always sends one) passes through.
-            let wallet_id = account_signing_wallet_id(&wallet_id, curve);
+            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw);
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
             model.wallet_state.pending_sign_session_id = None;
-            model.wallet_state.pending_raw_message = if curve == "secp256k1" {
-                Some(raw)
-            } else {
-                None
-            };
+            model.wallet_state.pending_raw_message = raw_for_display;
             // Clear any leftover DKG-creation/join state so SubmitPassword's
             // cold-start *sign* gate (creating_wallet.is_none() &&
             // active_session.is_none()) is taken — otherwise a wallet we just
@@ -1157,19 +1148,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
 
             let raw_message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
-            // For secp256k1 wallets, sign the EIP-191 hash of the message
-            // rather than the raw bytes. That's what `ecrecover`
-            // expects — so the resulting signature is directly usable
-            // as an Ethereum `personal_sign` output. For ed25519 /
-            // future curves, the raw bytes ARE the payload (Ed25519
-            // signs variable-length input natively).
             let curve = model.wallet_state.curve_type;
-            let (bytes_to_sign, raw_for_display) = if curve == "secp256k1" {
-                let hash = crate::utils::eth_helper::eip191_hash(&raw_message_bytes).to_vec();
-                (hash, Some(raw_message_bytes))
-            } else {
-                (raw_message_bytes, None)
-            };
+            let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw_message_bytes);
 
             let warm = model.wallet_state.wallet_unlocked_id.as_deref() == Some(&wallet_id);
 
@@ -3412,6 +3392,21 @@ pub(crate) fn wallet_threshold(
         .map(|w| (w.threshold, w.total_participants))
 }
 
+/// What the signing ceremony signs for `wallet_id`'s account, plus the raw
+/// message kept for display when it differs. An Ethereum account signs the
+/// EIP-191 hash (personal_sign text semantics); a Bitcoin account signs the
+/// raw bytes — the 32-byte BIP-341 sighash — as BIP-340 requires; ed25519
+/// chains sign raw bytes natively.
+fn signing_payload(wallet_id: &str, raw: Vec<u8>) -> (Vec<u8>, Option<Vec<u8>>) {
+    match starlab_core::accounts::parse_child_wallet_id(wallet_id) {
+        Some((_, "ethereum", _)) => (
+            crate::utils::eth_helper::eip191_hash(&raw).to_vec(),
+            Some(raw),
+        ),
+        _ => (raw, None),
+    }
+}
+
 fn preview_lines(
     wallet_id: &str,
     curve: &str,
@@ -3789,6 +3784,47 @@ mod tests {
         assert_eq!(
             model.wallet_state.password_prompt_purpose,
             crate::elm::model::PasswordPromptPurpose::SetNew
+        );
+    }
+
+    fn headless_sign(model: &mut Model, wallet_id: &str, message: &str, encoding: &str) {
+        update(
+            model,
+            Message::HeadlessSign {
+                wallet_id: wallet_id.to_string(),
+                message: message.to_string(),
+                encoding: encoding.to_string(),
+                password: "pw".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn bitcoin_account_signs_the_raw_sighash() {
+        // BIP-340 signs the 32-byte BIP-341 sighash itself — no EIP-191 wrap.
+        let mut model = Model::new("dev".to_string());
+        model.wallet_state.curve_type = "secp256k1";
+        let sighash = "5a".repeat(32);
+        headless_sign(&mut model, "w-bitcoin-0", &sighash, "hex");
+        assert_eq!(
+            model.wallet_state.pending_sign_message,
+            Some(hex::decode(&sighash).unwrap())
+        );
+        assert!(model.wallet_state.pending_raw_message.is_none());
+    }
+
+    #[test]
+    fn ethereum_account_signs_the_eip191_hash() {
+        let mut model = Model::new("dev".to_string());
+        model.wallet_state.curve_type = "secp256k1";
+        headless_sign(&mut model, "w-ethereum-0", "hello", "utf8");
+        assert_eq!(
+            model.wallet_state.pending_sign_message,
+            Some(crate::utils::eth_helper::eip191_hash(b"hello").to_vec())
+        );
+        assert_eq!(
+            model.wallet_state.pending_raw_message,
+            Some(b"hello".to_vec())
         );
     }
 

@@ -17,7 +17,7 @@
 //!     │                                                │
 //!     │ Addresses (N chains):                          │
 //!     │    ethereum      0xabc…def                    │
-//!     │    bitcoin       bc1qxyz…                     │
+//!     │    bitcoin       bc1pxyz…                     │
 //!     │                                                │
 //!     │ Enter = Done    Esc = Done    Ctrl-C = Quit    │
 //!     └────────────────────────────────────────────────┘
@@ -216,7 +216,7 @@ mod tests {
             curve_type: "secp256k1".to_string(),
             addresses: vec![
                 ("ethereum".to_string(), "0x1234abcd".to_string()),
-                ("bitcoin".to_string(), "bc1qrest".to_string()),
+                ("bitcoin".to_string(), "bc1prest".to_string()),
             ],
         }
     }

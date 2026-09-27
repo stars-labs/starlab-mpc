@@ -193,7 +193,7 @@ errors.rs                # Typed error variants
 ```
 
 The actual DKG + signing primitives come from upstream
-`frost-core 3.0` / `frost-ed25519 3.0` / `frost-secp256k1 3.0` crates.
+`frost-core 3.0` / `frost-ed25519 3.0` / `frost-secp256k1-tr 3.0` crates.
 `unified_dkg` wraps them to run both curves simultaneously from a
 single root secret. There is no custom `DKGSession` / `SigningSession`
 struct in this crate — you interact with upstream types.

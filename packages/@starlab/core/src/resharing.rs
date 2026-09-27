@@ -402,7 +402,7 @@ impl<C: Ciphersuite> ReshareSession<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
 
     #[test]
     fn refresh_preserves_group_key_same_set() {

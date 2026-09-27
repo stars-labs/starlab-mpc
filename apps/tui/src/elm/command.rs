@@ -349,7 +349,7 @@ pub fn decode_keystore_blob<C: frost_core::Ciphersuite>(
 /// Deterministic across participants — the chain code comes from the group
 /// key — so a threshold of co-signers deriving the SAME path can sign for
 /// the child address.
-pub fn derive_child_for_curve<C: frost_core::Ciphersuite>(
+pub fn derive_child_for_curve<C: starlab_core::hd_derivation::AccountKeyFinalize>(
     blob: &[u8],
     path: &starlab_core::DerivationPath,
 ) -> Result<(Vec<u8>, String), String> {
@@ -433,7 +433,7 @@ pub fn ensure_account_wallet(
         .map_err(|e| format!("unlock '{parent_id}' ({curve}): {e}"))?;
     let (child_blob, child_group_hex) = match curve {
         "ed25519" => derive_child_for_curve::<frost_ed25519::Ed25519Sha512>(&blob, &parsed)?,
-        _ => derive_child_for_curve::<frost_secp256k1::Secp256K1Sha256>(&blob, &parsed)?,
+        _ => derive_child_for_curve::<frost_secp256k1_tr::Secp256K1Sha256TR>(&blob, &parsed)?,
     };
     ks.create_wallet_multi_chain(
         &child_id,
@@ -3387,8 +3387,8 @@ mod tests {
     /// packages in-process without running a network DKG.
     #[test]
     fn encode_decode_keystore_blob_round_trips() {
-        use frost_secp256k1::{
-            Identifier, Secp256K1Sha256,
+        use frost_secp256k1_tr::{
+            Identifier, Secp256K1Sha256TR,
             keys::{
                 IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer,
             },
@@ -3401,10 +3401,10 @@ mod tests {
         let (id, secret_share) = secret_shares.iter().next().unwrap();
         let key_package: KP = secret_share.clone().try_into().expect("share → KeyPackage");
 
-        let blob =
-            encode_keystore_blob::<Secp256K1Sha256>(&key_package, &pubkey_package).expect("encode");
+        let blob = encode_keystore_blob::<Secp256K1Sha256TR>(&key_package, &pubkey_package)
+            .expect("encode");
 
-        let (kp_back, pkp_back) = decode_keystore_blob::<Secp256K1Sha256>(&blob).expect("decode");
+        let (kp_back, pkp_back) = decode_keystore_blob::<Secp256K1Sha256TR>(&blob).expect("decode");
 
         assert_eq!(
             kp_back.identifier(),
@@ -3425,7 +3425,7 @@ mod tests {
     #[test]
     fn decode_keystore_blob_handles_truncation_gracefully() {
         let truncated: Vec<u8> = vec![0xff, 0xff, 0xff, 0xff, 0x00]; // claims 4GB but has 1 byte
-        let result = decode_keystore_blob::<frost_secp256k1::Secp256K1Sha256>(&truncated);
+        let result = decode_keystore_blob::<frost_secp256k1_tr::Secp256K1Sha256TR>(&truncated);
         assert!(result.is_err(), "truncated blob must surface an Err");
         let msg = result.unwrap_err();
         assert!(
@@ -3436,7 +3436,7 @@ mod tests {
 
     #[test]
     fn decode_keystore_blob_rejects_empty_input() {
-        let result = decode_keystore_blob::<frost_secp256k1::Secp256K1Sha256>(&[]);
+        let result = decode_keystore_blob::<frost_secp256k1_tr::Secp256K1Sha256TR>(&[]);
         assert!(result.is_err(), "empty input must fail");
     }
 }
@@ -3449,7 +3449,7 @@ mod tests {
 #[cfg(test)]
 mod account_wallet_tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
     use starlab_core::resharing::dkg_keypackages;
 
     const PW: &str = "correct-horse-battery";

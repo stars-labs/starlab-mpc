@@ -1771,20 +1771,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "frost-secp256k1"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d69a97ae720bc1f01efd7a87c6c8451582bd00a45383052b01e83ba9c6faa5c5"
-dependencies = [
- "document-features",
- "frost-core",
- "frost-rerandomized",
- "k256 0.13.4",
- "rand_core 0.6.4",
- "sha2 0.10.9",
-]
-
-[[package]]
 name = "frost-secp256k1-tr"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3774,15 +3760,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ripemd"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dd4211456b4172d7e44261920c25acf07367c4f04bb5f5d54fc21b090d9b159"
-dependencies = [
- "digest 0.11.3",
-]
-
-[[package]]
 name = "rkyv"
 version = "0.8.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5566,7 +5543,7 @@ dependencies = [
  "clap",
  "frost-core",
  "frost-ed25519",
- "frost-secp256k1",
+ "frost-secp256k1-tr",
  "futures-util",
  "hex",
  "serde",
@@ -5598,7 +5575,7 @@ dependencies = [
  "ethers-core",
  "frost-core",
  "frost-ed25519",
- "frost-secp256k1",
+ "frost-secp256k1-tr",
  "futures-util",
  "gethostname",
  "getrandom 0.4.3",
@@ -5639,7 +5616,6 @@ dependencies = [
  "frost-core",
  "frost-ed25519",
  "frost-ristretto255",
- "frost-secp256k1",
  "frost-secp256k1-tr",
  "getrandom 0.4.3",
  "hex",
@@ -5650,7 +5626,6 @@ dependencies = [
  "pbkdf2 0.13.0",
  "rand_chacha 0.10.0",
  "rand_core 0.10.1",
- "ripemd",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -5665,7 +5640,6 @@ dependencies = [
  "console_error_panic_hook",
  "frost-core",
  "frost-ed25519",
- "frost-secp256k1",
  "frost-secp256k1-tr",
  "getrandom 0.4.3",
  "hex",

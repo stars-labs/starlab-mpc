@@ -17,8 +17,8 @@ use starlab_client::webrtc::{
     ConnectionMonitor, MeshSimulator, SimulationScenario, WebRTCMeshManager,
 };
 
-use frost_secp256k1::rand_core::OsRng;
-use frost_secp256k1::{
+use frost_secp256k1_tr::rand_core::OsRng;
+use frost_secp256k1_tr::{
     Identifier, SigningPackage,
     keys::{KeyPackage, PublicKeyPackage, dkg},
     round1, round2,
@@ -290,8 +290,9 @@ async fn run_signing_with_rejoin(
             .find_map(|p| p.pubkey_package.clone())
             .unwrap();
 
-        let _signature = frost_secp256k1::aggregate(&signing_package, &signature_shares, &pubkey)
-            .expect("Aggregation failed");
+        let _signature =
+            frost_secp256k1_tr::aggregate(&signing_package, &signature_shares, &pubkey)
+                .expect("Aggregation failed");
 
         println!("\n✅ Signature aggregated successfully!");
     } else {

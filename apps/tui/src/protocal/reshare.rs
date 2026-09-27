@@ -491,7 +491,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use frost_secp256k1::Secp256K1Sha256 as Secp;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
     use starlab_core::resharing;
     use std::collections::BTreeMap;
 

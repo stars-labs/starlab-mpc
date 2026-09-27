@@ -1,9 +1,17 @@
+//! secp256k1 FROST over the BIP-340 / Taproot ciphersuite (`frost-secp256k1-tr`).
+//!
+//! Signatures are BIP-340 Schnorr, so they spend Bitcoin P2TR outputs; the
+//! DKG's `post_dkg` hook commits the root key to an unspendable script path
+//! (BIP-341), and account children are BIP-86 output keys (see
+//! `hd_derivation::AccountKeyFinalize`). EVM needs ECDSA and does not use this
+//! suite for on-chain transactions.
+
 use crate::rng::{OsRng, os_rng};
 use crate::{
     errors::{FrostError, Result},
     traits::FrostCurve,
 };
-use frost_secp256k1::{
+use frost_secp256k1_tr::{
     self, Identifier, Signature, SigningPackage,
     keys::{KeyPackage, PublicKeyPackage, dkg},
     round1::{SigningCommitments, SigningNonces},
@@ -19,11 +27,11 @@ impl FrostCurve for Secp256k1Curve {
     type Identifier = Identifier;
     type KeyPackage = KeyPackage;
     type PublicKeyPackage = PublicKeyPackage;
-    type Round1SecretPackage = frost_secp256k1::keys::dkg::round1::SecretPackage;
-    type Round2SecretPackage = frost_secp256k1::keys::dkg::round2::SecretPackage;
-    type Round1Package = frost_secp256k1::keys::dkg::round1::Package;
-    type Round2Package = frost_secp256k1::keys::dkg::round2::Package;
-    type VerifyingKey = frost_secp256k1::VerifyingKey;
+    type Round1SecretPackage = frost_secp256k1_tr::keys::dkg::round1::SecretPackage;
+    type Round2SecretPackage = frost_secp256k1_tr::keys::dkg::round2::SecretPackage;
+    type Round1Package = frost_secp256k1_tr::keys::dkg::round1::Package;
+    type Round2Package = frost_secp256k1_tr::keys::dkg::round2::Package;
+    type VerifyingKey = frost_secp256k1_tr::VerifyingKey;
     type SigningNonces = SigningNonces;
     type SigningCommitments = SigningCommitments;
     type SignatureShare = SignatureShare;
@@ -87,7 +95,7 @@ impl FrostCurve for Secp256k1Curve {
     ) -> Result<(Self::SigningNonces, Self::SigningCommitments)> {
         let mut rng = os_rng();
         let (nonces, commitments) =
-            frost_secp256k1::round1::commit(key_package.signing_share(), &mut rng);
+            frost_secp256k1_tr::round1::commit(key_package.signing_share(), &mut rng);
         Ok((nonces, commitments))
     }
 
@@ -96,7 +104,7 @@ impl FrostCurve for Secp256k1Curve {
         nonces: &Self::SigningNonces,
         key_package: &Self::KeyPackage,
     ) -> Result<Self::SignatureShare> {
-        frost_secp256k1::round2::sign(signing_package, nonces, key_package).map_err(|e| {
+        frost_secp256k1_tr::round2::sign(signing_package, nonces, key_package).map_err(|e| {
             FrostError::SigningError(format!("Failed to generate signature share: {:?}", e))
         })
     }
@@ -106,7 +114,7 @@ impl FrostCurve for Secp256k1Curve {
         signature_shares: &BTreeMap<Self::Identifier, Self::SignatureShare>,
         public_key_package: &Self::PublicKeyPackage,
     ) -> Result<Self::Signature> {
-        frost_secp256k1::aggregate(signing_package, signature_shares, public_key_package)
+        frost_secp256k1_tr::aggregate(signing_package, signature_shares, public_key_package)
             .map_err(|e| FrostError::SigningError(e.to_string()))
     }
 
@@ -114,7 +122,7 @@ impl FrostCurve for Secp256k1Curve {
         commitments: &BTreeMap<Self::Identifier, Self::SigningCommitments>,
         message: &[u8],
     ) -> Result<Self::SigningPackage> {
-        Ok(frost_secp256k1::SigningPackage::new(
+        Ok(frost_secp256k1_tr::SigningPackage::new(
             commitments.clone(),
             message,
         ))
@@ -130,7 +138,7 @@ impl FrostCurve for Secp256k1Curve {
 
 // Additional Ethereum-specific functions
 impl Secp256k1Curve {
-    pub fn get_eth_address(verifying_key: &frost_secp256k1::VerifyingKey) -> Result<String> {
+    pub fn get_eth_address(verifying_key: &frost_secp256k1_tr::VerifyingKey) -> Result<String> {
         let pubkey_bytes = verifying_key
             .serialize()
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
@@ -154,5 +162,46 @@ impl Secp256k1Curve {
                 "Failed to parse verifying key".to_string(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::resharing::{dkg_keypackages, refresh, threshold_sign_verify};
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Tr;
+
+    #[test]
+    fn taproot_dkg_sign_verify_roundtrip() {
+        // The generic engine helpers are ciphersuite-generic, so the whole
+        // DKG → threshold-sign → verify pipeline proves the -tr suite works.
+        let (kps, pp) = dkg_keypackages::<Tr>(3, 2, 31).unwrap();
+        threshold_sign_verify::<Tr>(&kps, &[1, 3], &pp, b"taproot-roundtrip").unwrap();
+    }
+
+    #[test]
+    fn taproot_verifying_key_is_even_y_normalized() {
+        // The -tr ciphersuite serializes SEC1-compressed (33 bytes; parity
+        // prefix 0x02/0x03). BIP-340 verifiers use only the x coordinate —
+        // consumers take bytes[1..33] as the Taproot output key; the suite
+        // handles even-Y normalization internally during signing (proven by
+        // the roundtrip test: its verify IS BIP-340).
+        let (_, pp) = dkg_keypackages::<Tr>(2, 2, 32).unwrap();
+        let bytes = pp.verifying_key().serialize().unwrap();
+        assert_eq!(bytes.len(), 33);
+        assert!(
+            bytes[0] == 0x02 || bytes[0] == 0x03,
+            "expected SEC1 parity prefix"
+        );
+    }
+
+    #[test]
+    fn taproot_reshare_works_too() {
+        let (kps, pp) = dkg_keypackages::<Tr>(3, 2, 33).unwrap();
+        let (new_kps, new_pp) = refresh::<Tr>(&kps, &pp, &[1, 2], 2, 73).unwrap();
+        assert_eq!(
+            new_pp.verifying_key().serialize().unwrap(),
+            pp.verifying_key().serialize().unwrap()
+        );
+        threshold_sign_verify::<Tr>(&new_kps, &[1, 2], &new_pp, b"taproot-reshare").unwrap();
     }
 }

@@ -98,6 +98,40 @@ async fn dkg_then_sign_2_of_2_verifies() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC signing over loopback; run with --ignored"]
+async fn bitcoin_account_signs_a_sighash_valid_for_its_p2tr_address() {
+    init_logs();
+    let sighash = "5a".repeat(32); // a BIP-341 sighash is 32 bytes
+    let result = starlab_cli::simulate::run_bitcoin_signing_simulation(
+        SimulateOpts {
+            nodes: 3,
+            threshold: 2,
+            curve: "secp256k1".into(),
+            signal_url: None,
+            timeout_secs: 120,
+        },
+        &sighash,
+    )
+    .await
+    .expect("bitcoin signing simulation ran");
+
+    assert!(result.address.starts_with("bc1p"), "{result:?}");
+    assert_eq!(
+        result.sighash.trim_start_matches("0x"),
+        sighash,
+        "signed the raw sighash"
+    );
+    assert!(
+        result.verified,
+        "BIP-340 signature must verify for the P2TR address: {result:?}"
+    );
+    eprintln!(
+        "✅ 2-of-3 Taproot key-path signature valid for {}",
+        result.address
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 #[ignore = "real WebRTC reshare over loopback; run with --ignored"]
 async fn reshare_then_sign_2_of_3_preserves_group_key() {
     // #45 4b: networked same-set reshare over the live mesh. After DKG, every

@@ -668,8 +668,8 @@ async fn broadcast_signing_frame<C>(
 
 #[cfg(test)]
 mod tests {
-    use frost_secp256k1::{
-        Identifier, Secp256K1Sha256,
+    use frost_secp256k1_tr::{
+        Identifier, Secp256K1Sha256TR,
         keys::{IdentifierList, KeyPackage as KP, PublicKeyPackage as PKP, generate_with_dealer},
     };
     use std::collections::BTreeMap;
@@ -721,7 +721,7 @@ mod tests {
 
         // Aggregate
         let signature =
-            frost_core::aggregate::<Secp256K1Sha256>(&signing_package, &shares_map, &pkp)
+            frost_core::aggregate::<Secp256K1Sha256TR>(&signing_package, &shares_map, &pkp)
                 .expect("aggregate");
 
         pkp.verifying_key()
@@ -759,7 +759,7 @@ mod tests {
         // Build the wrong signing package (different message) and attempt to
         // aggregate the shares that belong to `message_a` against it.
         let pkg_b = frost_core::SigningPackage::new(commitments_map, message_b);
-        let result = frost_core::aggregate::<Secp256K1Sha256>(&pkg_b, &shares, &pkp);
+        let result = frost_core::aggregate::<Secp256K1Sha256TR>(&pkg_b, &shares, &pkp);
         assert!(
             result.is_err(),
             "aggregating shares for the wrong message must fail; got Ok({:?})",

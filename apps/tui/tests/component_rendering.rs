@@ -270,7 +270,7 @@ fn wallet_complete_renders_wallet_id_and_group_key() {
         curve_type: "secp256k1".to_string(),
         addresses: vec![
             ("ethereum".to_string(), "0xDEADBEEF".to_string()),
-            ("bitcoin".to_string(), "bc1qWALLET".to_string()),
+            ("bitcoin".to_string(), "bc1pWALLET".to_string()),
         ],
     };
     let rendered = render_wallet_complete(Some(info));
@@ -293,7 +293,7 @@ fn wallet_complete_renders_wallet_id_and_group_key() {
     assert_contains(&rendered, "ethereum", "ethereum row must render");
     assert_contains(&rendered, "0xDEADBEEF", "ethereum address must render");
     assert_contains(&rendered, "bitcoin", "bitcoin row must render");
-    assert_contains(&rendered, "bc1qWALLET", "bitcoin address must render");
+    assert_contains(&rendered, "bc1pWALLET", "bitcoin address must render");
     assert_contains(&rendered, "Enter = Done", "the Enter hint must render");
     assert_contains(
         &rendered,

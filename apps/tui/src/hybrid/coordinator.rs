@@ -19,7 +19,7 @@ pub struct ParticipantInfo {
     pub id: u16,
     pub name: String,
     pub mode: ParticipantMode,
-    pub identifier: frost_secp256k1::Identifier,
+    pub identifier: frost_secp256k1_tr::Identifier,
 }
 
 /// Message type for hybrid coordination
@@ -71,7 +71,7 @@ impl HybridCoordinator {
 
     /// Registers a participant
     pub fn register_participant(&mut self, id: u16, name: &str, mode: ParticipantMode) {
-        let identifier = frost_secp256k1::Identifier::try_from(id).expect("Invalid identifier");
+        let identifier = frost_secp256k1_tr::Identifier::try_from(id).expect("Invalid identifier");
 
         let info = ParticipantInfo {
             id,

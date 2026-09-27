@@ -21,7 +21,7 @@ starlab-core = { path = "../../packages/@starlab/core", version = "0.1.0" }
 # FROST 3.0 — secp256k1 for Ethereum, ed25519 for Solana, `frost-core`
 # for ciphersuite-generic bounds.
 frost-ed25519 = { version = "3.0.0", features = ["serde", "serialization"] }
-frost-secp256k1 = { version = "3.0.0", features = ["serde", "serialization"] }
+frost-secp256k1-tr = { version = "3.0.0", features = ["serde", "serialization"] }
 frost-core = { version = "3.0.0", features = ["serde"] }
 
 # Salt/nonce + one-shot random fills. getrandom is the direct system

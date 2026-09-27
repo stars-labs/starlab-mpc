@@ -626,7 +626,7 @@ pub async fn process_dkg_round2<C>(
     // `CurveIdentifier` is what lets us translate `C` → `"secp256k1"` or
     // `"ed25519"` at runtime. We need the real curve name (not the session
     // blob's "unified") to route address derivation in the completion block
-    // below. TUI only instantiates `AppState<Secp256K1Sha256>` today, and
+    // below. TUI only instantiates `AppState<Secp256K1Sha256TR>` today, and
     // both ciphersuites in use implement this trait — a future third curve
     // would need to implement it too.
     C: Ciphersuite + Send + Sync + 'static + crate::utils::curve_traits::CurveIdentifier,
@@ -851,7 +851,7 @@ pub async fn process_dkg_round2<C>(
 
                     // Determine address format based on chain
                     let addr_format = if chain_id == &"bitcoin" {
-                        "P2WPKH".to_string()
+                        "P2TR".to_string()
                     } else if chain_id == &"solana" || chain_id == &"sui" || chain_id == &"aptos" {
                         "base58".to_string()
                     } else {

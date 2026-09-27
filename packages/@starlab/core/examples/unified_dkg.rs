@@ -224,7 +224,7 @@ fn main() {
         let key_pkg = participants[idx]
             .secp256k1_key_package()
             .expect("no secp256k1 key package");
-        let (nonces, commitments) = frost_secp256k1::round1::commit(
+        let (nonces, commitments) = frost_secp256k1_tr::round1::commit(
             key_pkg.signing_share(),
             &mut starlab_core::rng::os_rng(),
         );
@@ -238,14 +238,14 @@ fn main() {
     }
 
     // Step 2: Create signing package and generate signature shares
-    let secp_signing_pkg = frost_secp256k1::SigningPackage::new(secp_commitments, message);
+    let secp_signing_pkg = frost_secp256k1_tr::SigningPackage::new(secp_commitments, message);
     let mut secp_sig_shares = BTreeMap::new();
 
     for &idx in &signer_indices {
         let key_pkg = participants[idx].secp256k1_key_package().unwrap();
         let id = *key_pkg.identifier();
         let nonces = &secp_nonces[&id];
-        let share = frost_secp256k1::round2::sign(&secp_signing_pkg, nonces, key_pkg)
+        let share = frost_secp256k1_tr::round2::sign(&secp_signing_pkg, nonces, key_pkg)
             .expect("secp256k1 signing failed");
         secp_sig_shares.insert(id, share);
         println!(
@@ -257,7 +257,7 @@ fn main() {
     // Step 3: Aggregate and verify
     let secp_pub_pkg = participants[0].secp256k1_public_key_package().unwrap();
     let secp_signature =
-        frost_secp256k1::aggregate(&secp_signing_pkg, &secp_sig_shares, secp_pub_pkg)
+        frost_secp256k1_tr::aggregate(&secp_signing_pkg, &secp_sig_shares, secp_pub_pkg)
             .expect("secp256k1 aggregation failed");
 
     let secp_vk = secp_pub_pkg.verifying_key();
@@ -310,7 +310,7 @@ fn main() {
     println!("  Base address: {}", eth_addresses[0]);
     let mut child_eth_addresses = Vec::new();
     for index in 0..3u32 {
-        let derived = derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
+        let derived = derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             participants[0].secp256k1_key_package().unwrap(),
             participants[0].secp256k1_public_key_package().unwrap(),
             &secp_chain_code,
@@ -428,7 +428,7 @@ fn main() {
     let child_secp_keys: Vec<_> = child_signer_indices
         .iter()
         .map(|&idx| {
-            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
+            derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
                 participants[idx].secp256k1_key_package().unwrap(),
                 participants[idx].secp256k1_public_key_package().unwrap(),
                 &secp_chain_code,
@@ -442,27 +442,29 @@ fn main() {
     let mut child_secp_commitments = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_secp_keys[i].key_package;
-        let (nonces, commitments) =
-            frost_secp256k1::round1::commit(kp.signing_share(), &mut starlab_core::rng::os_rng());
+        let (nonces, commitments) = frost_secp256k1_tr::round1::commit(
+            kp.signing_share(),
+            &mut starlab_core::rng::os_rng(),
+        );
         let id = *kp.identifier();
         child_secp_nonces.insert(id, nonces);
         child_secp_commitments.insert(id, commitments);
     }
 
     let child_secp_signing_pkg =
-        frost_secp256k1::SigningPackage::new(child_secp_commitments, child_message);
+        frost_secp256k1_tr::SigningPackage::new(child_secp_commitments, child_message);
     let mut child_secp_sig_shares = BTreeMap::new();
     for (i, _) in child_signer_indices.iter().enumerate() {
         let kp = &child_secp_keys[i].key_package;
         let id = *kp.identifier();
         let share =
-            frost_secp256k1::round2::sign(&child_secp_signing_pkg, &child_secp_nonces[&id], kp)
+            frost_secp256k1_tr::round2::sign(&child_secp_signing_pkg, &child_secp_nonces[&id], kp)
                 .expect("child secp256k1 signing failed");
         child_secp_sig_shares.insert(id, share);
     }
 
     let child_secp_pub = &child_secp_keys[0].public_key_package;
-    let child_secp_sig = frost_secp256k1::aggregate(
+    let child_secp_sig = frost_secp256k1_tr::aggregate(
         &child_secp_signing_pkg,
         &child_secp_sig_shares,
         child_secp_pub,

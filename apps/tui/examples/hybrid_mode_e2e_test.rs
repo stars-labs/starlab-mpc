@@ -1,7 +1,7 @@
 //! Comprehensive E2E test for hybrid mode (2 online + 1 offline) with Solana support
 //! Tests mixed online/offline DKG and signing for both Ethereum and Solana
 
-use frost_secp256k1::{
+use frost_secp256k1_tr::{
     Identifier as Secp256k1Identifier,
     keys::dkg as secp256k1_dkg,
     keys::{KeyPackage as Secp256k1KeyPackage, PublicKeyPackage as Secp256k1PublicKeyPackage},

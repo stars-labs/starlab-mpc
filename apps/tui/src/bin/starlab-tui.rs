@@ -4,7 +4,7 @@
 //! It uses the Elm Architecture pattern for clean, predictable state management.
 
 use clap::Parser;
-use frost_secp256k1::Secp256K1Sha256;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
 use starlab_client::elm::ElmApp;
 use std::io::IsTerminal;
 use std::sync::Arc;
@@ -183,7 +183,7 @@ async fn run_elm_tui(
     // Create app state with device ID and signal server URL
     let app_state = Arc::new(
         tokio::sync::Mutex::new(starlab_client::utils::appstate_compat::AppState::<
-            Secp256K1Sha256,
+            Secp256K1Sha256TR,
         >::with_device_id_and_server(
             device_id.clone(), signal_server.clone()
         )),

@@ -355,7 +355,58 @@ pub fn derive_child_key<C: Ciphersuite>(
 /// Derive a child key by following an entire derivation path.
 ///
 /// Chains multiple single-index derivations to follow a BIP-44 style path.
-pub fn derive_child_key_path<C: Ciphersuite>(
+/// Turns a derived account child into the key the account actually signs
+/// with. Identity for ed25519. For secp256k1 (the BIP-340 / Taproot suite) the
+/// child becomes its BIP-86 output key `Q = P + H_TapTweak(P)·G` (key path
+/// only, no script tree), so plain FROST signing with the stored child yields
+/// BIP-340 signatures valid for the child's P2TR address. Applied once, at the
+/// end of a path, by both the share path and the public-only path.
+pub trait AccountKeyFinalize: Ciphersuite {
+    fn finalize_packages(
+        key_package: frost_core::keys::KeyPackage<Self>,
+        public_key_package: frost_core::keys::PublicKeyPackage<Self>,
+    ) -> (
+        frost_core::keys::KeyPackage<Self>,
+        frost_core::keys::PublicKeyPackage<Self>,
+    ) {
+        (key_package, public_key_package)
+    }
+
+    fn finalize_verifying_key(verifying_key_bytes: Vec<u8>) -> Result<Vec<u8>> {
+        Ok(verifying_key_bytes)
+    }
+}
+
+impl AccountKeyFinalize for frost_ed25519::Ed25519Sha512 {}
+
+impl AccountKeyFinalize for frost_secp256k1_tr::Secp256K1Sha256TR {
+    fn finalize_packages(
+        key_package: frost_core::keys::KeyPackage<Self>,
+        public_key_package: frost_core::keys::PublicKeyPackage<Self>,
+    ) -> (
+        frost_core::keys::KeyPackage<Self>,
+        frost_core::keys::PublicKeyPackage<Self>,
+    ) {
+        use frost_secp256k1_tr::keys::Tweak;
+        (
+            key_package.tweak::<&[u8]>(None),
+            public_key_package.tweak::<&[u8]>(None),
+        )
+    }
+
+    fn finalize_verifying_key(verifying_key_bytes: Vec<u8>) -> Result<Vec<u8>> {
+        use frost_secp256k1_tr::keys::Tweak;
+        let verifying_key = frost_secp256k1_tr::VerifyingKey::deserialize(&verifying_key_bytes)
+            .map_err(|e| FrostError::DerivationError(format!("bad verifying key: {e}")))?;
+        frost_secp256k1_tr::keys::PublicKeyPackage::new(BTreeMap::new(), verifying_key, None)
+            .tweak::<&[u8]>(None)
+            .verifying_key()
+            .serialize()
+            .map_err(|e| FrostError::DerivationError(format!("serialize output key: {e}")))
+    }
+}
+
+pub fn derive_child_key_path<C: AccountKeyFinalize>(
     key_package: &frost_core::keys::KeyPackage<C>,
     public_key_package: &frost_core::keys::PublicKeyPackage<C>,
     chain_code: &ChainCode,
@@ -372,9 +423,10 @@ pub fn derive_child_key_path<C: Ciphersuite>(
         current_cc = derived.chain_code;
     }
 
+    let (key_package, public_key_package) = C::finalize_packages(current_kp, current_pub);
     Ok(DerivedKeys {
-        key_package: current_kp,
-        public_key_package: current_pub,
+        key_package,
+        public_key_package,
         chain_code: current_cc,
     })
 }
@@ -389,7 +441,7 @@ pub fn derive_child_key_path<C: Ciphersuite>(
 /// anything; signing for those accounts still requires the (private) share
 /// derivation via [`derive_child_key_path`]. The two are consistent by
 /// construction — pinned by `public_derivation_matches_full_derivation`.
-pub fn derive_child_verifying_key_path<C: Ciphersuite>(
+pub fn derive_child_verifying_key_path<C: AccountKeyFinalize>(
     group_verifying_key_bytes: &[u8],
     path: &DerivationPath,
 ) -> Result<Vec<u8>> {
@@ -418,7 +470,7 @@ pub fn derive_child_verifying_key_path<C: Ciphersuite>(
         current = current + generator * offset;
         chain_code = ChainCode(child_cc);
     }
-    serialize(&current)
+    C::finalize_verifying_key(serialize(&current)?)
 }
 
 #[cfg(test)]
@@ -545,12 +597,14 @@ mod tests {
         let secp_vk_bytes = secp_pub.verifying_key().serialize().unwrap();
         let secp_cc = ChainCode::from_group_key(secp_vk_bytes.as_ref());
 
-        let secp_d0 =
-            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 0)
-                .unwrap();
-        let secp_d1 =
-            derive_child_key::<frost_secp256k1::Secp256K1Sha256>(secp_kp, secp_pub, &secp_cc, 1)
-                .unwrap();
+        let secp_d0 = derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
+            secp_kp, secp_pub, &secp_cc, 0,
+        )
+        .unwrap();
+        let secp_d1 = derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
+            secp_kp, secp_pub, &secp_cc, 1,
+        )
+        .unwrap();
 
         let svk0 = secp_d0
             .public_key_package
@@ -673,7 +727,7 @@ mod tests {
         let child_keys: Vec<_> = participants
             .iter()
             .map(|p| {
-                derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
+                derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
                     p.secp256k1_key_package().unwrap(),
                     p.secp256k1_public_key_package().unwrap(),
                     &cc,
@@ -692,24 +746,25 @@ mod tests {
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
             let (n, c) =
-                frost_secp256k1::round1::commit(kp.signing_share(), &mut crate::rng::os_rng());
+                frost_secp256k1_tr::round1::commit(kp.signing_share(), &mut crate::rng::os_rng());
             let id = *kp.identifier();
             nonces.insert(id, n);
             commitments.insert(id, c);
         }
 
-        let signing_pkg = frost_secp256k1::SigningPackage::new(commitments, message);
+        let signing_pkg = frost_secp256k1_tr::SigningPackage::new(commitments, message);
         let mut sig_shares = BTreeMap::new();
 
         for &idx in &signer_indices {
             let kp = &child_keys[idx].key_package;
             let id = *kp.identifier();
-            let share = frost_secp256k1::round2::sign(&signing_pkg, &nonces[&id], kp).unwrap();
+            let share = frost_secp256k1_tr::round2::sign(&signing_pkg, &nonces[&id], kp).unwrap();
             sig_shares.insert(id, share);
         }
 
         let child_pub = &child_keys[0].public_key_package;
-        let signature = frost_secp256k1::aggregate(&signing_pkg, &sig_shares, child_pub).unwrap();
+        let signature =
+            frost_secp256k1_tr::aggregate(&signing_pkg, &sig_shares, child_pub).unwrap();
 
         child_pub
             .verifying_key()
@@ -758,7 +813,7 @@ mod tests {
     #[test]
     fn public_derivation_matches_full_derivation() {
         use crate::resharing::dkg_keypackages;
-        use frost_secp256k1::Secp256K1Sha256 as Secp;
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
         let (kps, pp) = dkg_keypackages::<Secp>(2, 2, 51).unwrap();
         let group = pp.verifying_key().serialize().unwrap();
         let path = DerivationPath::parse("m/44'/60'/0'/0/7").unwrap();

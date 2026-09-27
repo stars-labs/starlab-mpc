@@ -30,11 +30,10 @@ Rust monorepo (edition 2024) with Bun-managed WASM/TypeScript packages. Seven Ca
 ### Core Library: `packages/@starlab/core/`
 Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 - `unified_dkg.rs` — Runs FROST DKG for ed25519 + secp256k1 simultaneously from a single root secret
-- `hd_derivation.rs` — BIP-44 style HD key derivation using additive scalar offsets (no extra DKG rounds)
+- `hd_derivation.rs` — BIP-44 style HD key derivation using additive scalar offsets (no extra DKG rounds); `AccountKeyFinalize` turns a secp256k1 account child into its BIP-86 output key (share path and public-only path alike)
 - `traits.rs` — `FrostCurve` trait abstracting over curve operations
-- `ed25519.rs` / `secp256k1.rs` — Curve implementations (Solana addresses, Ethereum addresses)
-- `secp256k1_tr.rs` — BIP-340/Taproot ciphersuite (`frost-secp256k1-tr`) for Bitcoin P2TR; an ADDITIONAL curve, vanilla `secp256k1.rs` stays for EVM
-- `accounts.rs` — BIP-44 account model, the single source of truth for ALL clients: `Wallet → Account(index) → per-chain address`, derivation paths pinned here; address derivation is public-only (no key share / password needed)
+- `ed25519.rs` / `secp256k1.rs` — Curve implementations. secp256k1 FROST is the BIP-340 / Taproot suite (`frost-secp256k1-tr`): signatures spend Bitcoin P2TR; EVM needs ECDSA (threshold ECDSA via cggmp24 is the planned EVM path)
+- `accounts.rs` — BIP-44/86 account model (Bitcoin = P2TR `bc1p…` on `m/86'/0'/0'/0/n`; `verify_taproot_signature` checks a BIP-340 sig against an address), the single source of truth for ALL clients: `Wallet → Account(index) → per-chain address`, derivation paths pinned here; address derivation is public-only (no key share / password needed)
 - `curve_registry.rs` — Tag → ciphersuite table; object-safe `CurveDkg` so multi-curve DKG loops over registered curves instead of hard-coded arms
 - `resharing.rs` — Share refresh via `frost_core::keys::refresh`: rotate shares / drop a device WITHOUT changing the group public key (see `docs/RECOVERY_AND_RESHARING.md`)
 - `keystore.rs` — Encrypted key share storage (PBKDF2 + AES-256-GCM); legacy-ciphertext fixtures in its tests pin the on-disk format
@@ -51,7 +50,7 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 
 ## Key Patterns
 
-**FROST ciphersuite type names**: `frost_ed25519::Ed25519Sha512` and `frost_secp256k1::Secp256K1Sha256` (note capital K in Secp256K1).
+**FROST ciphersuite type names**: `frost_ed25519::Ed25519Sha512` and `frost_secp256k1_tr::Secp256K1Sha256TR` (note capital K in Secp256K1).
 
 **frost-core internal types**: `SigningShare::new()`, `VerifyingShare::new()`, `VerifyingKey::new()` are `pub(crate)`. To construct these from outside frost-core, use `serialize()` / `deserialize()` round-trips through `Field::serialize`/`Group::serialize`.
 
@@ -100,7 +99,7 @@ When changing `starlab-client::core` (`WalletManager`, `SessionManager`, `DkgMan
 
 ## Dependencies
 
-FROST: `frost-core` 3.0, `frost-ed25519` 3.0, `frost-secp256k1` 3.0, `frost-secp256k1-tr` 3.0 (ZCash implementations). frost 3.0 still bounds its APIs on `rand_core 0.6`, while our own RNG stack is `rand_core`/`rand_chacha` 0.10 + `getrandom` 0.4 — always pass RNGs via `starlab_core::rng` (`os_rng()`, `ChaCha20Rng`, `FrostRng<R>` bridge), never a direct old `rand_core`.
+FROST: `frost-core` 3.0, `frost-ed25519` 3.0, `frost-secp256k1-tr` 3.0 (ZCash implementations; secp256k1 is BIP-340 only — the vanilla suite is gone). frost 3.0 still bounds its APIs on `rand_core 0.6`, while our own RNG stack is `rand_core`/`rand_chacha` 0.10 + `getrandom` 0.4 — always pass RNGs via `starlab_core::rng` (`os_rng()`, `ChaCha20Rng`, `FrostRng<R>` bridge), never a direct old `rand_core`.
 Crypto: `sha2`, `sha3`, `k256`, `aes-gcm`, `argon2`, `pbkdf2` (keystore KDF — used in both `starlab-client::keystore::encryption` and `starlab-core::keystore`), `hkdf` (root-secret expansion in `starlab-core`), `hmac` (both HKDF and BIP-32-style HD derivation in `starlab-core`'s `hd_derivation.rs`). No direct `ed25519-dalek` — ed25519 curve ops go through `frost-ed25519` which pulls `curve25519-dalek` transitively.
 Dev environment: Nix flake (`nix develop`) provides all system deps including graphics libs.
 

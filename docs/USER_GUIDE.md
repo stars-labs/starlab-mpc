@@ -62,7 +62,7 @@ A wallet is created on one curve. That curve fixes the set of chains it can use:
 
 | Curve | Chains | Address style |
 |---|---|---|
-| **secp256k1** | Ethereum, BSC, Polygon, Avalanche (+ EVM), **Bitcoin** | `0x…` (EVM) / `bc1…` (BTC P2WPKH) |
+| **secp256k1** | Ethereum, BSC, Polygon, Avalanche (+ EVM), **Bitcoin** | `0x…` (EVM) / `bc1p…` (BTC Taproot, P2TR) |
 | **ed25519** | Solana, Sui, Aptos, NEAR | base58 (Solana) / chain-specific |
 
 One secp256k1 wallet gives you the **same** signing key across all EVM chains
@@ -233,7 +233,7 @@ Open the wallet → **Sign** a message/tx → a co-signer gets a signing request
 After DKG, one wallet exposes addresses for **every chain of its curve**:
 
 - **secp256k1 wallet:** the same `0x…` address on Ethereum/BSC/Polygon/Avalanche,
-  plus a Bitcoin `bc1…` (P2WPKH) address. View them in the TUI wallet detail, the
+  plus a Bitcoin `bc1p…` (Taproot / P2TR) address. View them in the TUI wallet detail, the
   extension account view, or via the CLI (`list_wallets` reports the primary
   address; multi-chain addresses derive from the one group key).
 - **ed25519 wallet:** Solana (base58) + Sui/Aptos/NEAR addresses.
@@ -286,7 +286,7 @@ extension↔CLI run) lives in **`docs/INTEROP_EXT_CLI.md`**. Summary:
 | Joiner sees no session | joined after the announce | run `list_sessions` (CLI) / reopen Join screen (TUI); or recreate with everyone connected first |
 | Extension keeps asking to unlock | (fixed) it no longer auto-prompts | unlock on demand via the header 🔓 button |
 | Stale session/keys in the extension | leftover dev state | Service Worker console → `chrome.storage.local.clear()` → reload |
-| Wrong/odd address | stale build | rebuild (addresses are pinned by tests: ETH=G→`0x7e5f4552…`, BTC=G→`bc1qw508d6…`) |
+| Wrong/odd address | stale build | rebuild (addresses are pinned by tests: ETH=G→`0x7e5f4552…`, BTC=BIP-86 vector→`bc1p5cyx…`) |
 | Want both EVM and Solana | one wallet = one curve | create two wallets (secp256k1 + ed25519) |
 
 ---

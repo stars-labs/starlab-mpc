@@ -45,14 +45,14 @@ pub struct UnifiedDkg {
         BTreeMap<frost_ed25519::Identifier, frost_ed25519::keys::dkg::round2::Package>,
 
     // Secp256k1 DKG state
-    secp256k1_round1_secret: Option<frost_secp256k1::keys::dkg::round1::SecretPackage>,
-    secp256k1_round2_secret: Option<frost_secp256k1::keys::dkg::round2::SecretPackage>,
-    secp256k1_key_package: Option<frost_secp256k1::keys::KeyPackage>,
-    secp256k1_public_key_package: Option<frost_secp256k1::keys::PublicKeyPackage>,
+    secp256k1_round1_secret: Option<frost_secp256k1_tr::keys::dkg::round1::SecretPackage>,
+    secp256k1_round2_secret: Option<frost_secp256k1_tr::keys::dkg::round2::SecretPackage>,
+    secp256k1_key_package: Option<frost_secp256k1_tr::keys::KeyPackage>,
+    secp256k1_public_key_package: Option<frost_secp256k1_tr::keys::PublicKeyPackage>,
     secp256k1_round1_packages:
-        BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round1::Package>,
+        BTreeMap<frost_secp256k1_tr::Identifier, frost_secp256k1_tr::keys::dkg::round1::Package>,
     secp256k1_round2_packages:
-        BTreeMap<frost_secp256k1::Identifier, frost_secp256k1::keys::dkg::round2::Package>,
+        BTreeMap<frost_secp256k1_tr::Identifier, frost_secp256k1_tr::keys::dkg::round2::Package>,
 
     // HD derivation chain codes (set after finalization)
     ed25519_chain_code: Option<ChainCode>,
@@ -161,7 +161,7 @@ impl UnifiedDkg {
 
         // Secp256k1 round 1
         let secp_identifier = Secp256k1Curve::identifier_from_u16(self.participant_index)?;
-        let (secp_r1_secret, secp_r1_package) = frost_secp256k1::keys::dkg::part1(
+        let (secp_r1_secret, secp_r1_package) = frost_secp256k1_tr::keys::dkg::part1(
             secp_identifier,
             self.total,
             self.threshold,
@@ -199,7 +199,7 @@ impl UnifiedDkg {
         // Secp256k1
         let secp_json = hex::decode(&package.secp256k1)
             .map_err(|e| FrostError::SerializationError(e.to_string()))?;
-        let secp_pkg: frost_secp256k1::keys::dkg::round1::Package =
+        let secp_pkg: frost_secp256k1_tr::keys::dkg::round1::Package =
             serde_json::from_slice(&secp_json)
                 .map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let secp_id = Secp256k1Curve::identifier_from_u16(participant_index)?;
@@ -250,7 +250,7 @@ impl UnifiedDkg {
             FrostError::InvalidState("Secp256k1 round 1 secret not available".into())
         })?;
         let (secp_r2_secret, secp_r2_packages) =
-            frost_secp256k1::keys::dkg::part2(secp_r1_secret, &secp_r1_others)
+            frost_secp256k1_tr::keys::dkg::part2(secp_r1_secret, &secp_r1_others)
                 .map_err(|e| FrostError::DkgError(e.to_string()))?;
         self.secp256k1_round2_secret = Some(secp_r2_secret);
 
@@ -302,7 +302,7 @@ impl UnifiedDkg {
         // Secp256k1
         let secp_json =
             hex::decode(secp_hex).map_err(|e| FrostError::SerializationError(e.to_string()))?;
-        let secp_pkg: frost_secp256k1::keys::dkg::round2::Package =
+        let secp_pkg: frost_secp256k1_tr::keys::dkg::round2::Package =
             serde_json::from_slice(&secp_json)
                 .map_err(|e| FrostError::SerializationError(e.to_string()))?;
         let secp_id = Secp256k1Curve::identifier_from_u16(sender_index)?;
@@ -359,7 +359,7 @@ impl UnifiedDkg {
         let secp_r2_secret = self.secp256k1_round2_secret.as_ref().ok_or_else(|| {
             FrostError::InvalidState("Secp256k1 round 2 secret not available".into())
         })?;
-        let (secp_key_pkg, secp_pub_pkg) = frost_secp256k1::keys::dkg::part3(
+        let (secp_key_pkg, secp_pub_pkg) = frost_secp256k1_tr::keys::dkg::part3(
             secp_r2_secret,
             &secp_r1_others,
             &self.secp256k1_round2_packages,
@@ -460,12 +460,14 @@ impl UnifiedDkg {
     }
 
     /// Get the secp256k1 key package (for signing).
-    pub fn secp256k1_key_package(&self) -> Option<&frost_secp256k1::keys::KeyPackage> {
+    pub fn secp256k1_key_package(&self) -> Option<&frost_secp256k1_tr::keys::KeyPackage> {
         self.secp256k1_key_package.as_ref()
     }
 
     /// Get the secp256k1 public key package (for verification).
-    pub fn secp256k1_public_key_package(&self) -> Option<&frost_secp256k1::keys::PublicKeyPackage> {
+    pub fn secp256k1_public_key_package(
+        &self,
+    ) -> Option<&frost_secp256k1_tr::keys::PublicKeyPackage> {
         self.secp256k1_public_key_package.as_ref()
     }
 
@@ -494,7 +496,7 @@ impl UnifiedDkg {
         secp_index: u32,
     ) -> Result<(
         DerivedKeys<frost_ed25519::Ed25519Sha512>,
-        DerivedKeys<frost_secp256k1::Secp256K1Sha256>,
+        DerivedKeys<frost_secp256k1_tr::Secp256K1Sha256TR>,
     )> {
         let ed_kp = self
             .ed25519_key_package
@@ -524,7 +526,7 @@ impl UnifiedDkg {
 
         let ed_derived =
             derive_child_key::<frost_ed25519::Ed25519Sha512>(ed_kp, ed_pub, ed_cc, ed_index)?;
-        let secp_derived = derive_child_key::<frost_secp256k1::Secp256K1Sha256>(
+        let secp_derived = derive_child_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             secp_kp, secp_pub, secp_cc, secp_index,
         )?;
 

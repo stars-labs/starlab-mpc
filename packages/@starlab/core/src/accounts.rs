@@ -59,11 +59,11 @@ pub fn parse_child_wallet_id(id: &str) -> Option<(&str, &str, u32)> {
     Some((parent, chain, account))
 }
 
-/// The PINNED standard derivation path per chain (BIP-44/84 coin types).
+/// The PINNED standard derivation path per chain (BIP-44/86 coin types).
 pub fn standard_path(chain: &str, account: u32) -> Option<String> {
     match chain.to_ascii_lowercase().as_str() {
         "ethereum" | "eth" => Some(format!("m/44'/60'/0'/0/{account}")),
-        "bitcoin" | "btc" => Some(format!("m/84'/0'/0'/0/{account}")),
+        "bitcoin" | "btc" => Some(format!("m/86'/0'/0'/0/{account}")),
         "solana" | "sol" => Some(format!("m/44'/501'/{account}'/0'")),
         "sui" => Some(format!("m/44'/784'/{account}'/0'/0'")),
         _ => None,
@@ -87,18 +87,23 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
             Ok(format!("0x{}", hex::encode(&hash[12..32])))
         }
         ("bitcoin" | "btc", "secp256k1") => {
-            // P2WPKH (BIP-84): bech32 segwit-v0 of hash160(compressed pubkey).
-            use k256::elliptic_curve::sec1::ToSec1Point;
-            use ripemd::Ripemd160;
-            let pk = k256::PublicKey::from_sec1_bytes(pubkey_bytes)
-                .map_err(|e| FrostError::SerializationError(format!("secp pubkey: {e}")))?;
-            let compressed = pk.to_sec1_point(true);
-            // sha2 0.11 and ripemd 0.1 track different `digest` majors — feed
-            // bytes across, never trait objects.
-            let sha = <sha2::Sha256 as sha2::Digest>::digest(compressed.as_bytes());
-            let h160 = <Ripemd160 as ripemd::Digest>::digest(sha.as_slice());
-            bech32::segwit::encode_v0(bech32::hrp::BC, h160.as_slice())
-                .map_err(|e| FrostError::SerializationError(format!("bech32: {e}")))
+            // P2TR key-path (BIP-86): bech32m segwit-v1 of the x-only output
+            // key. The secp256k1 account child is already the BIP-86-tweaked
+            // output key (see `hd_derivation::AccountKeyFinalize`), so its
+            // BIP-340 signatures spend this address directly.
+            let x_only = match pubkey_bytes.len() {
+                33 => &pubkey_bytes[1..],
+                32 => pubkey_bytes,
+                n => {
+                    return Err(FrostError::SerializationError(format!(
+                        "taproot output key must be 32 or 33 bytes, got {n}"
+                    )));
+                }
+            };
+            k256::schnorr::VerifyingKey::from_slice(x_only)
+                .map_err(|e| FrostError::SerializationError(format!("taproot output key: {e}")))?;
+            bech32::segwit::encode_v1(bech32::hrp::BC, x_only)
+                .map_err(|e| FrostError::SerializationError(format!("bech32m: {e}")))
         }
         ("solana" | "sol", "ed25519") => Ok(bs58::encode(pubkey_bytes).into_string()),
         ("sui", "ed25519") => {
@@ -113,6 +118,25 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
             "no address encoding for chain {chain:?} on curve {curve:?}"
         ))),
     }
+}
+
+/// Verify a BIP-340 signature against the output key a P2TR (`bc1p…`)
+/// address commits to — exactly what a Bitcoin node checks for a key-path
+/// spend of that address. `message` is the 32-byte BIP-341 sighash.
+pub fn verify_taproot_signature(address: &str, message: &[u8], signature: &[u8]) -> Result<bool> {
+    let (_, version, program) = bech32::segwit::decode(address)
+        .map_err(|e| FrostError::SerializationError(format!("bech32m: {e}")))?;
+    if version != bech32::segwit::VERSION_1 || program.len() != 32 {
+        return Err(FrostError::SerializationError(format!(
+            "{address} is not a P2TR address"
+        )));
+    }
+    let key = k256::schnorr::VerifyingKey::from_slice(&program)
+        .map_err(|e| FrostError::SerializationError(format!("taproot output key: {e}")))?;
+    let Ok(signature) = k256::schnorr::Signature::try_from(signature) else {
+        return Ok(false);
+    };
+    Ok(key.verify_raw(message, &signature).is_ok())
 }
 
 /// Account `account`'s public key on `chain` (standard BIP-44 path), derived
@@ -131,7 +155,7 @@ pub fn account_verifying_key(
         "ed25519" => {
             derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(group_key_bytes, &path)
         }
-        "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1::Secp256K1Sha256>(
+        "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             group_key_bytes,
             &path,
         ),
@@ -179,11 +203,98 @@ mod tests {
         );
     }
 
+    /// BIP-86 test vector m/86'/0'/0'/0/0 (cross-checked against the
+    /// `bitcoin` crate's `Address::p2tr`).
+    const BIP86_INTERNAL: &str = "cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115";
+    const BIP86_OUTPUT: &str = "a60869f0dbcf1dc659c9cecbaf8050135ea9e8cdc487053f1dc6880949dc684c";
+    const BIP86_ADDRESS: &str = "bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr";
+
     #[test]
-    fn bitcoin_address_is_segwit_v0() {
-        let g = hex::decode(G_HEX).unwrap();
-        let a = address_for_chain("bitcoin", "secp256k1", &g).unwrap();
-        assert!(a.starts_with("bc1q"), "{a}");
+    fn bitcoin_address_is_p2tr_of_the_output_key() {
+        let out = hex::decode(BIP86_OUTPUT).unwrap();
+        assert_eq!(
+            address_for_chain("bitcoin", "secp256k1", &out).unwrap(),
+            BIP86_ADDRESS
+        );
+        let mut sec1 = vec![0x02];
+        sec1.extend_from_slice(&out);
+        assert_eq!(
+            address_for_chain("bitcoin", "secp256k1", &sec1).unwrap(),
+            BIP86_ADDRESS
+        );
+    }
+
+    #[test]
+    fn taproot_account_tweak_matches_bip86() {
+        use crate::hd_derivation::AccountKeyFinalize;
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Tr;
+        let mut internal = vec![0x02];
+        internal.extend_from_slice(&hex::decode(BIP86_INTERNAL).unwrap());
+        let output = Tr::finalize_verifying_key(internal).unwrap();
+        assert_eq!(hex::encode(&output[1..]), BIP86_OUTPUT);
+    }
+
+    #[test]
+    fn bitcoin_account_signature_verifies_as_bip340_for_its_address() {
+        // DKG → derive the Bitcoin account-0 child (full share derivation) →
+        // 2-of-3 FROST signature → an independent BIP-340 verifier accepts it
+        // under the x-only key encoded in the account's P2TR address.
+        use crate::hd_derivation::{ChainCode, DerivationPath, derive_child_key_path};
+        use crate::resharing::dkg_keypackages;
+        use frost_secp256k1_tr::{self as tr, Secp256K1Sha256TR as Tr};
+        use std::collections::BTreeMap;
+
+        let (kps, pp) = dkg_keypackages::<Tr>(3, 2, 71).unwrap();
+        let group = pp.verifying_key().serialize().unwrap();
+        let path = DerivationPath::parse(&standard_path("bitcoin", 0).unwrap()).unwrap();
+        let cc = ChainCode::from_group_key(&group);
+        let child: BTreeMap<u16, _> = kps
+            .iter()
+            .map(|(i, kp)| {
+                (
+                    *i,
+                    derive_child_key_path::<Tr>(kp, &pp, &cc, &path).unwrap(),
+                )
+            })
+            .collect();
+        let child_pp = child[&1].public_key_package.clone();
+
+        let msg = [0x5au8; 32]; // a BIP-341 sighash is 32 bytes
+        let mut nonces = BTreeMap::new();
+        let mut commitments = BTreeMap::new();
+        let mut rng = crate::rng::os_rng();
+        for i in [1u16, 3] {
+            let kp = &child[&i].key_package;
+            let (n, c) = tr::round1::commit(kp.signing_share(), &mut rng);
+            nonces.insert(*kp.identifier(), n);
+            commitments.insert(*kp.identifier(), c);
+        }
+        let signing_package = tr::SigningPackage::new(commitments, &msg);
+        let shares: BTreeMap<_, _> = [1u16, 3]
+            .iter()
+            .map(|i| {
+                let kp = &child[i].key_package;
+                let share =
+                    tr::round2::sign(&signing_package, &nonces[kp.identifier()], kp).unwrap();
+                (*kp.identifier(), share)
+            })
+            .collect();
+        let sig = tr::aggregate(&signing_package, &shares, &child_pp).unwrap();
+        let sig_bytes = sig.serialize().unwrap();
+        assert_eq!(sig_bytes.len(), 64, "BIP-340 signatures are 64 bytes");
+
+        // The address the account model shows (PUBLIC derivation) …
+        let addresses = account_addresses("secp256k1", &group, 0).unwrap();
+        let btc = &addresses.iter().find(|(c, _, _)| c == "Bitcoin").unwrap().2;
+        let (_, _, program) = bech32::segwit::decode(btc).unwrap();
+        // … commits to exactly the key the shares sign for,
+        let child_key = child_pp.verifying_key().serialize().unwrap();
+        assert_eq!(program, child_key[1..].to_vec());
+        // … and a stock BIP-340 verifier accepts the signature under it.
+        assert!(verify_taproot_signature(btc, &msg, &sig_bytes).unwrap());
+        let mut tampered = msg;
+        tampered[0] ^= 1;
+        assert!(!verify_taproot_signature(btc, &tampered, &sig_bytes).unwrap());
     }
 
     #[test]
@@ -204,7 +315,7 @@ mod tests {
     #[test]
     fn standard_paths_are_pinned() {
         assert_eq!(standard_path("ethereum", 1).unwrap(), "m/44'/60'/0'/0/1");
-        assert_eq!(standard_path("bitcoin", 0).unwrap(), "m/84'/0'/0'/0/0");
+        assert_eq!(standard_path("bitcoin", 0).unwrap(), "m/86'/0'/0'/0/0");
         assert_eq!(standard_path("solana", 2).unwrap(), "m/44'/501'/2'/0'");
         assert_eq!(standard_path("sui", 3).unwrap(), "m/44'/784'/3'/0'/0'");
         assert!(standard_path("dogecoin", 0).is_none());
@@ -247,7 +358,7 @@ mod tests {
     #[test]
     fn account_addresses_are_deterministic_and_distinct_per_index() {
         use crate::resharing::dkg_keypackages;
-        use frost_secp256k1::Secp256K1Sha256 as Secp;
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
         let (_, pp) = dkg_keypackages::<Secp>(2, 2, 61).unwrap();
         let group = pp.verifying_key().serialize().unwrap();
         let a0 = account_addresses("secp256k1", &group, 0).unwrap();
@@ -256,6 +367,6 @@ mod tests {
         assert_eq!(a0, a0b);
         assert_ne!(a0[0].2, a1[0].2);
         assert_eq!(a0.len(), 2); // Ethereum + Bitcoin
-        assert!(a0[0].2.starts_with("0x") && a0[1].2.starts_with("bc1q"));
+        assert!(a0[0].2.starts_with("0x") && a0[1].2.starts_with("bc1p"));
     }
 }

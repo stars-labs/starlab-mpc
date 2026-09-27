@@ -1,7 +1,7 @@
 // Real FROST DKG + Signing demonstration for offline mode
 // Uses actual FROST cryptographic protocol, not mock data
 
-use frost_secp256k1::{
+use frost_secp256k1_tr::{
     Identifier, Signature, SigningPackage,
     keys::dkg::{self, round1, round2},
     keys::{KeyPackage, PublicKeyPackage},
@@ -317,7 +317,7 @@ impl FrostParticipant {
         println!("\n[P{}] 🎲 Generating signing nonces", self.id);
 
         let mut rng = starlab_core::rng::os_rng();
-        let (nonces, commitments) = frost_secp256k1::round1::commit(
+        let (nonces, commitments) = frost_secp256k1_tr::round1::commit(
             self.key_package
                 .as_ref()
                 .expect("Missing key package")
@@ -380,7 +380,7 @@ impl FrostParticipant {
         let signing_package = SigningPackage::new(signing_commitments.clone(), message);
 
         // Generate signature share using real FROST
-        let signature_share = frost_secp256k1::round2::sign(
+        let signature_share = frost_secp256k1_tr::round2::sign(
             &signing_package,
             self.signing_nonces
                 .as_ref()
@@ -438,7 +438,7 @@ impl FrostParticipant {
         let signing_package = SigningPackage::new(signing_commitments, message);
 
         // Aggregate signature using real FROST
-        let group_signature = frost_secp256k1::aggregate(
+        let group_signature = frost_secp256k1_tr::aggregate(
             &signing_package,
             &signature_shares,
             self.pubkey_package
