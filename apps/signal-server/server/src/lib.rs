@@ -335,7 +335,11 @@ pub async fn run(listener: TcpListener) {
                                                 .and_then(|v| v.as_array())
                                                 .map(|arr| arr.len())
                                                 .unwrap_or(0);
-                                            drop(sessions_guard);
+                                            // Keep `sessions_guard` held until the broadcast is
+                                            // queued: concurrent joins must reach every device in
+                                            // the order they were applied. Releasing it first let
+                                            // a stale roster (4 of 5) land after the full one, and
+                                            // clients took it as the new participant set.
 
                                             let update_msg = serde_json::json!({
                                                 "type": "participant_update",
@@ -393,13 +397,15 @@ pub async fn run(listener: TcpListener) {
                                         }),
                                     }).unwrap()
                                 };
+                                // Queue the roster change while `sessions` is still held,
+                                // so it is ordered with concurrent joins' updates.
+                                for device_tx in devices.lock().unwrap().values() {
+                                    let _ = device_tx.send(Message::Text(broadcast.clone().into()));
+                                }
                                 drop(sessions_guard);
 
                                 if let Some(ids) = device_sessions.lock().unwrap().get_mut(&me) {
                                     ids.retain(|id| id != &session_id);
-                                }
-                                for device_tx in devices.lock().unwrap().values() {
-                                    let _ = device_tx.send(Message::Text(broadcast.clone().into()));
                                 }
                             }
                             Ok(ClientMsg::QueryMyActiveSessions) => {
