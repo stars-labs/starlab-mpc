@@ -284,6 +284,24 @@ impl SigningManager {
         tokio::spawn(async move { apply_incoming(&state, ui_callback.as_ref(), update).await });
     }
 
+    /// Close a request that is no longer actionable (e.g. its ceremony
+    /// failed) without declining anything. Refused while a ceremony runs.
+    pub async fn dismiss(&self) -> CoreResult<()> {
+        if matches!(
+            *self.state.signing_state.lock().await,
+            SigningState::Commitment | SigningState::Share | SigningState::Aggregating
+        ) {
+            return Err(CoreError::Dkg("a signing ceremony is still running".into()));
+        }
+        *self.state.active_signing_request.lock().await = None;
+        *self.state.signing_state.lock().await = SigningState::Idle;
+        self.ui_callback.update_signing_request(None).await;
+        self.ui_callback
+            .update_signing_state(SigningState::Idle)
+            .await;
+        Ok(())
+    }
+
     pub async fn current_state(&self) -> SigningState {
         self.state.signing_state.lock().await.clone()
     }
@@ -323,9 +341,12 @@ fn incoming_update(model: &Model, msg: &Message) -> Option<IncomingUpdate> {
                 return None;
             }
             let wallets = &model.wallet_state.wallets;
-            let root_id = parse_child_wallet_id(wallet_name)
-                .map(|(parent, _, _)| parent)
-                .unwrap_or(wallet_name);
+            // An account id (`{root}-{chain}-{n}`) names its chain itself;
+            // trust that over the announce's `blockchain` field.
+            let (root_id, chain) = match parse_child_wallet_id(wallet_name) {
+                Some((parent, chain, _)) => (parent, chain.to_string()),
+                None => (wallet_name.as_str(), blockchain.clone()),
+            };
             let wallet_index = wallets.iter().position(|w| w.session_id == root_id)?;
             let wallet_label = wallets[wallet_index].display_name();
             Some(IncomingUpdate::Offer(SigningRequest {
@@ -336,7 +357,7 @@ fn incoming_update(model: &Model, msg: &Message) -> Option<IncomingUpdate> {
                     "{} asks to sign with {} ({}-of-{})",
                     session.proposer_id, wallet_label, session.threshold, session.total
                 )),
-                chain: blockchain.clone(),
+                chain,
                 created_at: chrono::Utc::now().to_rfc3339(),
                 session_id: Some(session.session_id.clone()),
             }))
@@ -352,11 +373,19 @@ async fn apply_incoming(state: &CoreState, ui_callback: &dyn UICallback, update:
     match update {
         IncomingUpdate::Offer(request) => {
             {
-                // Never clobber a request the user is already looking at or
-                // a ceremony in flight (re-announces / replays of the same
-                // session land here too).
+                // Never clobber a ceremony in flight, and ignore re-announces
+                // / replays of the request already showing. Anything else — a
+                // new session, or a new message on a reused session id —
+                // replaces the card, including a failed or finished one.
                 let mut active = state.active_signing_request.lock().await;
-                if active.is_some() {
+                let in_flight = matches!(
+                    *state.signing_state.lock().await,
+                    SigningState::Commitment | SigningState::Share | SigningState::Aggregating
+                );
+                let same = active.as_ref().is_some_and(|a| {
+                    a.session_id == request.session_id && a.message_hex == request.message_hex
+                });
+                if in_flight || same {
                     return;
                 }
                 *active = Some(request.clone());
@@ -734,7 +763,109 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repeat_announce_does_not_clobber_the_pending_request() {
+    async fn chain_comes_from_the_account_id() {
+        let model = model_holding_w1();
+        // Announce claims "ethereum" but the account is a Bitcoin one.
+        let Some(IncomingUpdate::Offer(req)) = incoming_update(
+            &model,
+            &signing_announce("peer", &["peer", "me"], "w1-bitcoin-0"),
+        ) else {
+            panic!("expected an offer")
+        };
+        assert_eq!(req.chain, "bitcoin");
+    }
+
+    fn announce_with(session_id: &str, message_hex: &str) -> Message {
+        let Message::SessionDiscovered { mut session } =
+            signing_announce("peer", &["peer", "me"], "w1")
+        else {
+            unreachable!()
+        };
+        session.session_id = session_id.into();
+        session.signing_message_hex = Some(message_hex.into());
+        Message::SessionDiscovered { session }
+    }
+
+    async fn offer(state: &CoreState, ui: &RecordingUi, msg: &Message) {
+        let Some(update) = incoming_update(&model_holding_w1(), msg) else {
+            panic!("expected an offer")
+        };
+        apply_incoming(state, ui, update).await;
+    }
+
+    #[tokio::test]
+    async fn re_announce_of_the_same_request_is_ignored() {
+        let ui = Arc::new(RecordingUi::default());
+        let (_mgr, state) = manager(ui.clone());
+        offer(&state, &ui, &announce_with("s1", "aa")).await;
+        offer(&state, &ui, &announce_with("s1", "aa")).await;
+        assert_eq!(ui.pushes().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn new_message_on_a_reused_session_id_replaces_a_failed_request() {
+        let ui = Arc::new(RecordingUi::default());
+        let (_mgr, state) = manager(ui.clone());
+        offer(&state, &ui, &announce_with("s1", "aa")).await;
+        *state.signing_state.lock().await = SigningState::Failed("timeout".into());
+
+        offer(&state, &ui, &announce_with("s1", "bb")).await;
+
+        let pushes = ui.pushes();
+        assert_eq!(pushes.len(), 2);
+        assert_eq!(pushes[1].as_ref().unwrap().message_hex, "bb");
+        assert_eq!(
+            *state.signing_state.lock().await,
+            SigningState::AwaitingApproval
+        );
+    }
+
+    #[tokio::test]
+    async fn new_session_does_not_interrupt_a_running_ceremony() {
+        let ui = Arc::new(RecordingUi::default());
+        let (_mgr, state) = manager(ui.clone());
+        offer(&state, &ui, &announce_with("s1", "aa")).await;
+        *state.signing_state.lock().await = SigningState::Share;
+
+        offer(&state, &ui, &announce_with("s2", "bb")).await;
+
+        assert_eq!(ui.pushes().len(), 1);
+        assert_eq!(
+            state
+                .active_signing_request
+                .lock()
+                .await
+                .as_ref()
+                .unwrap()
+                .message_hex,
+            "aa"
+        );
+    }
+
+    #[tokio::test]
+    async fn dismiss_clears_a_failed_request() {
+        let ui = Arc::new(RecordingUi::default());
+        let (mgr, state) = manager(ui.clone());
+        offer(&state, &ui, &announce_with("s1", "aa")).await;
+        *state.signing_state.lock().await = SigningState::Failed("timeout".into());
+
+        mgr.dismiss().await.unwrap();
+
+        assert!(ui.pushes().last().unwrap().is_none());
+        assert!(state.active_signing_request.lock().await.is_none());
+        assert_eq!(mgr.current_state().await, SigningState::Idle);
+    }
+
+    #[tokio::test]
+    async fn dismiss_is_refused_mid_ceremony() {
+        let ui = Arc::new(RecordingUi::default());
+        let (mgr, state) = manager(ui.clone());
+        *state.signing_state.lock().await = SigningState::Aggregating;
+        assert!(mgr.dismiss().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn peer_request_replaces_an_unanswered_local_one() {
         let ui = Arc::new(RecordingUi::default());
         let (mgr, state) = manager(ui.clone());
         let id = mgr
@@ -750,8 +881,8 @@ mod tests {
         };
         apply_incoming(&state, ui.as_ref(), update).await;
 
-        assert_eq!(ui.pushes().len(), 1, "only the local request was pushed");
-        assert_eq!(
+        assert_eq!(ui.pushes().len(), 2);
+        assert_ne!(
             state
                 .active_signing_request
                 .lock()
