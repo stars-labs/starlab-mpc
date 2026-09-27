@@ -207,6 +207,13 @@ pub struct WalletState {
     pub pending_sign_wallet_id: Option<String>,
     /// Which signing session we're about to join. Same lifecycle.
     pub pending_sign_session_id: Option<String>,
+    /// The announced session's `proposer_id` (the device that announced
+    /// THIS signing ceremony — not necessarily the wallet's original DKG
+    /// creator). Threaded through to `Command::JoinSigning` so the joiner
+    /// knows whose `SIGN_SET` to trust. Same lifecycle as
+    /// `pending_sign_session_id`; `None` on the creator path (a creator
+    /// never needs to be told who the proposer is — it's always itself).
+    pub pending_sign_proposer_id: Option<String>,
     /// Snapshot of the most recently produced signature. Populated by
     /// `Message::SigningComplete`; rendered by the `SignatureComplete`
     /// screen. Cleared on `NavigateHome` so a second signing attempt

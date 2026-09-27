@@ -330,6 +330,15 @@ pub enum Message {
         from_device: String,
         share_bytes: Vec<u8>,
     },
+    /// Received the proposer's fixed signer set (`SIGN_SET:<b64>`) over the
+    /// WebRTC mesh — base64 of a UTF-8 JSON array of device-id strings.
+    /// Dispatched by the primary data-channel reader; forwarded to
+    /// `Command::ProcessSigningSet` which validates and stashes it in
+    /// `protocal::signing`.
+    ProcessSigningSet {
+        from_device: String,
+        signer_set_bytes: Vec<u8>,
+    },
     // ----- SignTransaction screen input (Phase C.3) -----
     // Same routing pattern as the PasswordPrompt screen: keystrokes
     // don't reach the component's `on()` — they go through the app-level

@@ -51,6 +51,7 @@ pub const CEREMONY_FRAME_PREFIXES: &[&str] = &[
     "DKG_ROUND2:",
     crate::protocal::signing::SIGN_COMMIT_PREFIX,
     crate::protocal::signing::SIGN_SHARE_PREFIX,
+    crate::protocal::signing::SIGN_SET_PREFIX,
     "RESHARE_ROUND1:",
     "RESHARE_ROUND2:",
     crate::elm::command::UNIFIED_DKG_ROUND1_PREFIX,
@@ -680,6 +681,7 @@ mod tests {
     fn ceremony_frames_are_recognised_by_prefix() {
         assert!(is_ceremony_frame("DKG_ROUND1:abc"));
         assert!(is_ceremony_frame("SIGN_SHARE:abc"));
+        assert!(is_ceremony_frame("SIGN_SET:abc"));
         assert!(is_ceremony_frame("RESHARE_ROUND2:abc"));
         assert!(!is_ceremony_frame("hello"));
     }

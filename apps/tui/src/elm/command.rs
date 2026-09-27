@@ -217,14 +217,26 @@ pub enum Command {
         from_device: String,
         share_bytes: Vec<u8>,
     },
+    /// Forward the proposer's fixed signer set to the protocol layer.
+    /// Dispatched by the `Message::ProcessSigningSet` handler after the
+    /// primary WebRTC reader decoded the `SIGN_SET:<b64>` frame.
+    ProcessSigningSet {
+        from_device: String,
+        signer_set_bytes: Vec<u8>,
+    },
     /// Joiner-side counterpart of `StartSigning`: record the
     /// just-accepted signing session on AppState, then (after the wallet
     /// has been unlocked) kick off `handle_start_signing` on the joiner's
     /// node. Mesh setup is reused from the prior DKG when available;
     /// cold-start mesh establishment is deferred to a later phase.
+    ///
+    /// `proposer_id` is the announced session's proposer (the device that
+    /// announced THIS signing ceremony) — needed so `protocal::signing` can
+    /// tell a real `SIGN_SET` from the proposer apart from one to ignore.
     JoinSigning {
         session_id: String,
         message_bytes: Vec<u8>,
+        proposer_id: String,
     },
 
     // UI operations
@@ -2884,6 +2896,12 @@ impl Command {
                                 blockchain: request.chain.clone(),
                                 group_public_key: group_pubkey_hex.clone(),
                             };
+                            // StartSigning always means WE are proposing this
+                            // ceremony — refresh proposer_id even on a warm
+                            // session, whose stale value is whoever announced
+                            // the last one (the DKG creator, or an earlier
+                            // signing's proposer).
+                            session.proposer_id = self_device_id.clone();
                         }
                         sid
                     } else {
@@ -3079,6 +3097,7 @@ impl Command {
             Command::JoinSigning {
                 session_id,
                 message_bytes,
+                proposer_id,
             } => {
                 // Joiner-side counterpart of `StartSigning`. The session
                 // was already recorded on AppState by the accept-path
@@ -3104,11 +3123,20 @@ impl Command {
                 // participant list to enumerate.
                 //
                 // Warm joiner path: session carries over from the DKG
-                // that ran earlier in the same process; leave it alone
-                // (its session_type may already be Signing from an
-                // earlier ceremony; the protocol layer doesn't care).
+                // that ran earlier in the same process; leave everything
+                // alone EXCEPT proposer_id (its session_type may already be
+                // Signing from an earlier ceremony; the protocol layer
+                // doesn't care). proposer_id DOES need refreshing every
+                // time: a warm session's proposer_id is whatever announced
+                // it last (the DKG creator, or an earlier signing's
+                // proposer) — not necessarily whoever is proposing THIS
+                // ceremony, which is exactly what the just-accepted
+                // announce (`proposer_id` here) tells us.
                 {
                     let mut state = app_state.lock().await;
+                    if let Some(session) = state.session.as_mut() {
+                        session.proposer_id = proposer_id.clone();
+                    }
                     if state.session.is_none() {
                         // Find the wallet by its session_id-derived id.
                         // The current_wallet_id was set by UnlockWallet.
@@ -3134,7 +3162,7 @@ impl Command {
                                 );
                                 state.session = Some(crate::protocal::signal::SessionInfo {
                                     session_id: session_id.clone(),
-                                    proposer_id: String::new(),
+                                    proposer_id: proposer_id.clone(),
                                     total: m.total_participants,
                                     threshold: m.threshold,
                                     participants: m.participants.clone(),
@@ -3222,6 +3250,24 @@ impl Command {
                     app_state.clone(),
                     from_device,
                     share_bytes,
+                    tx.clone(),
+                )
+                .await;
+            }
+
+            Command::ProcessSigningSet {
+                from_device,
+                signer_set_bytes,
+            } => {
+                let self_device_id = {
+                    let state = app_state.lock().await;
+                    state.device_id.clone()
+                };
+                crate::protocal::signing::process_signing_set::<C>(
+                    app_state.clone(),
+                    self_device_id,
+                    from_device,
+                    signer_set_bytes,
                     tx.clone(),
                 )
                 .await;

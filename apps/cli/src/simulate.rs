@@ -311,18 +311,25 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
 }
 
 /// Drive a threshold signing once a cluster is connected and the wallet is
-/// available: node 0 initiates, co-signers 1..threshold join the signing
-/// session, then we await the aggregated signature on the initiator. Shared
-/// by the fresh-DKG and reload-from-disk signing paths.
+/// available: node 0 initiates, `join_count` co-signers (nodes 1..=join_count)
+/// join the signing session, then we await the aggregated signature on
+/// EVERY node that joined — every joiner is guaranteed a member of the
+/// proposer's fixed signer set (join_count is normally threshold-1, so the
+/// joined set IS the signer set), and every node that ran Round 2 must
+/// independently converge on the identical signature. Shared by the
+/// fresh-DKG and reload-from-disk signing paths.
+///
+/// Returns one `(signature, signed_message)` pair per joined node, in node
+/// order (index 0 first).
 async fn drive_signing(
     senders: &[UnboundedSender<Message>],
     receivers: &mut [UnboundedReceiver<Evt>],
     wallet_id: String,
     message: &str,
     encoding: &str,
-    threshold: u16,
+    join_count: usize,
     timeout_secs: u64,
-) -> anyhow::Result<(String, String)> {
+) -> anyhow::Result<Vec<(String, String)>> {
     // Initiator (node 0) announces the signing request.
     senders[0].send(Message::HeadlessSign {
         wallet_id,
@@ -331,8 +338,8 @@ async fn drive_signing(
         password: "sim-password-0".into(),
     })?;
 
-    // Co-signers 1..threshold approve by joining the signing session.
-    for i in 1..(threshold as usize) {
+    // Co-signers 1..=join_count approve by joining the signing session.
+    for i in 1..=join_count {
         let session_id = match wait_for(&mut receivers[i], 20, |e| {
             matches!(e, Evt::SessionDiscovered { signing: true, .. })
         })
@@ -348,15 +355,15 @@ async fn drive_signing(
         })?;
     }
 
-    // Wait for the aggregated signature on the initiator.
-    match wait_for(&mut receivers[0], timeout_secs, |e| {
-        matches!(e, Evt::SignDone { .. })
-    })
-    .await?
-    {
-        Evt::SignDone { signature, message } => Ok((signature, message)),
-        _ => unreachable!(),
+    // Wait for the aggregated signature on every node that joined.
+    let mut results = Vec::with_capacity(join_count + 1);
+    for rx in receivers.iter_mut().take(join_count + 1) {
+        match wait_for(rx, timeout_secs, |e| matches!(e, Evt::SignDone { .. })).await? {
+            Evt::SignDone { signature, message } => results.push((signature, message)),
+            _ => unreachable!(),
+        }
     }
+    Ok(results)
 }
 
 /// Run DKG only and return a summary.
@@ -405,10 +412,11 @@ pub async fn run_signing_simulation_enc(
         wallet_id,
         message,
         encoding,
-        threshold,
+        (threshold as usize).saturating_sub(1),
         opts.timeout_secs,
     )
-    .await?;
+    .await?
+    .remove(0);
     shut_down(c.senders, c.receivers).await;
 
     let verified =
@@ -420,6 +428,82 @@ pub async fn run_signing_simulation_enc(
         group_public_key: c.group_key,
         signature,
         signed_message,
+        verified,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
+/// Result of a signing run where EVERY node joined the ceremony — not just
+/// `threshold`-many. Regression coverage for the bug where every node ran
+/// Round 2 the moment it individually saw threshold-many commitments: with
+/// MORE than threshold signers online, different nodes picked different
+/// signer sets and `aggregate` failed with `UnknownIdentifier`. The fix has
+/// the proposer fix ONE signer set and broadcast it before anyone runs
+/// Round 2, so every joined node — set member or not — must converge on the
+/// identical aggregated signature.
+#[derive(Debug, Serialize)]
+pub struct AllSignersOnlineResult {
+    pub nodes: usize,
+    pub threshold: u16,
+    pub group_public_key: String,
+    /// One aggregated signature (hex) per joined node, in node order.
+    pub signatures: Vec<String>,
+    /// True iff every joined node reported the exact same signature bytes.
+    pub all_agreed: bool,
+    /// True iff `signatures[0]` verifies against `group_public_key`.
+    pub verified: bool,
+    pub elapsed_ms: u128,
+}
+
+impl AllSignersOnlineResult {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+/// DKG, then sign `message` with EVERY node online and joined (not just a
+/// threshold-many quorum) — see [`AllSignersOnlineResult`].
+pub async fn run_signing_simulation_all_signers_online(
+    opts: SimulateOpts,
+    message: &str,
+) -> anyhow::Result<AllSignersOnlineResult> {
+    let nodes = opts.nodes;
+    let threshold = opts.threshold;
+    let started = Instant::now();
+    let mut c = dkg_cluster(&opts).await?;
+    if !c.agreed {
+        anyhow::bail!("DKG did not agree; aborting signing");
+    }
+    let wallet_id = c.outcomes[0].wallet_id.clone();
+
+    // Every node besides the initiator joins — this is the "more than
+    // threshold signers online" scenario the old per-node first-come rule
+    // got wrong.
+    let results = drive_signing(
+        &c.senders,
+        &mut c.receivers,
+        wallet_id,
+        message,
+        "utf8",
+        nodes - 1,
+        opts.timeout_secs,
+    )
+    .await?;
+    shut_down(c.senders, c.receivers).await;
+
+    let signatures: Vec<String> = results.iter().map(|(sig, _)| sig.clone()).collect();
+    let all_agreed = signatures.len() == nodes && signatures.windows(2).all(|w| w[0] == w[1]);
+    let verified = match results.first() {
+        Some((sig, msg)) => verify_signature(&opts.curve, &c.group_key, msg, sig).unwrap_or(false),
+        None => false,
+    };
+
+    Ok(AllSignersOnlineResult {
+        nodes,
+        threshold,
+        group_public_key: c.group_key,
+        signatures,
+        all_agreed,
         verified,
         elapsed_ms: started.elapsed().as_millis(),
     })
@@ -455,10 +539,11 @@ pub async fn run_bitcoin_signing_simulation(
         wallet_id,
         sighash_hex,
         "hex",
-        threshold,
+        (threshold as usize).saturating_sub(1),
         opts.timeout_secs,
     )
-    .await?;
+    .await?
+    .remove(0);
     shut_down(c.senders, c.receivers).await;
 
     let group_key = hex::decode(&c.group_key)?;
@@ -641,10 +726,11 @@ pub async fn run_reshare_e2e(
         wallet_id,
         message,
         "utf8",
-        threshold,
+        (threshold as usize).saturating_sub(1),
         opts.timeout_secs,
     )
-    .await?;
+    .await?
+    .remove(0);
     shut_down(senders, receivers).await;
     let signed_after_reshare =
         verify_signature(&opts.curve, &dkg_group_key, &signed_message, &signature).unwrap_or(false);

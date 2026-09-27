@@ -318,6 +318,27 @@ pub async fn dispatch_data_channel_msg<C>(
             }
             return;
         }
+        // The proposer's fixed signer set. Same shape as SIGN_COMMIT/SIGN_SHARE
+        // (base64 payload after the prefix); the payload itself is a JSON
+        // array of device-id strings, decoded by the protocol layer.
+        if let Some(b64) = msg_text.strip_prefix(crate::protocal::signing::SIGN_SET_PREFIX) {
+            info!("🔏 Received SIGN_SET from {}", device_id_recv);
+            match BASE64.decode(b64) {
+                Ok(signer_set_bytes) => {
+                    if let Some(tx) = &ui_msg_tx {
+                        let _ = tx.send(crate::elm::message::Message::ProcessSigningSet {
+                            from_device: device_id_recv.clone(),
+                            signer_set_bytes,
+                        });
+                    }
+                }
+                Err(e) => error!(
+                    "Failed to base64-decode SIGN_SET from {}: {}",
+                    device_id_recv, e
+                ),
+            }
+            return;
+        }
         info!("📨 SimpleMessage from {}: {}", device_id_recv, msg_text);
         return;
     }
