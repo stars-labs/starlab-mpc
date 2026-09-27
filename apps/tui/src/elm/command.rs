@@ -51,12 +51,19 @@ pub enum Command {
     DeleteWallet {
         wallet_id: String,
     },
+    /// Write the wallet's encrypted share file(s) to `path`
+    /// (`Keystore::export_share`, which checks `password` unlocks them).
     ExportWallet {
         wallet_id: String,
         path: PathBuf,
+        password: String,
+        keystore_path: String,
     },
+    /// Validate + add an exported share file (`Keystore::import_share`).
     ImportWallet {
         path: PathBuf,
+        password: String,
+        keystore_path: String,
     },
 
     // DKG operations
@@ -672,6 +679,54 @@ async fn try_finalize_unified<C>(
     }
 }
 
+/// Export every key share `wallet_id` has (`Keystore::export_share`) to
+/// `path`. A single-curve wallet writes `path` itself; a unified wallet has
+/// one share per curve, written as `<stem>-<curve>.<ext>` next to `path`.
+/// Returns the files written.
+fn export_wallet_shares(
+    ks: &crate::keystore::Keystore,
+    wallet_id: &str,
+    path: &std::path::Path,
+    password: &str,
+) -> crate::keystore::Result<Vec<PathBuf>> {
+    let curves: Vec<String> = ks
+        .list_wallets()
+        .into_iter()
+        .filter(|w| w.session_id == wallet_id)
+        .map(|w| w.curve_type.clone())
+        .collect();
+    if curves.is_empty() {
+        return Err(crate::keystore::KeystoreError::WalletNotFound(
+            wallet_id.to_string(),
+        ));
+    }
+    // Validate + serialize every share before writing any file.
+    let exports = curves
+        .iter()
+        .map(|curve| Ok((curve, ks.export_share(wallet_id, curve, password)?)))
+        .collect::<crate::keystore::Result<Vec<_>>>()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut written = Vec::new();
+    for (curve, json) in exports {
+        let target = if curves.len() == 1 {
+            path.to_path_buf()
+        } else {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+            let name = match ext {
+                Some(ext) => format!("{stem}-{curve}.{ext}"),
+                None => format!("{stem}-{curve}"),
+            };
+            path.with_file_name(name)
+        };
+        std::fs::write(&target, json)?;
+        written.push(target);
+    }
+    Ok(written)
+}
+
 /// Reset `AppState` for a new DKG ceremony (creator or joiner). A node that
 /// already ran a DKG this process still holds that ceremony's session,
 /// `DkgState::Complete`, round packages and mesh-ready flags; left in place,
@@ -907,6 +962,62 @@ impl Command {
         C: crate::utils::curve_traits::CurveIdentifier,
     {
         match self {
+            Command::ExportWallet {
+                wallet_id,
+                path,
+                password,
+                keystore_path,
+            } => {
+                let device_id = app_state.lock().await.device_id.clone();
+                let result = crate::keystore::Keystore::new(&keystore_path, &device_id)
+                    .and_then(|ks| export_wallet_shares(&ks, &wallet_id, &path, &password));
+                drop(password);
+                let _ = tx.send(match result {
+                    Ok(written) => Message::WalletExported {
+                        wallet_id,
+                        path: written
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    },
+                    Err(e) => Message::WalletTransferFailed {
+                        error: format!("Export failed: {e}"),
+                    },
+                });
+            }
+
+            Command::ImportWallet {
+                path,
+                password,
+                keystore_path,
+            } => {
+                let device_id = app_state.lock().await.device_id.clone();
+                let result = crate::keystore::Keystore::new(&keystore_path, &device_id).and_then(
+                    |mut ks| {
+                        let file = std::fs::read(&path)?;
+                        let wallet = ks.import_share(&file, &password)?;
+                        Ok((ks, wallet))
+                    },
+                );
+                drop(password);
+                match result {
+                    Ok((ks, wallet)) => {
+                        // Publish the keystore that holds the import so the
+                        // next LoadWallets lists it.
+                        app_state.lock().await.keystore = Some(std::sync::Arc::new(ks));
+                        let _ = tx.send(Message::WalletImported {
+                            wallet_id: wallet.session_id,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Message::WalletTransferFailed {
+                            error: format!("Import failed: {e}"),
+                        });
+                    }
+                }
+            }
+
             Command::LoadWallets => {
                 info!("Loading wallets from keystore");
 
@@ -3682,5 +3793,125 @@ mod account_wallet_tests {
         .expect_err("must fail");
         assert!(err.contains(PARENT), "error must name the parent: {err}");
         assert!(ks.get_wallet(&format!("{PARENT}-ethereum-1")).is_none());
+    }
+
+    /// Run one command against a node whose device id is `device-1`.
+    async fn run(cmd: Command) -> Message {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp>::new();
+        state.device_id = "device-1".to_string();
+        let app_state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        cmd.execute::<Secp>(tx, &app_state).await.expect("execute");
+        rx.recv().await.expect("a result message")
+    }
+
+    /// The TUI's export → import commands move a wallet into a fresh
+    /// keystore with its group key intact; a wrong password is reported.
+    #[tokio::test]
+    async fn export_then_import_commands_move_a_wallet_between_keystores() {
+        let (src_dir, _ks, group_hex) = keystore_with_parent();
+        let out = tempfile::tempdir().expect("tempdir");
+        let file = out.path().join("w.json");
+        let src_path = src_dir.path().to_string_lossy().into_owned();
+        let refused = run(Command::ExportWallet {
+            wallet_id: PARENT.to_string(),
+            path: file.clone(),
+            password: "nope".to_string(),
+            keystore_path: src_path.clone(),
+        })
+        .await;
+        assert!(
+            matches!(refused, Message::WalletTransferFailed { .. }),
+            "{refused:?}"
+        );
+        assert!(!file.exists(), "no file for a password that doesn't unlock");
+
+        let exported = run(Command::ExportWallet {
+            wallet_id: PARENT.to_string(),
+            path: file.clone(),
+            password: PW.to_string(),
+            keystore_path: src_path,
+        })
+        .await;
+        assert!(
+            matches!(exported, Message::WalletExported { .. }),
+            "{exported:?}"
+        );
+
+        let dst_dir = tempfile::tempdir().expect("tempdir");
+        let dst_path = dst_dir.path().to_string_lossy().into_owned();
+        let wrong = run(Command::ImportWallet {
+            path: file.clone(),
+            password: "nope".to_string(),
+            keystore_path: dst_path.clone(),
+        })
+        .await;
+        assert!(
+            matches!(wrong, Message::WalletTransferFailed { .. }),
+            "{wrong:?}"
+        );
+
+        let imported = run(Command::ImportWallet {
+            path: file,
+            password: PW.to_string(),
+            keystore_path: dst_path.clone(),
+        })
+        .await;
+        assert_eq!(
+            imported,
+            Message::WalletImported {
+                wallet_id: PARENT.to_string()
+            }
+        );
+        let ks = crate::keystore::Keystore::new(&dst_path, "device-1").expect("reopen");
+        assert_eq!(
+            ks.get_wallet(PARENT).expect("listed").group_public_key,
+            group_hex
+        );
+    }
+
+    /// A unified wallet holds one share per curve under the same id; export
+    /// writes each to `<stem>-<curve>.json`, and both import back.
+    #[test]
+    fn unified_wallet_exports_one_file_per_curve() {
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut ks = crate::keystore::Keystore::new(dir.path(), "device-1").expect("keystore");
+        let (ed_kps, ed_pp) = dkg_keypackages::<Ed>(3, 2, 5).expect("dkg ed");
+        let (k_kps, k_pp) = dkg_keypackages::<Secp>(3, 2, 6).expect("dkg secp");
+        let hex_of = |b: Vec<u8>| hex::encode(b);
+        ks.create_wallet_unified(
+            "u1",
+            2,
+            3,
+            1,
+            vec!["alice".into(), "bob".into(), "carol".into()],
+            None,
+            PW,
+            &hex_of(ed_pp.verifying_key().serialize().unwrap()),
+            &encode_keystore_blob::<Ed>(&ed_kps[&1], &ed_pp).unwrap(),
+            &hex_of(k_pp.verifying_key().serialize().unwrap().to_vec()),
+            &encode_keystore_blob::<Secp>(&k_kps[&1], &k_pp).unwrap(),
+        )
+        .expect("unified wallet");
+
+        let out = tempfile::tempdir().expect("tempdir");
+        let written =
+            export_wallet_shares(&ks, "u1", &out.path().join("u1.json"), PW).expect("export");
+        let mut names: Vec<_> = written
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["u1-ed25519.json", "u1-secp256k1.json"]);
+
+        let dst = tempfile::tempdir().expect("tempdir");
+        let mut restored = crate::keystore::Keystore::new(dst.path(), "device-1").expect("fresh");
+        for file in &written {
+            restored
+                .import_share(&std::fs::read(file).unwrap(), PW)
+                .expect("import");
+        }
+        assert_eq!(restored.list_wallets().len(), 2);
     }
 }

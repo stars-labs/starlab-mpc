@@ -171,6 +171,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             if matches!(model.current_screen, Screen::SignTransaction { .. }) {
                 model.wallet_state.clear_sign_draft();
             }
+            if matches!(
+                model.current_screen,
+                Screen::ImportWallet | Screen::ExportWallet { .. }
+            ) {
+                model.wallet_state.reset_transfer_draft(String::new());
+            }
 
             // Check if we're at the root screen (main menu with empty stack)
             if model.navigation_stack.is_empty()
@@ -1481,6 +1487,103 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             info!("Deleting wallet: {}", wallet_id);
             model.ui_state.modal = None;
             Some(Command::DeleteWallet { wallet_id })
+        }
+
+        // ============= Wallet export / import =============
+        Message::ExportWallet { wallet_id } => {
+            model
+                .wallet_state
+                .reset_transfer_draft(format!("~/starlab-export/{wallet_id}.json"));
+            model.push_screen(Screen::ExportWallet { wallet_id });
+            None
+        }
+        Message::ImportWallet => {
+            model.wallet_state.reset_transfer_draft(String::new());
+            model.push_screen(Screen::ImportWallet);
+            None
+        }
+        Message::TransferTypeChar(c) => {
+            let ws = &mut model.wallet_state;
+            if ws.transfer_focus_password {
+                ws.transfer_password_draft.push(c);
+            } else {
+                ws.transfer_path_draft.push(c);
+            }
+            ws.transfer_error = None;
+            None
+        }
+        Message::TransferBackspace => {
+            let ws = &mut model.wallet_state;
+            if ws.transfer_focus_password {
+                ws.transfer_password_draft.pop();
+            } else {
+                ws.transfer_path_draft.pop();
+            }
+            ws.transfer_error = None;
+            None
+        }
+        Message::TransferToggleField => {
+            model.wallet_state.transfer_focus_password =
+                !model.wallet_state.transfer_focus_password;
+            None
+        }
+        Message::TransferSubmit => {
+            // Both screens need the path and the wallet password: import to
+            // decrypt the file, export to prove the share unlocks before it
+            // is handed out.
+            let ws = &mut model.wallet_state;
+            if ws.transfer_path_draft.trim().is_empty() {
+                ws.transfer_error = Some("Enter a file path".to_string());
+                return None;
+            }
+            if ws.transfer_password_draft.is_empty() {
+                ws.transfer_error = Some("Enter the wallet password".to_string());
+                return None;
+            }
+            let path = expand_home(ws.transfer_path_draft.trim());
+            let keystore_path = ws.keystore_path.clone();
+            let password = std::mem::take(&mut ws.transfer_password_draft);
+            match &model.current_screen {
+                Screen::ExportWallet { wallet_id } => Some(Command::ExportWallet {
+                    wallet_id: wallet_id.clone(),
+                    path,
+                    password,
+                    keystore_path,
+                }),
+                Screen::ImportWallet => Some(Command::ImportWallet {
+                    path,
+                    password,
+                    keystore_path,
+                }),
+                _ => None,
+            }
+        }
+        Message::WalletExported { wallet_id, path } => {
+            leave_transfer_screen(model);
+            model.ui_state.notifications.push(Notification {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Exported wallet '{wallet_id}' to {path}"),
+                kind: NotificationKind::Success,
+                timestamp: Utc::now(),
+                dismissible: true,
+            });
+            None
+        }
+        Message::WalletImported { wallet_id } => {
+            leave_transfer_screen(model);
+            model.ui_state.notifications.push(Notification {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Imported wallet '{wallet_id}'"),
+                kind: NotificationKind::Success,
+                timestamp: Utc::now(),
+                dismissible: true,
+            });
+            Some(Command::LoadWallets)
+        }
+        Message::WalletTransferFailed { error } => {
+            warn!("{}", error);
+            model.wallet_state.transfer_error = Some(error);
+            None
         }
 
         // ============= Wallet Creation Flow =============
@@ -3442,6 +3545,26 @@ fn short_session_id(id: &str) -> String {
     }
 }
 
+/// Back from the Export/Import screen to wherever it was opened (Manage
+/// Wallets, or the main menu for an import on a fresh device).
+fn leave_transfer_screen(model: &mut Model) {
+    model.wallet_state.reset_transfer_draft(String::new());
+    model.pop_screen();
+    model.ui_state.focus = if matches!(model.current_screen, Screen::ManageWallets) {
+        crate::elm::model::ComponentId::WalletList
+    } else {
+        crate::elm::model::ComponentId::MainMenu
+    };
+}
+
+/// A typed file path, with a leading `~/` expanded to `$HOME`.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => std::path::Path::new(&home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
+}
+
 /// The chain a signature is made for: a secp256k1 wallet signs as its
 /// Ethereum account, or its Bitcoin account when chosen; ed25519 is Solana.
 fn sign_chain(curve_type: &str, bitcoin: bool) -> &'static str {
@@ -4645,5 +4768,134 @@ mod tests {
         )
         .expect("verify");
         assert!(valid, "signature must verify for {address}");
+    }
+
+    fn type_transfer(model: &mut Model, text: &str) {
+        for c in text.chars() {
+            update(model, Message::TransferTypeChar(c));
+        }
+    }
+
+    #[test]
+    fn export_writes_the_selected_wallet_to_the_typed_path() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        model.wallet_state.keystore_path = "/ks".to_string();
+        update(
+            &mut model,
+            Message::ExportWallet {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert_eq!(
+            model.wallet_state.transfer_path_draft,
+            "~/starlab-export/w1.json"
+        );
+        model.wallet_state.transfer_path_draft = "/backup/w1.json".to_string();
+
+        // The share is only handed out once the password proves it unlocks.
+        assert!(update(&mut model, Message::TransferSubmit).is_none());
+        assert!(model.wallet_state.transfer_error.is_some());
+        update(&mut model, Message::TransferToggleField);
+        type_transfer(&mut model, "pw");
+
+        match update(&mut model, Message::TransferSubmit) {
+            Some(Command::ExportWallet {
+                wallet_id,
+                path,
+                password,
+                keystore_path,
+            }) => {
+                assert_eq!(wallet_id, "w1");
+                assert_eq!(path, std::path::PathBuf::from("/backup/w1.json"));
+                assert_eq!(password, "pw");
+                assert_eq!(keystore_path, "/ks");
+            }
+            other => panic!("expected ExportWallet, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn import_needs_a_password_then_hands_path_and_password_to_the_executor() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        assert_eq!(model.current_screen, Screen::ImportWallet);
+        type_transfer(&mut model, "/backup/w1.json");
+
+        assert!(update(&mut model, Message::TransferSubmit).is_none());
+        assert!(model.wallet_state.transfer_error.is_some());
+
+        update(&mut model, Message::TransferToggleField);
+        type_transfer(&mut model, "pw");
+        match update(&mut model, Message::TransferSubmit) {
+            Some(Command::ImportWallet { path, password, .. }) => {
+                assert_eq!(path, std::path::PathBuf::from("/backup/w1.json"));
+                assert_eq!(password, "pw");
+            }
+            other => panic!("expected ImportWallet, got {:?}", other),
+        }
+        assert!(
+            model.wallet_state.transfer_password_draft.is_empty(),
+            "password must not outlive the submit"
+        );
+    }
+
+    #[test]
+    fn a_finished_import_returns_to_manage_wallets_and_reloads_the_list() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        let cmd = update(
+            &mut model,
+            Message::WalletImported {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert!(matches!(cmd, Some(Command::LoadWallets)));
+        assert_eq!(model.current_screen, Screen::ManageWallets);
+        assert_eq!(
+            model.ui_state.focus,
+            crate::elm::model::ComponentId::WalletList
+        );
+    }
+
+    /// On a fresh device the import starts from the main menu (no Manage
+    /// Wallets entry yet); it must hand focus back to the menu, or the next
+    /// arrow keys move a list that isn't on screen.
+    #[test]
+    fn an_import_from_the_main_menu_returns_focus_to_the_menu() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::MainMenu;
+        update(&mut model, Message::ImportWallet);
+        update(
+            &mut model,
+            Message::WalletImported {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert_eq!(model.current_screen, Screen::MainMenu);
+        assert_eq!(
+            model.ui_state.focus,
+            crate::elm::model::ComponentId::MainMenu
+        );
+    }
+
+    #[test]
+    fn a_failed_import_stays_on_screen_with_the_error() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        update(
+            &mut model,
+            Message::WalletTransferFailed {
+                error: "Import failed: Invalid password".to_string(),
+            },
+        );
+        assert_eq!(model.current_screen, Screen::ImportWallet);
+        assert_eq!(
+            model.wallet_state.transfer_error.as_deref(),
+            Some("Import failed: Invalid password")
+        );
     }
 }

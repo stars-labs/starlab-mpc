@@ -102,6 +102,14 @@ impl WalletState {
         self.sign_on_bitcoin = false;
         self.sign_error = None;
     }
+
+    /// Reset the Export/Import screen; `path` pre-fills the path field.
+    pub fn reset_transfer_draft(&mut self, path: String) {
+        self.transfer_path_draft = path;
+        self.transfer_password_draft.clear();
+        self.transfer_focus_password = false;
+        self.transfer_error = None;
+    }
 }
 
 /// Wallet-related state
@@ -199,6 +207,13 @@ pub struct WalletState {
     /// Inline SignTransaction validation error (e.g. a Bitcoin sighash that
     /// isn't 32 bytes of hex). Cleared on the next edit.
     pub sign_error: Option<String>,
+    /// Export/Import screen drafts: the file path, the import password
+    /// (cleared on submit and on leaving the screen), which field has focus,
+    /// and the inline error.
+    pub transfer_path_draft: String,
+    pub transfer_password_draft: String,
+    pub transfer_focus_password: bool,
+    pub transfer_error: Option<String>,
     /// Stashed bytes-to-sign for the signing flow that threads through
     /// PasswordPrompt → UnlockWallet → JoinSigning. Set by the
     /// SubmitPassword handler when it sees a `SessionType::Signing`;

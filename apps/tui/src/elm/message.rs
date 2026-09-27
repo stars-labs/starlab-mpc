@@ -95,6 +95,7 @@ pub enum Message {
     WalletDeleted {
         wallet_id: String,
     },
+    /// 'e' on Manage Wallets: open the export screen for this wallet.
     ExportWallet {
         wallet_id: String,
     },
@@ -102,11 +103,21 @@ pub enum Message {
         wallet_id: String,
         path: String,
     },
-    ImportWallet {
-        data: Vec<u8>,
-    },
+    /// 'i' on Manage Wallets: open the import screen.
+    ImportWallet,
     WalletImported {
         wallet_id: String,
+    },
+    /// Export/Import screen text entry (path, and the import password).
+    TransferTypeChar(char),
+    TransferBackspace,
+    /// Tab on the Import screen: switch between the path and password field.
+    TransferToggleField,
+    /// Enter on the Export/Import screen.
+    TransferSubmit,
+    /// Export/import failed; shown inline on the screen.
+    WalletTransferFailed {
+        error: String,
     },
     /// '+' on the WalletDetail screen — derive one more BIP-44 account
     /// row in the accounts table (`Model.ui_state.accounts_shown`).
