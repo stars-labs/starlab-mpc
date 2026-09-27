@@ -352,11 +352,11 @@ async fn rebuild_peer<C>(
 {
     let (self_device_id, in_session, conns) = {
         let mut guard = app_state.lock().await;
-        guard
-            .peer_recovery
-            .entry(peer.clone())
-            .or_default()
-            .begin_rebuild(Instant::now());
+        // No entry: the peer left the signal server since this was scheduled.
+        let Some(recovery) = guard.peer_recovery.get_mut(&peer) else {
+            return;
+        };
+        recovery.begin_rebuild(Instant::now());
         let in_session = guard
             .session
             .as_ref()
@@ -414,6 +414,44 @@ async fn rebuild_peer<C>(
             schedule_rebuild(app_state, tx_msg, peer);
         }
     });
+}
+
+/// Peers we hold a connection to that are missing from the signal server's
+/// roster of connected devices.
+pub fn departed_peers<'a>(
+    connected: impl IntoIterator<Item = &'a String>,
+    online: &[String],
+) -> Vec<String> {
+    connected
+        .into_iter()
+        .filter(|p| !online.contains(p))
+        .cloned()
+        .collect()
+}
+
+/// Apply the signal server's roster of connected devices. A peer that left
+/// exited (or is restarting as a new process): drop its connection now rather
+/// than after ICE times out, and stop recovering it. Otherwise the dead
+/// connection counts toward the mesh and a restarted peer is never offered
+/// to again. The roster also gates new offers (`AppState::is_online`).
+pub async fn apply_device_roster<C>(
+    app_state: &Arc<Mutex<AppState<C>>>,
+    tx_msg: &UnboundedSender<Message>,
+    online: &[String],
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+{
+    app_state.lock().await.online_devices = Some(online.iter().cloned().collect());
+    let conns = device_connections(app_state).await;
+    let departed = departed_peers(conns.lock().await.keys(), online);
+    for peer in departed {
+        info!(
+            "👋 {} left the signal server; dropping its connection",
+            peer
+        );
+        app_state.lock().await.peer_recovery.remove(&peer);
+        teardown_peer(app_state, tx_msg, &peer, true).await;
+    }
 }
 
 /// Close and forget the peer connection + data channel for `peer`.
@@ -743,6 +781,32 @@ mod tests {
             None,
         )
         .await;
+    }
+
+    #[test]
+    fn departed_peers_are_those_missing_from_the_roster() {
+        let connected = ["a".to_string(), "b".to_string()];
+        let online = vec!["b".to_string(), "c".to_string()];
+        assert_eq!(departed_peers(&connected, &online), vec!["a".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_peer_that_left_the_server_is_dropped_and_not_recovered() {
+        let (app_state, _ws) = app_state_with_ws();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        pc_with_pending_offer(&app_state, "a", "b").await;
+        app_state
+            .lock()
+            .await
+            .peer_recovery
+            .entry("b".into())
+            .or_default()
+            .start_grace();
+        apply_device_roster(&app_state, &tx, &["a".to_string()]).await;
+        let guard = app_state.lock().await;
+        assert!(!guard.device_connections.lock().await.contains_key("b"));
+        assert!(!guard.peer_recovery.contains_key("b"));
+        assert!(!guard.is_online("b"));
     }
 
     #[tokio::test]

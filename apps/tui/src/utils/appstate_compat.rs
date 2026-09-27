@@ -42,6 +42,10 @@ pub struct AppState<C: Ciphersuite> {
     /// Peers whose remote description has been applied; candidates from these
     /// go straight to the peer connection instead of `pending_ice_candidates`.
     pub remote_description_set: std::collections::HashSet<String>,
+    /// Devices the signal server lists as connected (its last `Devices`
+    /// roster); `None` until the first roster arrives. Offers only go to these:
+    /// the server drops a relay to an unknown device.
+    pub online_devices: Option<std::collections::HashSet<String>>,
     /// Per-peer grace timer + rebuild backoff (`network::peer_recovery`).
     pub peer_recovery:
         std::collections::HashMap<String, crate::network::peer_recovery::PeerRecovery>,
@@ -196,6 +200,14 @@ where
     /// AND its data channel has opened. With webrtc 0.21 the channel's
     /// `OnOpen` can land after the connection-state event, so `Connected`
     /// alone would start a ceremony whose first frames have nowhere to go.
+    /// Whether `device_id` is on the signal server's roster (unknown before
+    /// the first roster, so nothing is held back then).
+    pub fn is_online(&self, device_id: &str) -> bool {
+        self.online_devices
+            .as_ref()
+            .is_none_or(|online| online.contains(device_id))
+    }
+
     pub fn peer_ready(&self, device_id: &str) -> bool {
         self.device_statuses.get(device_id)
             == Some(&webrtc::peer_connection::RTCPeerConnectionState::Connected)
@@ -223,6 +235,7 @@ where
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
             remote_description_set: std::collections::HashSet::new(),
+            online_devices: None,
             peer_recovery: std::collections::HashMap::new(),
             ceremony_outbox: Default::default(),
             seen_ceremony_frames: Default::default(),
@@ -308,6 +321,7 @@ where
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
             remote_description_set: std::collections::HashSet::new(),
+            online_devices: None,
             peer_recovery: std::collections::HashMap::new(),
             ceremony_outbox: Default::default(),
             seen_ceremony_frames: Default::default(),

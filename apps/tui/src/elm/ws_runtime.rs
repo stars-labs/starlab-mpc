@@ -266,6 +266,11 @@ pub(crate) fn spawn_relay_handler_task<C>(
                             our_session_id,
                         )
                         .await;
+                    } else if let starlab_signal_server::ServerMsg::Devices { devices } = &*shared {
+                        crate::network::peer_recovery::apply_device_roster(
+                            &app_state, &tx_elm, devices,
+                        )
+                        .await;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {

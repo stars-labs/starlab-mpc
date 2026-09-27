@@ -703,6 +703,10 @@ async fn seed_reshare_context<C: frost_core::Ciphersuite>(
     state.reshare_password = Some(password.to_string());
     state.reshare_keystore_path = Some(keystore_path.to_string());
     state.reshare_in_progress = true;
+    // A new ceremony: a node that already ran a DKG (a long-lived `serve`)
+    // still has that DKG's state, and StartFrostProtocol would drop the
+    // reshare's round 1 as "FROST already running".
+    state.dkg_state = crate::utils::state::DkgState::Idle;
     Ok((
         meta.participants.clone(),
         meta.threshold,

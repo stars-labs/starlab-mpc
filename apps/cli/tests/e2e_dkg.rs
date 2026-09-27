@@ -131,12 +131,9 @@ async fn bitcoin_account_signs_a_sighash_valid_for_its_p2tr_address() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-#[ignore = "real WebRTC reshare over loopback; run with --ignored"]
-async fn reshare_then_sign_2_of_3_preserves_group_key() {
-    // #45 4b: networked same-set reshare over the live mesh. After DKG, every
-    // node refreshes its share; the group key (address) must be unchanged and a
-    // threshold signature with the REFRESHED shares must verify.
+/// DKG, then a same-set reshare on `runners`; the group key must survive, the
+/// refreshed shares must sign, and node 0's share must be persisted.
+async fn reshare_then_sign_2_of_3(runners: starlab_cli::simulate::ReshareRunners) {
     init_logs();
     let r = starlab_cli::simulate::run_reshare_e2e(
         starlab_cli::simulate::SimulateOpts {
@@ -147,6 +144,7 @@ async fn reshare_then_sign_2_of_3_preserves_group_key() {
             timeout_secs: 120,
         },
         "reshared then signed",
+        runners,
     )
     .await
     .expect("reshare e2e ran");
@@ -162,7 +160,22 @@ async fn reshare_then_sign_2_of_3_preserves_group_key() {
         "refreshed share not persisted with same group key: {r:?}"
     );
     eprintln!(
-        "✅ reshare e2e ok in {}ms, group preserved = {}",
+        "✅ reshare e2e ({runners:?}) ok in {}ms, group preserved = {}",
         r.elapsed_ms, r.dkg_group_public_key
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC reshare over loopback; run with --ignored"]
+async fn reshare_then_sign_2_of_3_preserves_group_key() {
+    // #45 4b / #56: fresh processes load their shares from disk and reshare.
+    reshare_then_sign_2_of_3(starlab_cli::simulate::ReshareRunners::Fresh).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC reshare over loopback; run with --ignored"]
+async fn reshare_on_the_nodes_that_ran_the_dkg() {
+    // A long-lived `serve` node reshares after its own DKG: the finished DKG
+    // must not block the reshare's round 1 as "FROST already running".
+    reshare_then_sign_2_of_3(starlab_cli::simulate::ReshareRunners::Reused).await;
 }
