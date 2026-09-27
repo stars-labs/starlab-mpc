@@ -1,3 +1,5 @@
+import type { SupportedChain } from './appstate';
+
 // ===================================================================
 // ACCOUNT AND WALLET TYPES
 // ===================================================================
@@ -35,7 +37,7 @@ export interface Account {
     publicKey?: string;
 
     /** Which blockchain network this account belongs to */
-    blockchain: 'ethereum' | 'solana';
+    blockchain: SupportedChain;
 
     /** Timestamp when this account was created (Unix timestamp) */
     created?: number;
@@ -90,7 +92,7 @@ export interface AccountStorage {
         /** Whether to auto-switch to newly created accounts */
         autoSwitchToNew: boolean;
         /** Default blockchain for new accounts */
-        defaultBlockchain: 'ethereum' | 'solana';
+        defaultBlockchain: SupportedChain;
         /** Whether to show test networks */
         showTestNetworks: boolean;
     };

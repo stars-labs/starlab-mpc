@@ -17,8 +17,35 @@
 // ===================================================================
 
 // Core Application State
-export type { AppState, SupportedChain } from './appstate';
-export { INITIAL_APP_STATE, CURVE_COMPATIBLE_CHAINS, getCompatibleChains, getRequiredCurve, signingCaveat } from './appstate';
+export type {
+    AppState,
+    ChainMetadata,
+    EvmChain,
+    KnownChain,
+    LimitedChain,
+    ProtocolBlockchain,
+    SupportedChain,
+    WalletCurve,
+} from './appstate';
+export {
+    CHAIN_METADATA,
+    CURVE_COMPATIBLE_CHAINS,
+    EVM_CHAINS,
+    INITIAL_APP_STATE,
+    LIMITED_CHAINS,
+    SUPPORTED_CHAINS,
+    getChainLabel,
+    getChainShortLabel,
+    getCompatibleChains,
+    getDefaultChainForCurve,
+    getProtocolBlockchainForChain,
+    getRequiredCurve,
+    isEvmChain,
+    isKnownChain,
+    isSupportedChain,
+    normalizeDerivedAddressChain,
+    signingCaveat,
+} from './appstate';
 // Note: Constants are exported for components that need them
 
 // Session Management
