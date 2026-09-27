@@ -42,7 +42,15 @@ pub struct AppState<C: Ciphersuite> {
     /// Peers whose remote description has been applied; candidates from these
     /// go straight to the peer connection instead of `pending_ice_candidates`.
     pub remote_description_set: std::collections::HashSet<String>,
-    pub making_offer: std::collections::HashMap<String, bool>,
+    /// Per-peer grace timer + rebuild backoff (`network::peer_recovery`).
+    pub peer_recovery:
+        std::collections::HashMap<String, crate::network::peer_recovery::PeerRecovery>,
+    /// Ceremony frames sent to each peer during the current ceremony, resent
+    /// when that peer's data channel reopens. Cleared when a ceremony starts,
+    /// completes or fails.
+    pub ceremony_outbox: crate::network::peer_recovery::CeremonyOutbox,
+    /// Ceremony frames already delivered, so resends are ignored.
+    pub seen_ceremony_frames: crate::network::peer_recovery::SeenFrames,
     pub mesh_status: MeshStatus,
     pub dkg_state: DkgState,
     pub received_dkg_packages: std::collections::HashMap<String, Vec<u8>>,
@@ -60,7 +68,6 @@ pub struct AppState<C: Ciphersuite> {
     /// `process_signing_round1` once the session exists.
     pub pending_pre_session_commitments: Vec<(String, Vec<u8>)>,
     // Additional DKG and other fields
-    pub reconnection_tracker: std::collections::HashMap<String, std::time::Instant>,
     pub dkg_part1_public_package: Option<Vec<u8>>,
     pub dkg_part1_secret_package: Option<Vec<u8>>,
     pub dkg_part2_secret_package: Option<Vec<u8>>,
@@ -216,7 +223,9 @@ where
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
             remote_description_set: std::collections::HashSet::new(),
-            making_offer: std::collections::HashMap::new(),
+            peer_recovery: std::collections::HashMap::new(),
+            ceremony_outbox: Default::default(),
+            seen_ceremony_frames: Default::default(),
             mesh_status: MeshStatus::Incomplete,
             dkg_state: DkgState::Idle,
             received_dkg_packages: std::collections::HashMap::new(),
@@ -226,7 +235,6 @@ where
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
-            reconnection_tracker: std::collections::HashMap::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
@@ -300,7 +308,9 @@ where
             device_statuses: std::collections::HashMap::new(),
             pending_ice_candidates: std::collections::HashMap::new(),
             remote_description_set: std::collections::HashSet::new(),
-            making_offer: std::collections::HashMap::new(),
+            peer_recovery: std::collections::HashMap::new(),
+            ceremony_outbox: Default::default(),
+            seen_ceremony_frames: Default::default(),
             mesh_status: MeshStatus::Incomplete,
             dkg_state: DkgState::Idle,
             received_dkg_packages: std::collections::HashMap::new(),
@@ -310,7 +320,6 @@ where
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
-            reconnection_tracker: std::collections::HashMap::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,

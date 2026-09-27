@@ -29,9 +29,20 @@ pub async fn send_webrtc_message<C>(
 where
     C: Ciphersuite,
 {
+    let msg_json = serde_json::to_string(&message)
+        .map_err(|e| format!("Failed to serialize envelope: {}", e))?;
+
     // Enhanced debugging to trace data channel access
     let data_channel = {
-        let guard = state_log.lock().await;
+        let mut guard = state_log.lock().await;
+        // Remember ceremony frames whether or not this send gets through: a
+        // frame that dies with a broken connection is resent when the peer's
+        // data channel reopens (`network::peer_recovery`).
+        if let WebRTCMessage::SimpleMessage { text } = message
+            && crate::network::peer_recovery::is_ceremony_frame(text)
+        {
+            guard.ceremony_outbox.record(target_device_id, &msg_json);
+        }
         tracing::debug!(
             "🔍 Looking for data channel for device: {}",
             target_device_id
@@ -55,9 +66,6 @@ where
         );
 
         if ready_state == RTCDataChannelState::Open {
-            let msg_json = serde_json::to_string(&message)
-                .map_err(|e| format!("Failed to serialize envelope: {}", e))?;
-
             if let Err(_e) = dc.send_text(&msg_json).await {
                 return Err(format!("Failed to send message: {}", _e));
             }

@@ -101,6 +101,19 @@ async fn handle_webrtc_signal<C>(
                     from
                 ),
             });
+            // Decided inline (relay frames are handled in order) so the ICE
+            // candidates that follow this offer are buffered for the new
+            // connection instead of landing on the one being replaced.
+            if !crate::network::peer_recovery::prepare_for_offer(
+                &app_state,
+                &tx_msg,
+                &self_device_id,
+                &from,
+            )
+            .await
+            {
+                return;
+            }
             spawn_offer_handler(from, sdp.to_string(), app_state, tx_msg, self_device_id);
         }
     } else if let Some(answer_data) = data.get("Answer") {
@@ -509,11 +522,13 @@ where
     <<C as Ciphersuite>::Group as Group>::Element: Send + Sync,
     <<<C as Ciphersuite>::Group as Group>::Field as Field>::Scalar: Send + Sync,
 {
+    let slot = crate::network::peer_recovery::PcSlot::default();
     let handler: Arc<dyn PeerConnectionEventHandler> = Arc::new(SignalingHandler {
         device_id: device_id.clone(),
         tx_msg: tx_msg.clone(),
         ws_tx: ws_tx.clone(),
         app_state,
+        slot: slot.clone(),
     });
 
     let config = RTCConfigurationBuilder::new()
@@ -526,7 +541,11 @@ where
         .build()
         .await
     {
-        Ok(pc) => Some(Arc::new(pc) as Arc<dyn PeerConnection>),
+        Ok(pc) => {
+            let pc = Arc::new(pc) as Arc<dyn PeerConnection>;
+            let _ = slot.set(Arc::downgrade(&pc));
+            Some(pc)
+        }
         Err(e) => {
             error!(
                 "❌ Failed to create peer connection for {}: {}",
@@ -552,6 +571,9 @@ where
     tx_msg: UnboundedSender<Message>,
     ws_tx: UnboundedSender<String>,
     app_state: Arc<Mutex<AppState<C>>>,
+    /// The connection this handler belongs to; events from a connection that
+    /// has since been replaced for `device_id` are ignored.
+    slot: crate::network::peer_recovery::PcSlot,
 }
 
 #[async_trait::async_trait]
@@ -592,6 +614,15 @@ where
     }
 
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
+        if !crate::network::peer_recovery::is_current(&self.app_state, &self.device_id, &self.slot)
+            .await
+        {
+            info!(
+                "Ignoring {:?} from a replaced connection to {}",
+                state, self.device_id
+            );
+            return;
+        }
         // webrtc 0.21's `PeerConnection` trait has no synchronous/async `connection_state()`
         // accessor anymore (state is event-delivered only, see the crate's
         // `docs/transport-objects.md`), so callers that used to poll `pc.connection_state()`
@@ -627,6 +658,14 @@ where
                 self.device_id, other
             ),
         }
+        // Grace / rebuild (never block the event handler on it).
+        tokio::spawn(crate::network::peer_recovery::handle_state_change(
+            self.app_state.clone(),
+            self.tx_msg.clone(),
+            self.device_id.clone(),
+            self.slot.clone(),
+            state,
+        ));
     }
 
     async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
@@ -669,6 +708,8 @@ async fn run_answer_side_data_channel<C>(
                         device_id
                     );
                 }
+                crate::network::peer_recovery::resend_ceremony_frames(&app_state, &device_id, &dc)
+                    .await;
                 let _ = tx_msg.send(Message::UpdateParticipantWebRTCStatus {
                     device_id: device_id.clone(),
                     webrtc_connected: true,
