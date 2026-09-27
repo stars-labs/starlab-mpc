@@ -62,6 +62,17 @@ pub struct AppState<C: Ciphersuite> {
     pub webrtc_initiation_in_progress: bool,
     pub webrtc_initiation_started_at: Option<std::time::Instant>,
     pub signing_state: SigningState<C>,
+    /// Monotonically increasing counter, bumped by
+    /// `protocal::signing::handle_start_signing` at the start of every
+    /// signing ceremony. The per-ceremony timeout task it arms captures the
+    /// epoch at arm time and only fails the ceremony if it's still current
+    /// when the timer fires — so a timer left over from an aborted or
+    /// already-completed ceremony can never fail a newer one.
+    pub signing_epoch: u64,
+    /// Per-ceremony signing timeout, defaulting to
+    /// `protocal::signing::SIGNING_TIMEOUT`. Overridable (e.g. in tests) so
+    /// a stuck ceremony doesn't take the default 120s to fail.
+    pub signing_timeout: std::time::Duration,
     pub pending_signing_requests: Vec<super::state::PendingSigningRequest>,
     /// Raw `SIGN_COMMIT` payloads (from_device_id, commitment_bytes) that
     /// arrived BEFORE this node had a signing session — e.g. a cold-started
@@ -264,6 +275,8 @@ where
             webrtc_initiation_in_progress: false,
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
+            signing_epoch: 0,
+            signing_timeout: crate::protocal::signing::default_signing_timeout(),
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
             signer_set: None,
@@ -353,6 +366,8 @@ where
             webrtc_initiation_in_progress: false,
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
+            signing_epoch: 0,
+            signing_timeout: crate::protocal::signing::default_signing_timeout(),
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
             signer_set: None,
