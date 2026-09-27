@@ -58,35 +58,21 @@ impl SigningManager {
     /// backend and never stored here. Returns the aggregated signature.
     pub async fn approve_and_sign(&self, request_id: &str, password: String) -> CoreResult<String> {
         let Some(backend) = self.backend.as_ref() else {
-            return Err(CoreError::Dkg(
+            return Err(CoreError::Signing(
                 "no signing backend attached — construct SigningManager::with_backend".into(),
             ));
         };
 
         let request = self.state.active_signing_request.lock().await.clone();
         let Some(req) = request else {
-            return Err(CoreError::Dkg("no pending signing request".into()));
+            return Err(CoreError::Signing("no pending signing request".into()));
         };
         if req.id != request_id {
-            return Err(CoreError::Dkg(format!(
+            return Err(CoreError::Signing(format!(
                 "signing request id mismatch: expected {}, got {}",
                 req.id, request_id
             )));
         }
-
-        // Resolve the keystore wallet id from the request's wallet index. A
-        // peer's request needs none: the announce already names the wallet.
-        let wallet_id = if req.session_id.is_some() {
-            String::new()
-        } else {
-            let wallets = self.state.wallets.lock().await;
-            wallets
-                .get(req.wallet_index)
-                .map(|w| w.id.clone())
-                .ok_or_else(|| {
-                    CoreError::Dkg(format!("wallet index {} out of range", req.wallet_index))
-                })?
-        };
 
         // The elm loop drives commitment→share→aggregate internally; surface
         // the coarse states so the desktop progress UI moves.
@@ -97,7 +83,7 @@ impl SigningManager {
 
         let outcome = backend
             .sign(BackendSignRequest {
-                wallet_id,
+                wallet_id: req.wallet_id.clone(),
                 session_id: req.session_id.clone(),
                 message_hex: req.message_hex.clone(),
                 password,
@@ -138,21 +124,22 @@ impl SigningManager {
     /// request id so a dApp / batch caller can correlate.
     pub async fn request_signing(
         &self,
+        wallet_id: String,
         message_hex: String,
         chain: String,
         display_label: Option<String>,
     ) -> CoreResult<String> {
         if message_hex.is_empty() {
-            return Err(CoreError::Dkg("empty message_hex".into()));
+            return Err(CoreError::Signing("empty message_hex".into()));
         }
 
-        // Use the active wallet by default; callers that want to
-        // pin a specific wallet can extend this later.
-        let wallet_index = *self.state.active_wallet_index.lock().await;
+        if wallet_id.is_empty() {
+            return Err(CoreError::Signing("no wallet selected".into()));
+        }
 
         let request = SigningRequest {
             id: format!("sign-{}", uuid::Uuid::new_v4()),
-            wallet_index,
+            wallet_id,
             message_hex,
             display_label,
             chain,
@@ -180,10 +167,10 @@ impl SigningManager {
     pub async fn approve(&self, request_id: &str) -> CoreResult<()> {
         let request = self.state.active_signing_request.lock().await.clone();
         let Some(req) = request else {
-            return Err(CoreError::Dkg("no pending signing request".into()));
+            return Err(CoreError::Signing("no pending signing request".into()));
         };
         if req.id != request_id {
-            return Err(CoreError::Dkg(format!(
+            return Err(CoreError::Signing(format!(
                 "signing request id mismatch: expected {}, got {}",
                 req.id, request_id
             )));
@@ -241,10 +228,10 @@ impl SigningManager {
     pub async fn reject(&self, request_id: &str) -> CoreResult<()> {
         let request = self.state.active_signing_request.lock().await.clone();
         let Some(req) = request else {
-            return Err(CoreError::Dkg("no pending signing request".into()));
+            return Err(CoreError::Signing("no pending signing request".into()));
         };
         if req.id != request_id {
-            return Err(CoreError::Dkg(format!(
+            return Err(CoreError::Signing(format!(
                 "signing request id mismatch: expected {}, got {}",
                 req.id, request_id
             )));
@@ -291,7 +278,9 @@ impl SigningManager {
             *self.state.signing_state.lock().await,
             SigningState::Commitment | SigningState::Share | SigningState::Aggregating
         ) {
-            return Err(CoreError::Dkg("a signing ceremony is still running".into()));
+            return Err(CoreError::Signing(
+                "a signing ceremony is still running".into(),
+            ));
         }
         *self.state.active_signing_request.lock().await = None;
         *self.state.signing_state.lock().await = SigningState::Idle;
@@ -347,11 +336,13 @@ fn incoming_update(model: &Model, msg: &Message) -> Option<IncomingUpdate> {
                 Some((parent, chain, _)) => (parent, chain.to_string()),
                 None => (wallet_name.as_str(), blockchain.clone()),
             };
-            let wallet_index = wallets.iter().position(|w| w.session_id == root_id)?;
-            let wallet_label = wallets[wallet_index].display_name();
+            let wallet_label = wallets
+                .iter()
+                .find(|w| w.session_id == root_id)?
+                .display_name();
             Some(IncomingUpdate::Offer(SigningRequest {
                 id: format!("sign-{}", uuid::Uuid::new_v4()),
-                wallet_index,
+                wallet_id: wallet_name.clone(),
                 message_hex: session.signing_message_hex.clone().unwrap_or_default(),
                 display_label: Some(format!(
                     "{} asks to sign with {} ({}-of-{})",
@@ -452,7 +443,7 @@ mod tests {
         let mgr = SigningManager::new(state.clone(), ui);
 
         let id = mgr
-            .request_signing("deadbeef".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "deadbeef".into(), "ethereum".into(), None)
             .await
             .unwrap();
         assert_eq!(mgr.current_state().await, SigningState::AwaitingApproval);
@@ -469,7 +460,7 @@ mod tests {
         let mgr = SigningManager::new(state.clone(), ui);
 
         let id = mgr
-            .request_signing("deadbeef".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "deadbeef".into(), "ethereum".into(), None)
             .await
             .unwrap();
         mgr.approve(&id).await.unwrap();
@@ -486,7 +477,7 @@ mod tests {
         let mgr = SigningManager::new(state, ui);
 
         let _id = mgr
-            .request_signing("deadbeef".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "deadbeef".into(), "ethereum".into(), None)
             .await
             .unwrap();
         let wrong = mgr.approve("not-a-real-id").await;
@@ -500,7 +491,7 @@ mod tests {
         let mgr = SigningManager::new(state, ui);
 
         let err = mgr
-            .request_signing("".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "".into(), "ethereum".into(), None)
             .await;
         assert!(err.is_err());
     }
@@ -512,16 +503,8 @@ mod tests {
         use tokio::sync::mpsc::unbounded_channel;
 
         let state = Arc::new(CoreState::new());
-        // Seed a wallet so wallet_index 0 resolves to a keystore id.
-        state.wallets.lock().await.push(super::super::WalletInfo {
-            id: "wallet-abc".into(),
-            name: "Treasury".into(),
-            address: "0xabc".into(),
-            balance: "0".into(),
-            chain: "ethereum".into(),
-            threshold: "2/3".into(),
-            participants: vec![],
-        });
+        // No CoreState.wallets seeding: the request names its wallet (a
+        // fresh process that never ran DKG/import must still sign).
 
         // Fake elm runner: HeadlessSign → SigningComplete via the sink,
         // exactly how the embedder's on_sync feeds the real loop's output.
@@ -550,7 +533,7 @@ mod tests {
         let mgr = SigningManager::new(state.clone(), ui).with_backend(backend);
 
         let id = mgr
-            .request_signing("dead".into(), "ethereum".into(), None)
+            .request_signing("wallet-abc".into(), "dead".into(), "ethereum".into(), None)
             .await
             .unwrap();
         let sig = mgr.approve_and_sign(&id, "hunter2".into()).await.unwrap();
@@ -562,12 +545,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_without_a_wallet_is_refused() {
+        let ui: Arc<dyn UICallback> = Arc::new(NoopUi);
+        let mgr = SigningManager::new(Arc::new(CoreState::new()), ui);
+        let err = mgr
+            .request_signing(String::new(), "aa".into(), "ethereum".into(), None)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no wallet selected"));
+    }
+
+    #[tokio::test]
     async fn approve_and_sign_without_backend_errors_clearly() {
         let state = Arc::new(CoreState::new());
         let ui: Arc<dyn UICallback> = Arc::new(NoopUi);
         let mgr = SigningManager::new(state, ui);
         let id = mgr
-            .request_signing("dead".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "dead".into(), "ethereum".into(), None)
             .await
             .unwrap();
         let err = mgr.approve_and_sign(&id, "pw".into()).await.unwrap_err();
@@ -581,15 +575,6 @@ mod tests {
         use tokio::sync::mpsc::unbounded_channel;
 
         let state = Arc::new(CoreState::new());
-        state.wallets.lock().await.push(super::super::WalletInfo {
-            id: "w".into(),
-            name: "n".into(),
-            address: "a".into(),
-            balance: "0".into(),
-            chain: "ethereum".into(),
-            threshold: "2/3".into(),
-            participants: vec![],
-        });
         let (tx, mut rx) = unbounded_channel::<Message>();
         let (backend, sink) = ElmSigningBackend::new(tx);
         tokio::spawn(async move {
@@ -605,11 +590,12 @@ mod tests {
         let ui: Arc<dyn UICallback> = Arc::new(NoopUi);
         let mgr = SigningManager::new(state.clone(), ui).with_backend(backend);
         let id = mgr
-            .request_signing("dead".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "dead".into(), "ethereum".into(), None)
             .await
             .unwrap();
         let err = mgr.approve_and_sign(&id, "pw".into()).await.unwrap_err();
         assert!(err.to_string().contains("co-signer declined"));
+        assert!(err.to_string().starts_with("Signing error"), "{err}");
         assert!(matches!(mgr.current_state().await, SigningState::Failed(_)));
     }
 
@@ -727,7 +713,7 @@ mod tests {
         assert_eq!(req.session_id.as_deref(), Some("sign-session"));
         assert_eq!(req.message_hex, "deadbeef");
         assert_eq!(req.chain, "ethereum");
-        assert_eq!(req.wallet_index, 0);
+        assert_eq!(req.wallet_id, "w1-ethereum-0");
         assert!(req.display_label.unwrap().contains("peer"));
         assert_eq!(mgr.current_state().await, SigningState::AwaitingApproval);
         assert_eq!(
@@ -869,7 +855,7 @@ mod tests {
         let ui = Arc::new(RecordingUi::default());
         let (mgr, state) = manager(ui.clone());
         let id = mgr
-            .request_signing("aa".into(), "ethereum".into(), None)
+            .request_signing("w".into(), "aa".into(), "ethereum".into(), None)
             .await
             .unwrap();
 

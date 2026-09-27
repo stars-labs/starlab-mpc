@@ -23,6 +23,9 @@ pub enum CoreError {
     #[error("DKG error: {0}")]
     Dkg(String),
 
+    #[error("Signing error: {0}")]
+    Signing(String),
+
     #[error("Session error: {0}")]
     Session(String),
 
@@ -140,8 +143,9 @@ pub enum SDOperationType {
 pub struct SigningRequest {
     /// Opaque id; the UI echoes it back when approving/rejecting.
     pub id: String,
-    /// Which wallet to sign with (index into CoreState.wallets).
-    pub wallet_index: usize,
+    /// Keystore wallet id to sign with: a root id, or a BIP-44 account id
+    /// (`{root}-{chain}-{n}`) to sign as that account.
+    pub wallet_id: String,
     /// Raw bytes to sign, hex-encoded. For EIP-191 / personal_sign
     /// the caller is responsible for pre-hashing via viem's
     /// hashMessage equivalent.

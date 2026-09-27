@@ -152,14 +152,14 @@ impl SigningBackend for ElmSigningBackend {
         };
         self.runner_tx
             .send(start)
-            .map_err(|e| CoreError::Dkg(format!("signing runner gone: {e}")))?;
+            .map_err(|e| CoreError::Signing(format!("signing runner gone: {e}")))?;
 
         let deadline = tokio::time::sleep(req.timeout);
         tokio::pin!(deadline);
         loop {
             tokio::select! {
                 _ = &mut deadline => {
-                    return Err(CoreError::Dkg(format!(
+                    return Err(CoreError::Signing(format!(
                         "signing ceremony timed out after {:?} — co-signers may be offline or \
                          never approved",
                         req.timeout
@@ -170,13 +170,13 @@ impl SigningBackend for ElmSigningBackend {
                         return Ok(SignatureOutcome { signature_hex, message_hash_hex });
                     }
                     Ok(SigningEvent::Failed { error }) => {
-                        return Err(CoreError::Dkg(format!("signing failed: {error}")));
+                        return Err(CoreError::Signing(format!("signing failed: {error}")));
                     }
                     // Lagged: we missed events under burst — keep waiting for
                     // the next one rather than failing the ceremony.
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => {
-                        return Err(CoreError::Dkg("signing event stream closed".into()));
+                        return Err(CoreError::Signing("signing event stream closed".into()));
                     }
                 },
             }
@@ -188,7 +188,7 @@ impl SigningBackend for ElmSigningBackend {
             .send(Message::DeclineSigningRequest {
                 session_id: session_id.to_string(),
             })
-            .map_err(|e| CoreError::Dkg(format!("signing runner gone: {e}")))
+            .map_err(|e| CoreError::Signing(format!("signing runner gone: {e}")))
     }
 }
 
