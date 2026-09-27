@@ -153,6 +153,11 @@ pub struct SigningRequest {
     /// "polygon", …).
     pub chain: String,
     pub created_at: String,
+    /// Set when a PEER started this ceremony (its signing-session announce
+    /// reached us): approving joins that session as a co-signer and
+    /// rejecting declines it. `None` for a request this device initiated.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Lifecycle state of the current signing ceremony.
