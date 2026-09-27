@@ -4,10 +4,12 @@
 C>announce_session
 C>register
 C>relay
+C>request_active_sessions
 C>session_status_update
 S>devices
 S>relay
 S>session_available
+S>session_list_request
 
 # announce_session (client→server)
 {"session_info":{"coordination_type":"Network","curve_type":"secp256k1","participants":["<device>"],"proposer_id":"<proposer_id>","session_id":"<session_id>","session_type":"dkg","threshold":2,"total":2},"type":"announce_session"}

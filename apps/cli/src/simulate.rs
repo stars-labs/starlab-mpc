@@ -1038,10 +1038,8 @@ impl LateJoinResult {
 /// the `RequestActiveSessions` replay.
 ///
 /// Also records whether the late node discovered it WITHOUT an explicit
-/// refresh — i.e. whether the headless runner auto-replays on connect the way
-/// the browser extension does. (It currently does not; the headless/CLI path
-/// needs an explicit refresh — `discovered_on_connect` captures that parity
-/// gap rather than asserting it.)
+/// refresh — the runner requests the replay itself right after `Register`, the
+/// way the browser extension does, so `discovered_on_connect` must be true.
 pub async fn run_late_join_discovery_simulation(
     opts: SimulateOpts,
 ) -> anyhow::Result<LateJoinResult> {
