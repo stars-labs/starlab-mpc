@@ -32,6 +32,23 @@ fn enter_round1(model: &mut Model) {
     }
 }
 
+/// Drop the previous ceremony before the creator starts a new DKG. A finished
+/// DKG (or signing) stays in `active_session`, and `SubmitPassword` reads a
+/// set `active_session` as "joining that session" — so without this a second
+/// wallet creation re-joins the old session instead of announcing a new one.
+fn forget_finished_ceremony(model: &mut Model) {
+    model.active_session = None;
+    model.wallet_state.joining_session = None;
+}
+
+/// Model side of a new DKG (creator or joiner): the progress label restarts
+/// (a previous DKG left it at Complete), and the key share the executor had
+/// loaded is dropped for the new ceremony, so no wallet counts as unlocked.
+fn begin_dkg(model: &mut Model) {
+    model.wallet_state.dkg_round = DKGRound::Initialization;
+    model.wallet_state.wallet_unlocked_id = None;
+}
+
 /// Build the mesh-ready FROST-trigger batch. For a unified ceremony, prepend a
 /// `PrepareUnifiedFinalize` that captures the password/keystore/label so the
 /// round-2 completion can persist both curves. The password is taken (cleared)
@@ -421,6 +438,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 template: None,
                 custom_config: Some(config),
             });
+            forget_finished_ceremony(model);
             model.wallet_state.wallet_name_draft = label;
             Some(Command::SendMessage(Message::SubmitPassword {
                 value: password,
@@ -600,6 +618,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 let session_id = session.session_id.clone();
                 match &session.session_type {
                     crate::protocal::signal::SessionType::DKG => {
+                        begin_dkg(model);
                         model.push_screen(Screen::DKGProgress {
                             session_id: session_id.clone(),
                         });
@@ -782,6 +801,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             } else {
                 model.wallet_state.curve_type.to_string()
             };
+            begin_dkg(model);
             model.active_session = Some(SessionInfo {
                 session_id: temp_session_id.clone(),
                 proposer_id: model.device_id.clone(),
@@ -1461,6 +1481,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         // ============= DKG Operations =============
+        Message::SigningSessionAnnounced { session } => {
+            info!("Signing session announced: {}", session.session_id);
+            model.active_session = Some(session);
+            None
+        }
+
         Message::UpdateDKGSessionId { real_session_id } => {
             info!("Updating DKG session ID to real ID: {}", real_session_id);
 
@@ -2872,6 +2898,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // which is where session announcement + StartDKG
                     // kick in.
                     info!("ThresholdConfig confirmed — routing to PasswordPrompt");
+                    forget_finished_ceremony(model);
                     // Creator sets a new password + optional wallet name.
                     model.wallet_state.password_prompt_purpose =
                         crate::elm::model::PasswordPromptPurpose::SetNew;
@@ -4333,6 +4360,115 @@ mod tests {
                 model.wallet_state.pending_sign_session_id.as_deref(),
                 Some("sess1")
             );
+        }
+    }
+
+    fn creator_config() -> WalletConfig {
+        WalletConfig {
+            name: "Second".to_string(),
+            total_participants: 3,
+            threshold: 2,
+            mode: WalletMode::Online,
+        }
+    }
+
+    /// Model state a node is left in after its first DKG: the finished
+    /// ceremony is still `active_session` and the progress label is Complete.
+    fn after_first_dkg() -> Model {
+        let mut model = Model::new("dev".to_string());
+        model.active_session = Some(dkg_invite("s1"));
+        model.wallet_state.dkg_round = DKGRound::Complete;
+        model
+    }
+
+    /// Creating a second wallet in the same run must announce a NEW DKG, not
+    /// route the password back into the finished session as a joiner.
+    #[test]
+    fn second_wallet_creation_starts_a_new_dkg_instead_of_rejoining_the_first() {
+        let mut model = after_first_dkg();
+        model.current_screen = Screen::ThresholdConfig;
+        update(&mut model, Message::SelectItem { index: 0 });
+        assert_eq!(model.current_screen, Screen::PasswordPrompt);
+
+        let cmd = update(
+            &mut model,
+            Message::SubmitPassword {
+                value: "pw".to_string(),
+            },
+        );
+        let config = match cmd {
+            Some(Command::SendMessage(Message::CreateWallet { config })) => config,
+            other => panic!("expected CreateWallet, got {:?}", other),
+        };
+        let cmd = update(&mut model, Message::CreateWallet { config });
+        assert!(matches!(cmd, Some(Command::StartDKG { .. })));
+        assert_eq!(model.wallet_state.dkg_round, DKGRound::Initialization);
+    }
+
+    #[test]
+    fn headless_second_wallet_creation_starts_a_new_dkg() {
+        let mut model = after_first_dkg();
+        update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config: creator_config(),
+                password: "pw".to_string(),
+                label: String::new(),
+            },
+        );
+        let cmd = update(
+            &mut model,
+            Message::SubmitPassword {
+                value: "pw".to_string(),
+            },
+        );
+        assert!(
+            matches!(
+                cmd,
+                Some(Command::SendMessage(Message::CreateWallet { .. }))
+            ),
+            "expected CreateWallet, got {:?}",
+            cmd
+        );
+    }
+
+    /// A joiner's second DKG must not inherit the first one's Complete label.
+    #[test]
+    fn joining_a_second_dkg_restarts_the_round_label() {
+        let mut model = after_first_dkg();
+        model.session_invites.push(dkg_invite("s2"));
+        join(&mut model, "s2");
+        let cmd = update(
+            &mut model,
+            Message::SubmitPassword {
+                value: "pw".to_string(),
+            },
+        );
+        assert!(matches!(cmd, Some(Command::JoinDKG { ref session_id, .. }) if session_id == "s2"));
+        assert_eq!(model.wallet_state.dkg_round, DKGRound::Initialization);
+    }
+
+    /// The signing initiator learns its session id only when StartSigning
+    /// announces it; after that, "Copy Session ID" copies it.
+    #[test]
+    fn signing_initiator_can_copy_the_announced_session_id() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::SigningProgress {
+            request_id: "inline".to_string(),
+        };
+        let mut session = dkg_invite("sign-1");
+        session.proposer_id = "dev".to_string();
+        update(&mut model, Message::SigningSessionAnnounced { session });
+        model
+            .ui_state
+            .selected_indices
+            .insert(crate::elm::model::ComponentId::DKGProgress, 1);
+
+        match update(&mut model, Message::SelectItem { index: 1 }) {
+            Some(Command::SendMessage(Message::CopyToClipboard { text, .. })) => {
+                assert_eq!(text, "sign-1")
+            }
+            other => panic!("expected CopyToClipboard, got {:?}", other),
         }
     }
 }

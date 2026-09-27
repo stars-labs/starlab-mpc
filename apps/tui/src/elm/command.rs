@@ -672,6 +672,39 @@ async fn try_finalize_unified<C>(
     }
 }
 
+/// Reset `AppState` for a new DKG ceremony (creator or joiner). A node that
+/// already ran a DKG this process still holds that ceremony's session,
+/// `DkgState::Complete`, round packages and mesh-ready flags; left in place,
+/// a second wallet's DKG reuses the old session and its round 1 is dropped as
+/// "FROST already running". Live peer connections are kept (warm mesh).
+fn begin_new_dkg<C: frost_core::Ciphersuite>(
+    state: &mut crate::utils::appstate_compat::AppState<C>,
+) {
+    state.dkg_in_progress = true;
+    state.session = None;
+    state.dkg_state = crate::utils::state::DkgState::Idle;
+    state.received_dkg_packages.clear();
+    state.received_dkg_round2_packages.clear();
+    state.dkg_part1_public_package = None;
+    state.dkg_part1_secret_package = None;
+    state.dkg_part2_secret_package = None;
+    state.dkg_round1_packages.clear();
+    state.dkg_round2_packages.clear();
+    state.round2_secret_package = None;
+    // DKG completion is detected as "public_key_package is set", so the last
+    // wallet's keys must go or the new ceremony "completes" with them.
+    state.key_package = None;
+    state.public_key_package = None;
+    state.group_public_key = None;
+    state.current_wallet_id = None;
+    state.unified_mode = false;
+    state.unified_dkg = None;
+    state.unified_finalize = None;
+    state.own_mesh_ready_sent = false;
+    state.pending_mesh_ready_signals.clear();
+    state.ceremony_outbox.clear();
+}
+
 /// Load an existing wallet's OLD share + metadata from the keystore and seed the
 /// reshare context on `AppState` (keys, ORIGINAL participant set, persist creds,
 /// `reshare_in_progress`). Shared by the reshare initiator (`StartReshare`) and
@@ -981,14 +1014,21 @@ impl Command {
 
                 {
                     let mut state = app_state.lock().await;
-                    if state.dkg_in_progress {
+                    // `dkg_in_progress` outlives a finished ceremony, so only a
+                    // DKG that hasn't ended blocks a new one (second wallet).
+                    let finished = matches!(
+                        state.dkg_state,
+                        crate::utils::state::DkgState::Complete
+                            | crate::utils::state::DkgState::Failed(_)
+                    );
+                    if state.dkg_in_progress && !finished {
                         info!("⚠️ DKG already in progress, skipping duplicate StartDKG");
                         let _ = tx.send(Message::Info {
                             message: "DKG already in progress, please wait...".to_string(),
                         });
                         return Ok(());
                     }
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                 }
 
                 if config.mode == crate::elm::model::WalletMode::Online {
@@ -1011,25 +1051,13 @@ impl Command {
                     // Note: We can't use tokio::spawn here due to Send/Sync constraints
                     // with FROST cryptographic types. For now, show informative messages.
 
-                    // CRITICAL FIX: Check if we already have an active session ID
-                    // This prevents creating new sessions on WebSocket reconnection
-                    let session_id = {
-                        let state = app_state.lock().await;
-                        if let Some(ref session) = state.session {
-                            // Reuse existing session ID to prevent session chaos
-                            info!("🔄 Reusing existing session ID: {}", session.session_id);
-                            session.session_id.clone()
-                        } else {
-                            // Only generate new session ID if we don't have one.
-                            // Bare UUID — the session TYPE is carried in the
-                            // `session_type` field, not parsed from an id prefix,
-                            // so a `dkg_` prefix was just noise. (wallet ids derive
-                            // from the hex either way; see wallet_id_from_session.)
-                            let new_id = uuid::Uuid::new_v4().to_string();
-                            info!("🆕 Creating new session ID: {}", new_id);
-                            new_id
-                        }
-                    };
+                    // Every StartDKG is a new ceremony (duplicates bail at the
+                    // gate above), so always mint a fresh id. Bare UUID — the
+                    // session TYPE is carried in `session_type`, not an id
+                    // prefix. (wallet ids derive from the hex; see
+                    // wallet_id_from_session.)
+                    let session_id = uuid::Uuid::new_v4().to_string();
+                    info!("🆕 Creating new session ID: {}", session_id);
 
                     let _ = tx_clone.send(Message::UpdateDKGSessionId {
                         real_session_id: session_id.clone(),
@@ -1829,7 +1857,7 @@ impl Command {
                 // at the dedupe check and can't re-announce the session as us.
                 let device_id = {
                     let mut state = app_state.lock().await;
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                     state.device_id.clone()
                 };
                 let tx_clone = tx.clone();
@@ -2963,6 +2991,11 @@ impl Command {
                         sid
                     }
                 };
+                // The initiator minted this id here; hand it to the Elm side
+                // (joiners already have it from the announce).
+                if let Some(session) = app_state.lock().await.session.clone() {
+                    let _ = tx.send(Message::SigningSessionAnnounced { session });
+                }
 
                 // Announce over the signal server so any peer that is
                 // joining can discover this signing ceremony. Best-effort —
