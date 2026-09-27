@@ -620,6 +620,17 @@ async fn broadcast_signing_frame<C>(
         if device_id == self_device_id {
             continue;
         }
+        // Signing needs only threshold-many of the participants; retrying an
+        // offline one here held up the frame to every peer after it (by up to
+        // 5s per round), and a one-shot signer could finish and exit first.
+        if !state.lock().await.is_online(device_id) {
+            info!(
+                "⏭ {} is not on the signal server; skipping {}",
+                device_id,
+                prefix.trim_end_matches(':')
+            );
+            continue;
+        }
         let mut retry = 0;
         const MAX_RETRIES: u32 = 10;
         const RETRY_DELAY_MS: u64 = 500;
@@ -688,6 +699,21 @@ mod tests {
             kps.insert(id, share.try_into().expect("share→KP"));
         }
         (kps, pkp)
+    }
+
+    /// An offline participant must not hold up the frame to the others.
+    #[tokio::test]
+    async fn broadcast_skips_participants_that_are_offline() {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.online_devices = Some(["me".to_string()].into_iter().collect());
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let participants = ["me".to_string(), "gone".to_string()];
+        let sent = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            super::broadcast_signing_frame(&state, &participants, "me", "SIGN_COMMIT:", b"x"),
+        )
+        .await;
+        assert!(sent.is_ok(), "broadcast waited on an offline participant");
     }
 
     /// The happy path this module drives: round1::commit × threshold,

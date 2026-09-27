@@ -63,7 +63,7 @@ def main():
         "--curve", args.curve,
         "--auto-approve",
         "--approve-password-env", args.pw_var,
-        "--log-level", "warn",
+        "--log-level", os.environ.get("SERVE_LOG_LEVEL", "warn"),
     ]
     if args.room:
         cmd += ["--room", args.room]

@@ -507,12 +507,23 @@ impl ReshareE2eResult {
     }
 }
 
-/// Networked reshare end to end over the real WebRTC mesh: run DKG, then trigger
-/// a same-set reshare on every node (reusing the live mesh), confirm all nodes
-/// preserve the group key, and finally sign with the REFRESHED shares + verify.
+/// Which runners perform the reshare after the DKG.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReshareRunners {
+    /// Fresh processes against the same keystores (a device that restarted).
+    Fresh,
+    /// The runners that just ran the DKG (a long-lived `serve` node).
+    Reused,
+}
+
+/// Networked reshare end to end over the real WebRTC mesh: run DKG, then a
+/// same-set reshare (announced by node 0, joined by the rest) on `runners`,
+/// confirm all nodes preserve the group key, and finally sign with the
+/// REFRESHED shares + verify.
 pub async fn run_reshare_e2e(
     opts: SimulateOpts,
     message: &str,
+    runners: ReshareRunners,
 ) -> anyhow::Result<ReshareE2eResult> {
     let nodes = opts.nodes;
     let threshold = opts.threshold;
@@ -524,47 +535,52 @@ pub async fn run_reshare_e2e(
     let dkg_group_key = c.group_key.clone();
     let wallet_id = c.outcomes[0].wallet_id.clone();
 
-    // True cross-process reshare (#56): tear down the DKG runners and spawn FRESH
-    // ones against the SAME keystores. Each fresh node loads its OLD share from
-    // disk, the initiator announces a reshare session, the retained signers
-    // discover + join, a NEW mesh forms, and every node refreshes. This
-    // exercises the disk-load + announce/join path a separate device would take
-    // — not the in-memory post-DKG mesh shortcut (4b).
-    //
-    // The fresh runners reuse the ORIGINAL device_ids (reshare identifiers are
-    // canonical over the original set, design §3) so they connect to a FRESH
-    // embedded signal server — the old runners still hold those ids on the old
-    // server (the server rejects duplicate live registrations, exactly as it
-    // would for a real still-connected device).
-    let ws_url = match &opts.signal_url {
-        Some(u) => u.clone(),
-        None => embedded_signal_server().await?,
-    };
     let device_ids = c.device_ids.clone();
-    let keystores = c.keystores; // move: must outlive the fresh runners
+    let keystores = c.keystores; // move: must outlive the runners
+    let (senders, mut receivers) = match runners {
+        ReshareRunners::Reused => (c.senders, c.receivers),
+        ReshareRunners::Fresh => {
+            // True cross-process reshare (#56): tear down the DKG runners and spawn FRESH
+            // ones against the SAME keystores. Each fresh node loads its OLD share from
+            // disk, the initiator announces a reshare session, the retained signers
+            // discover + join, a NEW mesh forms, and every node refreshes. This
+            // exercises the disk-load + announce/join path a separate device would take
+            // — not the in-memory post-DKG mesh shortcut (4b).
+            //
+            // The fresh runners reuse the ORIGINAL device_ids (reshare identifiers are
+            // canonical over the original set, design §3) so they connect to a FRESH
+            // embedded signal server — the old runners still hold those ids on the old
+            // server (the server rejects duplicate live registrations, exactly as it
+            // would for a real still-connected device).
+            let ws_url = match &opts.signal_url {
+                Some(u) => u.clone(),
+                None => embedded_signal_server().await?,
+            };
+            // Tear the DKG cluster down before bringing the reshare cluster up.
+            shut_down(c.senders, c.receivers).await;
 
-    // Tear the DKG cluster down before bringing the reshare cluster up.
-    shut_down(c.senders, c.receivers).await;
-
-    let mut senders = Vec::new();
-    let mut receivers = Vec::new();
-    for (i, device_id) in device_ids.iter().enumerate() {
-        let (cb, rx) = watcher();
-        let ks_path = keystores[i].path().to_string_lossy().into_owned();
-        let tx = if opts.curve == "ed25519" {
-            spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
-        } else {
-            spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
-        };
-        senders.push(tx);
-        receivers.push(rx);
-    }
-    for tx in &senders {
-        let _ = tx.send(Message::TriggerReconnect);
-    }
-    for rx in &mut receivers {
-        wait_for(rx, 15, |e| matches!(e, Evt::Connected)).await?;
-    }
+            let mut senders = Vec::new();
+            let mut receivers = Vec::new();
+            for (i, device_id) in device_ids.iter().enumerate() {
+                let (cb, rx) = watcher();
+                let ks_path = keystores[i].path().to_string_lossy().into_owned();
+                let tx = if opts.curve == "ed25519" {
+                    spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
+                } else {
+                    spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
+                };
+                senders.push(tx);
+                receivers.push(rx);
+            }
+            for tx in &senders {
+                let _ = tx.send(Message::TriggerReconnect);
+            }
+            for rx in &mut receivers {
+                wait_for(rx, 15, |e| matches!(e, Evt::Connected)).await?;
+            }
+            (senders, receivers)
+        }
+    };
 
     // Initiator (node 0) announces the reshare; retained signers 1.. join it.
     senders[0].send(Message::HeadlessReshare {

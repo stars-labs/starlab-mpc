@@ -589,6 +589,16 @@ pub async fn initiate_webrtc_with_channel<C>(
             // create the PC with a full handler set.
             continue;
         }
+        // The server drops an offer to a device it doesn't know, and the PC
+        // would then sit in have-local-offer and block every later offer (a
+        // peer that is restarting). Offer once it is back on the roster.
+        if !app_state.lock().await.is_online(participant) {
+            info!(
+                "⏸ [{}] {} is not on the signal server; offering when it rejoins",
+                self_device_id, participant
+            );
+            continue;
+        }
         let mut conns = device_connections.lock().await;
         if conns.contains_key(participant) {
             info!(
