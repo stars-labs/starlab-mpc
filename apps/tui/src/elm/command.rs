@@ -910,7 +910,15 @@ impl Command {
             Command::LoadWallets => {
                 info!("Loading wallets from keystore");
 
-                let state = app_state.lock().await;
+                let mut state = app_state.lock().await;
+                // Rescan disk: another Keystore instance (e.g. a front-end's
+                // wallet import) may have written files this cache hasn't seen.
+                if let Some(current) = state.keystore.clone() {
+                    match crate::keystore::Keystore::new(current.base_path(), current.device_id()) {
+                        Ok(fresh) => state.keystore = Some(std::sync::Arc::new(fresh)),
+                        Err(e) => warn!("LoadWallets: keystore rescan failed: {}", e),
+                    }
+                }
                 if let Some(ref keystore) = state.keystore {
                     let wallets = keystore.list_wallets();
                     // Convert Vec<&WalletMetadata> to Vec<WalletMetadata> by cloning
