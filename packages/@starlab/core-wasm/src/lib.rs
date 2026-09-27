@@ -1148,8 +1148,11 @@ macro_rules! frost_reshare_impl {
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
                 let bytes = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-                let pkg: frost_core::keys::dkg::round1::Package<$suite> =
-                    serde_json::from_slice(&bytes).map_err(|e| WasmError::new(&e.to_string()))?;
+                // JSON (extension peers) or FROST binary (CLI/TUI RESHARE_ROUND* frames).
+                let pkg: frost_core::keys::dkg::round1::Package<$suite> = decode_wire(
+                    &bytes,
+                    frost_core::keys::dkg::round1::Package::<$suite>::deserialize,
+                )?;
                 session.add_round1(from, pkg).map_err(WasmError::from)
             }
 
@@ -1188,8 +1191,11 @@ macro_rules! frost_reshare_impl {
                     .as_mut()
                     .ok_or_else(|| WasmError::new("init_reshare not called"))?;
                 let bytes = hex::decode(package_hex).map_err(|e| WasmError::new(&e.to_string()))?;
-                let pkg: frost_core::keys::dkg::round2::Package<$suite> =
-                    serde_json::from_slice(&bytes).map_err(|e| WasmError::new(&e.to_string()))?;
+                // JSON (extension peers) or FROST binary (CLI/TUI RESHARE_ROUND* frames).
+                let pkg: frost_core::keys::dkg::round2::Package<$suite> = decode_wire(
+                    &bytes,
+                    frost_core::keys::dkg::round2::Package::<$suite>::deserialize,
+                )?;
                 session.add_round2(from, pkg).map_err(WasmError::from)
             }
 
