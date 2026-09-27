@@ -6,7 +6,8 @@
 //!   cargo test -p starlab-cli --test e2e_dkg -- --ignored --nocapture
 
 use starlab_cli::simulate::{
-    SimulateOpts, run_signing_simulation, run_signing_simulation_all_signers_online, run_simulation,
+    SimulateOpts, run_signing_simulation, run_signing_simulation_all_signers_online,
+    run_signing_timeout_then_retry_simulation, run_simulation,
 };
 
 fn init_logs() {
@@ -154,6 +155,69 @@ async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
         result.elapsed_ms,
         result.verified,
         &result.signatures[0][..16.min(result.signatures[0].len())]
+    );
+}
+
+/// Regression test for the signing-timeout feature: a picked signer that
+/// never responds (down, or never approves the request) must not wedge the
+/// ceremony forever — node 0 announces, nobody joins, so it never gathers
+/// `threshold`-many commitments and must fail cleanly on its own once the
+/// (shortened, via `STARLAB_SIGNING_TIMEOUT_MS`) timeout elapses. A retry —
+/// a fresh ceremony with a real co-signer — must then succeed and verify,
+/// proving the timeout wiped the ceremony state cleanly enough to start
+/// over (automatic re-picking of a different signer INSIDE the same
+/// ceremony is unsafe: FROST nonce reuse would leak the key).
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+signing over loopback; run with --ignored"]
+async fn signing_times_out_when_nobody_joins_then_retry_succeeds() {
+    init_logs();
+
+    // Restores the env var on drop (even on panic) so this test's shortened
+    // timeout can't leak into a later test sharing the process — tests run
+    // with `--test-threads=1`, but still inside the same binary.
+    struct EnvGuard;
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: `--test-threads=1` serializes test bodies in this
+            // binary, so no other test reads/writes this var concurrently.
+            unsafe { std::env::remove_var("STARLAB_SIGNING_TIMEOUT_MS") };
+        }
+    }
+    // SAFETY: see `EnvGuard::drop` above.
+    unsafe { std::env::set_var("STARLAB_SIGNING_TIMEOUT_MS", "3000") };
+    let _env_guard = EnvGuard;
+
+    let result = run_signing_timeout_then_retry_simulation(
+        SimulateOpts {
+            nodes: 3,
+            threshold: 2,
+            curve: "secp256k1".into(),
+            signal_url: None,
+            timeout_secs: 60,
+        },
+        "picked signer never responds; ceremony must time out, then retry",
+    )
+    .await
+    .expect("signing-timeout-then-retry simulation ran");
+
+    assert!(
+        result.timeout_reason.contains("timed out"),
+        "first ceremony must fail via the timeout: {}",
+        result.timeout_reason
+    );
+    assert!(
+        result.timeout_reason.contains("threshold"),
+        "with nobody joined, the reason must cite the commitment shortfall: {}",
+        result.timeout_reason
+    );
+    assert!(!result.retried_signature.is_empty(), "empty signature");
+    assert!(
+        result.verified,
+        "retried signature did not verify against the group key: {result:?}"
+    );
+    eprintln!(
+        "✅ stuck ceremony timed out ({}), retry ok in {}ms, verified={}",
+        result.timeout_reason, result.elapsed_ms, result.verified
     );
 }
 
