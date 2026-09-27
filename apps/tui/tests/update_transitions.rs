@@ -1668,6 +1668,11 @@ fn submit_password_on_signing_session_dispatches_unlock_and_stashes_payload() {
         model.wallet_state.pending_sign_session_id.as_deref(),
         Some("sign_xyz"),
     );
+    assert_eq!(
+        model.wallet_state.pending_sign_proposer_id.as_deref(),
+        Some("mpc-1"),
+        "the announced session's proposer_id must be stashed for JoinSigning"
+    );
 }
 
 #[test]
@@ -1682,6 +1687,7 @@ fn wallet_unlocked_with_pending_sign_dispatches_join_signing() {
     model.wallet_state.pending_sign_message = Some(b"hello".to_vec());
     model.wallet_state.pending_sign_wallet_id = Some("wallet-dkg_abcd".to_string());
     model.wallet_state.pending_sign_session_id = Some("sign_xyz".to_string());
+    model.wallet_state.pending_sign_proposer_id = Some("sim-node-0".to_string());
 
     let cmd = update(
         &mut model,
@@ -1694,9 +1700,11 @@ fn wallet_unlocked_with_pending_sign_dispatches_join_signing() {
         Some(Command::JoinSigning {
             session_id,
             message_bytes,
+            proposer_id,
         }) => {
             assert_eq!(session_id, "sign_xyz");
             assert_eq!(message_bytes, b"hello");
+            assert_eq!(proposer_id, "sim-node-0");
         }
         other => panic!(
             "WalletUnlocked with pending sign must dispatch JoinSigning; got {:?}",
@@ -1708,6 +1716,7 @@ fn wallet_unlocked_with_pending_sign_dispatches_join_signing() {
     assert!(model.wallet_state.pending_sign_message.is_none());
     assert!(model.wallet_state.pending_sign_wallet_id.is_none());
     assert!(model.wallet_state.pending_sign_session_id.is_none());
+    assert!(model.wallet_state.pending_sign_proposer_id.is_none());
     // Current screen should be SigningProgress.
     assert!(
         matches!(model.current_screen, Screen::SigningProgress { .. }),

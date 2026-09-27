@@ -1,25 +1,41 @@
 //! FROST Threshold Signing — Protocol Layer
 //!
-//! Structure mirrors `protocal/dkg.rs`: three async handlers driven by
-//! Commands, and a SigningState tracked on `AppState<C>`. The round-1
-//! (commit) and round-2 (sign) FROST functions are applied locally; peer
-//! artifacts flow over the existing WebRTC mesh using `SIGN_COMMIT:<b64>`
-//! and `SIGN_SHARE:<b64>` prefixes on `WebRTCMessage::SimpleMessage`.
+//! Structure mirrors `protocal/dkg.rs`: async handlers driven by Commands,
+//! and a SigningState tracked on `AppState<C>`. The round-1 (commit) and
+//! round-2 (sign) FROST functions are applied locally; peer artifacts flow
+//! over the existing WebRTC mesh using `SIGN_COMMIT:<b64>`, `SIGN_SHARE:<b64>`
+//! and `SIGN_SET:<b64>` prefixes on `WebRTCMessage::SimpleMessage`.
 //!
-//! Unlike DKG — which must see EVERY participant's package before
-//! moving forward — signing only needs `session.threshold` participants.
-//! We accumulate whatever the mesh delivers and fire the next phase the
-//! moment we've crossed that bar. Late arrivals are ignored.
+//! With MORE than `threshold` signers online, every node accumulating
+//! whatever threshold-many commitments it happened to see first (the old
+//! rule) let different nodes pick different signer sets, so aggregation
+//! failed with `UnknownIdentifier`. The signer set is now fixed by exactly
+//! one node — the proposer (`session.proposer_id`) — and broadcast to
+//! everyone else before Round 2 runs anywhere:
+//!
+//! 1. The **proposer** fixes the set (itself + the first threshold-1
+//!    commitments it received — today's first-come rule, but confined to
+//!    the proposer) the moment it has threshold-many commitments, THEN
+//!    broadcasts `SIGN_SET` to every other participant, THEN runs Round 2.
+//! 2. A **non-proposer** never picks a set. It runs Round 2 only once it
+//!    has received `SIGN_SET` from the proposer, is listed in it, and holds
+//!    every set member's commitment (own included). A node NOT in the set
+//!    never signs.
+//! 3. **Every** node — set member or not — aggregates once it holds the
+//!    `SIGN_SHARE` of every set member, built from exactly the set's
+//!    commitments + shares, so every node (including one that never
+//!    signed) converges on the identical signature.
 //!
 //! Public surface:
 //! - [`handle_start_signing`]: kickoff. Runs `round1::commit` on this
 //!   node, stashes the nonces, broadcasts the commitment.
-//! - [`process_signing_round1`]: peer commitment arrived. Accumulate;
-//!   when threshold reached, build `SigningPackage`, run `round2::sign`
-//!   locally, broadcast the share.
-//! - [`process_signing_round2`]: peer share arrived. Accumulate; when
-//!   threshold reached, `aggregate`, serialize the signature, and emit
-//!   `Message::SigningComplete` to the UI layer.
+//! - [`process_signing_round1`]: peer commitment arrived. Accumulate; the
+//!   proposer may now have enough to fix the signer set (see above).
+//! - [`process_signing_set`]: the proposer's `SIGN_SET` arrived (or a
+//!   buffered SIGN_COMMIT/SIGN_SET unblocked Round 2 once applied).
+//!   Validate it, stash it, and try to advance.
+//! - [`process_signing_round2`]: peer share arrived. Accumulate; try to
+//!   aggregate.
 //!
 //! All error paths transition `SigningState = Failed { reason }` and
 //! emit `Message::SigningFailed`. There are no panics in this module —
@@ -38,11 +54,17 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info, warn};
 
-/// Prefix markers for the two signing-related frames on the SimpleMessage
+/// Prefix markers for the signing-related frames on the SimpleMessage
 /// channel. The inbound dispatcher in `network/webrtc.rs` strip-prefixes
 /// against these constants; keep them in sync.
 pub const SIGN_COMMIT_PREFIX: &str = "SIGN_COMMIT:";
 pub const SIGN_SHARE_PREFIX: &str = "SIGN_SHARE:";
+/// The proposer-fixed signer set: `SIGN_SET:` + standard base64 (with
+/// padding) of the UTF-8 JSON array of device-id strings, e.g.
+/// `SIGN_SET:` + base64(`["ext-1","cli-2"]`). The browser extension
+/// implements the exact same wire format — order doesn't matter (receivers
+/// treat it as a set), but the encoding must match byte-for-byte.
+pub const SIGN_SET_PREFIX: &str = "SIGN_SET:";
 
 /// Synthetic signing-request id for the "sign a message right now" flow
 /// we implement in Phase C. The real pending-signing-request queue is a
@@ -111,21 +133,36 @@ pub async fn handle_start_signing<C>(
         };
 
         // Reset transient state from a prior ceremony so an aborted
-        // attempt doesn't contaminate this one. Caveat on `frost_commitments`:
-        // we deliberately do NOT clear that map here. Reason: on the
-        // joiner path, handle_start_signing runs AFTER the node has
-        // already buffered the creator's SIGN_COMMIT via
-        // `process_signing_round1`. Clearing would drop that buffered
-        // commit and stall the ceremony at threshold - 1. Inserts are
-        // keyed by `Identifier<C>`, so stale entries from a previous
-        // ceremony with the same participants get overwritten by the
-        // fresh commit below rather than accumulated. If a prior
-        // ceremony had DIFFERENT participants you'd get cross-contamination,
-        // but we don't support concurrent ceremonies this phase.
-        guard.frost_signature_shares.clear();
+        // attempt doesn't contaminate this one. Caveat on `frost_commitments`,
+        // `frost_signature_shares` AND `signer_set`: we deliberately do NOT
+        // clear these here. Reason: `AppState.session` survives from the
+        // prior DKG (or a prior signing) with the SAME participants/threshold,
+        // so a peer's SIGN_COMMIT / SIGN_SET / SIGN_SHARE for THIS ceremony
+        // can be accepted and applied (by `process_signing_round1` /
+        // `process_signing_set` / `process_signing_round2`) the moment it
+        // arrives — `session.is_none()` is false, so nothing buffers it —
+        // even if that's BEFORE this node has locally reached
+        // `handle_start_signing`. Clearing here would drop whatever already
+        // landed and stall the ceremony (a real interop race: a fast
+        // proposer + fast co-signer can finish Round 2 and broadcast SIGN_SET
+        // / SIGN_SHARE before a slower third participant even starts).
+        // `frost_commitments`/`frost_signature_shares` inserts are keyed by
+        // `Identifier<C>`, so stale entries from a previous ceremony with the
+        // same participants get overwritten by the fresh ones rather than
+        // accumulated, and `signer_set` is `Option`-guarded (only ever
+        // written once, by the proposer or by a validated SIGN_SET) with the
+        // post-aggregate signature verification as the safety net against a
+        // truly stale value slipping through. If a prior ceremony had
+        // DIFFERENT participants you'd get cross-contamination, but we don't
+        // support concurrent ceremonies this phase.
         guard.frost_nonces = None;
         guard.signing_message = Some(message.clone());
         guard.ceremony_outbox.clear();
+        // Arrival order always restarts with self (inserted into
+        // `frost_commitments` right below) — only the proposer (who always
+        // calls this BEFORE fixing any set) reads it, so no early-arrival
+        // race applies here.
+        guard.commitment_arrival_order = vec![self_device_id.clone()];
         guard.signing_state = SigningState::CommitmentPhase {
             signing_id: INLINE_SIGNING_ID.to_string(),
             transaction_data: format!("{} bytes", message.len()),
@@ -178,12 +215,27 @@ pub async fn handle_start_signing<C>(
     // place, they can be decoded, counted toward threshold, and may complete
     // Round 1. No-op (empty buffer) on the warm path.
     drain_pre_session_commitments::<C>(state.clone(), self_device_id.clone(), ui_tx.clone()).await;
+    // Same for a `SIGN_SET` that beat this node's session into existence
+    // (a cold-started co-signer, the same race `pending_pre_session_commitments`
+    // guards against).
+    drain_pre_session_signer_set::<C>(state.clone(), self_device_id.clone(), ui_tx.clone()).await;
 
     // Check the threshold-reached edge here too — a 2-of-3 wallet where
     // only this node signs would otherwise sit on its own commitment
     // forever. `try_advance_to_round2` runs Round 2 locally if we
     // already have threshold-many commitments (including our own).
     try_advance_to_round2::<C>(&state, &ui_tx, &self_device_id).await;
+    // A node outside the fixed signer set never runs Round 2, so the only
+    // thing that can trigger ITS aggregation is a peer's SIGN_COMMIT / SIGN_SET
+    // / SIGN_SHARE arriving — which, on a warm `AppState.session` (reused from
+    // a prior DKG/signing), can happen well BEFORE this node calls
+    // `handle_start_signing` (nothing buffers it; `session.is_none()` is
+    // false). Every such early arrival's `try_aggregate` call silently no-ops
+    // because `signing_message` — set only by THIS function, right above —
+    // wasn't there yet. Retry once now that it is: if every set member's
+    // commitment + share already arrived, this is what actually completes
+    // the ceremony for a late-starting non-member.
+    try_aggregate::<C>(&state, &ui_tx).await;
 }
 
 /// Re-feed `SIGN_COMMIT`s that arrived before this node had a signing session
@@ -210,6 +262,39 @@ pub async fn drain_pre_session_commitments<C>(
     );
     for (from, bytes) in buffered {
         process_signing_round1(
+            state.clone(),
+            self_device_id.clone(),
+            from,
+            bytes,
+            ui_tx.clone(),
+        )
+        .await;
+    }
+}
+
+/// Re-feed a `SIGN_SET` that arrived before this node had a signing session
+/// (see `AppState::pending_pre_session_signer_set`). Called once the session
+/// is established. Mirrors `drain_pre_session_commitments`.
+pub async fn drain_pre_session_signer_set<C>(
+    state: Arc<Mutex<AppState<C>>>,
+    self_device_id: String,
+    ui_tx: UnboundedSender<Message>,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+{
+    let buffered: Vec<(String, Vec<u8>)> = {
+        let mut guard = state.lock().await;
+        std::mem::take(&mut guard.pending_pre_session_signer_set)
+    };
+    if buffered.is_empty() {
+        return;
+    }
+    info!(
+        "signing: re-feeding {} buffered pre-session SIGN_SET(s)",
+        buffered.len()
+    );
+    for (from, bytes) in buffered {
+        process_signing_set(
             state.clone(),
             self_device_id.clone(),
             from,
@@ -285,21 +370,44 @@ pub async fn process_signing_round1<C>(
         (sender_id, decoded)
     };
 
-    // Insert into the accumulator.
+    // Insert into the accumulator. Also record arrival order (dedup: a
+    // resend of the exact same frame never reaches here twice — the
+    // `SeenFrames` de-dup in `network::webrtc` catches that — but a
+    // never-fixed proposer might still see the sender again after a
+    // buffered replay, so guard anyway).
     {
         let mut guard = state.lock().await;
         guard
             .frost_commitments
             .insert(decode_result.0, decode_result.1);
+        if !guard.commitment_arrival_order.contains(&from_device_id) {
+            guard.commitment_arrival_order.push(from_device_id.clone());
+        }
     }
 
     try_advance_to_round2::<C>(&state, &ui_tx, &self_device_id).await;
+    // A commitment can be the last piece a non-member node needed to build
+    // the SIGN_SET signer set's SigningPackage for aggregation (shares may
+    // have already arrived).
+    try_aggregate::<C>(&state, &ui_tx).await;
 }
 
-/// If this node has gathered threshold-many commitments AND its own
-/// Round-1 nonces are stashed, derive our Round-2 share and broadcast
-/// it. Idempotent — if we've already broadcast our share, returns
-/// without doing anything.
+/// Two jobs, run in order:
+///
+/// 1. **Proposer only, once**: the moment `frost_commitments` crosses
+///    `threshold`, fix the signer set to itself + the first threshold-1
+///    arrivals (`commitment_arrival_order` — today's first-come rule,
+///    but confined to the proposer) and broadcast `SIGN_SET` to every
+///    other participant BEFORE doing anything else this call.
+/// 2. **Every set member**: once `signer_set` is populated (fixed just
+///    above if we're the proposer, or received via `process_signing_set`
+///    otherwise) and we hold the commitment of every member (own
+///    included), derive our Round-2 share and broadcast it.
+///
+/// A node not listed in the fixed set returns after step 1 without ever
+/// running Round 2 — it doesn't sign, but it still aggregates once every
+/// member's share arrives (`try_aggregate`). Idempotent — if we've already
+/// broadcast our share, returns without doing anything.
 async fn try_advance_to_round2<C>(
     state: &Arc<Mutex<AppState<C>>>,
     ui_tx: &UnboundedSender<Message>,
@@ -307,15 +415,64 @@ async fn try_advance_to_round2<C>(
 ) where
     C: Ciphersuite + Send + Sync + 'static,
 {
-    // Collect the inputs under a short lock.
-    let (commitments_for_pkg, message, nonces, key_package, my_id, threshold, participants) = {
+    // Step 1: proposer fixes the signer set, exactly once.
+    let just_fixed: Option<(Vec<String>, Vec<String>)> = {
+        let mut guard = state.lock().await;
+        let Some(session) = guard.session.as_ref() else {
+            return;
+        };
+        if session.proposer_id != self_device_id || guard.signer_set.is_some() {
+            None
+        } else {
+            let threshold = session.threshold as usize;
+            if guard.frost_commitments.len() < threshold {
+                return; // not enough yet — wait for more SIGN_COMMITs
+            }
+            let set: Vec<String> = guard
+                .commitment_arrival_order
+                .iter()
+                .take(threshold)
+                .cloned()
+                .collect();
+            let participants = session.participants.clone();
+            info!(
+                "🔒 {} (proposer): fixed signer set {:?}",
+                self_device_id, set
+            );
+            guard.signer_set = Some(set.iter().cloned().collect());
+            Some((set, participants))
+        }
+    };
+    if let Some((set, participants)) = just_fixed {
+        let payload = match serde_json::to_vec(&set) {
+            Ok(b) => b,
+            Err(e) => {
+                let mut g = state.lock().await;
+                fail_and_notify(&mut g, ui_tx, format!("SIGN_SET serialize: {e}"));
+                return;
+            }
+        };
+        broadcast_signing_frame(
+            state,
+            &participants,
+            self_device_id,
+            SIGN_SET_PREFIX,
+            &payload,
+        )
+        .await;
+    }
+
+    // Step 2: run Round 2 once we hold every signer-set member's commitment.
+    let (commitments_for_pkg, message, nonces, key_package, my_id, participants) = {
         let guard = state.lock().await;
         let Some(session) = guard.session.as_ref() else {
             return;
         };
-        let threshold = session.threshold as usize;
-        if guard.frost_commitments.len() < threshold {
-            return; // not enough yet — wait for more SIGN_COMMITs
+        let Some(signer_set) = guard.signer_set.as_ref() else {
+            return; // non-proposer still waiting on SIGN_SET
+        };
+        if !signer_set.contains(self_device_id) {
+            return; // not a member of the fixed set — never signs
         }
         let Some(key_package) = guard.key_package.as_ref() else {
             warn!("try_advance_to_round2: no key_package — cannot sign, bailing");
@@ -329,6 +486,22 @@ async fn try_advance_to_round2<C>(
         if guard.frost_signature_shares.contains_key(&my_id) {
             return;
         }
+        // The SigningPackage must use EXACTLY the set's commitments — never
+        // whatever else `frost_commitments` accumulated from signers outside
+        // the set.
+        let mut commitments_for_pkg = BTreeMap::new();
+        for device in signer_set {
+            let Some(id) = canonical_identifier::<C>(&session.participants, device) else {
+                // SIGN_SET is validated against session.participants before
+                // being stored (see `process_signing_set`) — unreachable.
+                warn!("signer_set member {} not in session.participants", device);
+                return;
+            };
+            let Some(commitment) = guard.frost_commitments.get(&id) else {
+                return; // still waiting on this member's SIGN_COMMIT
+            };
+            commitments_for_pkg.insert(id, *commitment);
+        }
         let Some(nonces) = guard.frost_nonces.clone() else {
             warn!("try_advance_to_round2: frost_nonces is None — did Round 1 run?");
             return;
@@ -339,19 +512,18 @@ async fn try_advance_to_round2<C>(
         };
 
         (
-            guard.frost_commitments.clone(),
+            commitments_for_pkg,
             message,
             nonces,
             key_package.clone(),
             my_id,
-            threshold,
             session.participants.clone(),
         )
     };
 
     info!(
-        "✅ {}: threshold reached ({} commitments), running Round 2",
-        self_device_id, threshold
+        "✅ {}: have every signer-set member's commitment, running Round 2",
+        self_device_id
     );
 
     let signing_package = frost_core::SigningPackage::new(commitments_for_pkg, &message);
@@ -464,22 +636,163 @@ pub async fn process_signing_round2<C>(
     try_aggregate::<C>(&state, &ui_tx).await;
 }
 
-/// If this node has threshold-many shares AND a SigningPackage built
-/// during Round 1, run `frost_core::aggregate` and emit
-/// `Message::SigningComplete`. Idempotent.
+// -----------------------------------------------------------------
+// process_signing_set — the proposer's fixed signer set arrives here
+// -----------------------------------------------------------------
+
+/// Decode a `SIGN_SET` payload: standard base64 (with padding, already
+/// stripped by the caller) of the UTF-8 JSON array of device-id strings.
+/// Exposed for the wire-format unit tests below.
+pub fn decode_signer_set(payload: &[u8]) -> Result<Vec<String>, String> {
+    serde_json::from_slice::<Vec<String>>(payload)
+        .map_err(|e| format!("SIGN_SET payload is not a JSON string array: {e}"))
+}
+
+/// Encode the full `SIGN_SET:<b64>` wire frame — order as given (receivers
+/// treat it as a set). Production code never needs the full frame string
+/// (`broadcast_signing_frame` does the equivalent base64(payload) step
+/// itself given just the JSON bytes); this exists for the wire-format test.
+#[cfg(test)]
+fn encode_signer_set_frame(device_ids: &[String]) -> String {
+    let json = serde_json::to_vec(device_ids).expect("Vec<String> always serializes");
+    format!("{SIGN_SET_PREFIX}{}", BASE64.encode(json))
+}
+
+/// Received the proposer's fixed signer set (device ids, order doesn't
+/// matter). Only `session.proposer_id` may send this frame — anyone else's
+/// is ignored with a warning, never treated as an error (a stale co-signer
+/// guessing at the protocol isn't a ceremony-ending event). An invalid set
+/// from the real proposer (unknown device, missing the proposer itself, or
+/// the wrong size) DOES fail the ceremony: every other node validates the
+/// exact same way, so a mismatch here is a real protocol bug, not a
+/// transient race.
+pub async fn process_signing_set<C>(
+    state: Arc<Mutex<AppState<C>>>,
+    self_device_id: String,
+    from_device_id: String,
+    signer_set_bytes: Vec<u8>,
+    ui_tx: UnboundedSender<Message>,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+{
+    info!(
+        "📥 Received SIGN_SET from {} ({} bytes)",
+        from_device_id,
+        signer_set_bytes.len()
+    );
+
+    // Cold-start race: the session doesn't exist yet, so we can't check
+    // `from_device_id` against `session.proposer_id` yet. Buffer the raw
+    // bytes and re-feed via `drain_pre_session_signer_set` once the session
+    // exists — mirrors `pending_pre_session_commitments`.
+    let (proposer_id, participants, threshold) = {
+        let mut guard = state.lock().await;
+        let Some(session) = guard.session.as_ref() else {
+            info!(
+                "SIGN_SET from {} before session ready; buffering",
+                from_device_id
+            );
+            guard
+                .pending_pre_session_signer_set
+                .push((from_device_id.clone(), signer_set_bytes.clone()));
+            return;
+        };
+        (
+            session.proposer_id.clone(),
+            session.participants.clone(),
+            session.threshold as usize,
+        )
+    };
+
+    if from_device_id != proposer_id {
+        warn!(
+            "SIGN_SET from non-proposer {} (proposer is {}); ignoring",
+            from_device_id, proposer_id
+        );
+        return;
+    }
+
+    let device_ids = match decode_signer_set(&signer_set_bytes) {
+        Ok(ids) => ids,
+        Err(e) => {
+            let mut g = state.lock().await;
+            fail_and_notify(&mut g, &ui_tx, format!("process_signing_set: {e}"));
+            return;
+        }
+    };
+    let set: std::collections::BTreeSet<String> = device_ids.into_iter().collect();
+
+    if set.len() != threshold {
+        let err = format!(
+            "SIGN_SET from proposer {} has {} member(s), expected threshold {}: {:?}",
+            proposer_id,
+            set.len(),
+            threshold,
+            set
+        );
+        let mut g = state.lock().await;
+        fail_and_notify(&mut g, &ui_tx, err);
+        return;
+    }
+    if !set.contains(&proposer_id) {
+        let err = format!(
+            "SIGN_SET from proposer {proposer_id} does not include the proposer itself: {set:?}"
+        );
+        let mut g = state.lock().await;
+        fail_and_notify(&mut g, &ui_tx, err);
+        return;
+    }
+    if let Some(unknown) = set.iter().find(|d| !participants.contains(d)) {
+        let err = format!("SIGN_SET from proposer {proposer_id} lists unknown device {unknown}");
+        let mut g = state.lock().await;
+        fail_and_notify(&mut g, &ui_tx, err);
+        return;
+    }
+
+    {
+        let mut guard = state.lock().await;
+        match &guard.signer_set {
+            Some(existing) if existing == &set => return, // resend; already applied
+            Some(existing) => {
+                let err = format!(
+                    "SIGN_SET from proposer {proposer_id} ({set:?}) conflicts with the \
+                     already-fixed signer set ({existing:?})"
+                );
+                fail_and_notify(&mut guard, &ui_tx, err);
+                return;
+            }
+            None => {
+                info!(
+                    "🔒 Fixed signer set (from proposer {}): {:?}",
+                    proposer_id, set
+                );
+                guard.signer_set = Some(set);
+            }
+        }
+    }
+
+    try_advance_to_round2::<C>(&state, &ui_tx, &self_device_id).await;
+    try_aggregate::<C>(&state, &ui_tx).await;
+}
+
+/// If this node holds the `SIGN_SHARE` of every fixed signer-set member
+/// (own included, when this node is a member) AND the signer set is known,
+/// run `frost_core::aggregate` and emit `Message::SigningComplete`.
+/// Idempotent. Runs on EVERY node, member or not — a node outside the set
+/// never calls `round2::sign` but still collects the set's shares off the
+/// mesh and aggregates them, so it converges on the identical signature.
 async fn try_aggregate<C>(state: &Arc<Mutex<AppState<C>>>, ui_tx: &UnboundedSender<Message>)
 where
     C: Ciphersuite + Send + Sync + 'static,
 {
-    let (signing_package, shares, pubkey_package, message, threshold) = {
+    let (signing_package, shares, pubkey_package, message, signer_set_len) = {
         let guard = state.lock().await;
         let Some(session) = guard.session.as_ref() else {
             return;
         };
-        let threshold = session.threshold as usize;
-        if guard.frost_signature_shares.len() < threshold {
-            return;
-        }
+        let Some(signer_set) = guard.signer_set.as_ref() else {
+            return; // no fixed set yet — nothing to aggregate against
+        };
         // Guard against double-aggregate: Complete state means we already
         // emitted a signature — ignore further SIGN_SHAREs.
         if matches!(guard.signing_state, SigningState::Complete { .. }) {
@@ -492,24 +805,32 @@ where
         let Some(message) = guard.signing_message.clone() else {
             return;
         };
-        // Rebuild the SigningPackage from the accumulated commitments — we
-        // deliberately don't rely on the SharePhase::signing_package field
-        // because that's only populated on the node that ran Round 2
-        // locally. Every node that's about to aggregate has the full
-        // `frost_commitments` map, so this construction is stable.
-        let pkg = frost_core::SigningPackage::new(guard.frost_commitments.clone(), &message);
-        (
-            pkg,
-            guard.frost_signature_shares.clone(),
-            pkp.clone(),
-            message,
-            threshold,
-        )
+        // Exactly the signer set's commitments + shares — never whatever
+        // else `frost_commitments`/`frost_signature_shares` accumulated
+        // from signers outside the fixed set.
+        let mut commitments = BTreeMap::new();
+        let mut shares = BTreeMap::new();
+        for device in signer_set {
+            let Some(id) = canonical_identifier::<C>(&session.participants, device) else {
+                warn!("signer_set member {} not in session.participants", device);
+                return;
+            };
+            let Some(commitment) = guard.frost_commitments.get(&id) else {
+                return; // still waiting on this member's SIGN_COMMIT
+            };
+            let Some(share) = guard.frost_signature_shares.get(&id) else {
+                return; // still waiting on this member's SIGN_SHARE
+            };
+            commitments.insert(id, *commitment);
+            shares.insert(id, *share);
+        }
+        let pkg = frost_core::SigningPackage::new(commitments, &message);
+        (pkg, shares, pkp.clone(), message, signer_set.len())
     };
 
     info!(
-        "🧮 Threshold shares reached ({}), running aggregate",
-        threshold
+        "🧮 Have every signer-set member's share ({}), running aggregate",
+        signer_set_len
     );
 
     let signature = match frost_core::aggregate(&signing_package, &shares, &pubkey_package) {
@@ -560,6 +881,8 @@ where
         guard.frost_nonces = None;
         guard.signing_message = None;
         guard.ceremony_outbox.clear();
+        guard.signer_set = None;
+        guard.commitment_arrival_order.clear();
     }
 
     info!(
@@ -593,6 +916,8 @@ fn fail_and_notify<C: Ciphersuite>(
     guard.frost_nonces = None;
     guard.signing_message = None;
     guard.ceremony_outbox.clear();
+    guard.signer_set = None;
+    guard.commitment_arrival_order.clear();
     let _ = ui_tx.send(Message::SigningFailed {
         request_id: INLINE_SIGNING_ID.to_string(),
         error: reason,
@@ -794,5 +1119,348 @@ mod tests {
             "aggregating shares for the wrong message must fail; got Ok({:?})",
             result.map(|s| s.serialize().unwrap())
         );
+    }
+
+    // -------------------------------------------------------------
+    // SIGN_SET — wire format + decision-logic tests
+    // -------------------------------------------------------------
+
+    use super::{BASE64, Message, SIGN_SET_PREFIX, decode_signer_set, encode_signer_set_frame};
+    use crate::protocal::dkg::canonical_identifier;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use crate::utils::state::SigningState;
+    use base64::Engine as _;
+
+    fn signing_session(proposer_id: &str, participants: &[&str], threshold: u16) -> SessionInfo {
+        SessionInfo {
+            session_id: "sim-sign".to_string(),
+            proposer_id: proposer_id.to_string(),
+            total: participants.len() as u16,
+            threshold,
+            participants: participants.iter().map(|s| s.to_string()).collect(),
+            session_type: SessionType::Signing {
+                wallet_name: "w".to_string(),
+                curve_type: "secp256k1".to_string(),
+                blockchain: "secp256k1".to_string(),
+                group_public_key: String::new(),
+            },
+            curve_type: "secp256k1".to_string(),
+            coordination_type: "Network".to_string(),
+            signing_message_hex: None,
+        }
+    }
+
+    #[test]
+    fn signer_set_wire_format_matches_the_spec_vector_and_round_trips() {
+        let ids = vec!["a".to_string(), "b".to_string()];
+        let frame = encode_signer_set_frame(&ids);
+        assert_eq!(frame, "SIGN_SET:WyJhIiwiYiJd");
+
+        let payload = frame.strip_prefix(SIGN_SET_PREFIX).expect("has the prefix");
+        let decoded_bytes = BASE64.decode(payload).expect("valid base64");
+        let decoded = decode_signer_set(&decoded_bytes).expect("valid JSON string array");
+        assert_eq!(decoded, ids);
+    }
+
+    #[test]
+    fn decode_signer_set_rejects_non_json() {
+        assert!(decode_signer_set(b"not json").is_err());
+    }
+
+    /// The proposer fixes itself + the first threshold-1 arrivals the
+    /// moment it has threshold-many commitments, THEN runs Round 2 (it is
+    /// always a member of its own fixed set).
+    #[tokio::test]
+    async fn proposer_fixes_signer_set_and_signs_once_threshold_commitments_arrive() {
+        let (kps, pkp) = trusted_2_of_3();
+        let session = signing_session("a", &["a", "b", "c"], 2);
+        let message = b"proposer fixes the set".to_vec();
+
+        let id_a = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "a").unwrap();
+        let id_b = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "b").unwrap();
+
+        let mut rng = starlab_core::rng::os_rng();
+        let (nonces_a, commit_a) = frost_core::round1::commit(kps[&id_a].signing_share(), &mut rng);
+        let (_nonces_b, commit_b) =
+            frost_core::round1::commit(kps[&id_b].signing_share(), &mut rng);
+
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = "a".into();
+        state.session = Some(session);
+        state.key_package = Some(kps[&id_a].clone());
+        state.public_key_package = Some(pkp);
+        state.signing_message = Some(message);
+        state.frost_nonces = Some(nonces_a);
+        state.frost_commitments.insert(id_a, commit_a);
+        state.frost_commitments.insert(id_b, commit_b);
+        state.commitment_arrival_order = vec!["a".to_string(), "b".to_string()];
+        // Only self online — sends to "b"/"c" are skipped outright rather
+        // than retried against a data channel that doesn't exist in this test.
+        state.online_devices = Some(["a".to_string()].into_iter().collect());
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        super::try_advance_to_round2::<Secp256K1Sha256TR>(&state, &tx, "a").await;
+
+        let guard = state.lock().await;
+        assert_eq!(
+            guard.signer_set,
+            Some(["a".to_string(), "b".to_string()].into_iter().collect()),
+            "proposer must fix itself + the first threshold-1 arrivals"
+        );
+        assert!(
+            guard.frost_signature_shares.contains_key(&id_a),
+            "proposer is a member of its own fixed set — must have signed"
+        );
+    }
+
+    /// A non-proposer never picks a set on its own, even once it has
+    /// threshold-many commitments — it must wait for SIGN_SET.
+    #[tokio::test]
+    async fn non_proposer_does_not_run_round2_without_sign_set() {
+        let (kps, pkp) = trusted_2_of_3();
+        let session = signing_session("a", &["a", "b", "c"], 2);
+        let message = b"non-proposer waits".to_vec();
+
+        let id_a = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "a").unwrap();
+        let id_b = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "b").unwrap();
+
+        let mut rng = starlab_core::rng::os_rng();
+        let (nonces_b, commit_b) = frost_core::round1::commit(kps[&id_b].signing_share(), &mut rng);
+        let (_nonces_a, commit_a) =
+            frost_core::round1::commit(kps[&id_a].signing_share(), &mut rng);
+
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = "b".into();
+        state.session = Some(session);
+        state.key_package = Some(kps[&id_b].clone());
+        state.public_key_package = Some(pkp);
+        state.signing_message = Some(message);
+        state.frost_nonces = Some(nonces_b);
+        // Threshold-many commitments (b's own + a's) — the OLD rule would
+        // have signed right here. "b" is not the proposer, so it must not.
+        state.frost_commitments.insert(id_b, commit_b);
+        state.frost_commitments.insert(id_a, commit_a);
+        state.online_devices = Some(["b".to_string()].into_iter().collect());
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+        super::try_advance_to_round2::<Secp256K1Sha256TR>(&state, &tx, "b").await;
+
+        let guard = state.lock().await;
+        assert!(
+            guard.signer_set.is_none(),
+            "non-proposer must never fix a signer set"
+        );
+        assert!(
+            guard.frost_signature_shares.is_empty(),
+            "must not sign before SIGN_SET arrives"
+        );
+    }
+
+    /// A node outside the fixed signer set never signs, but still
+    /// aggregates once it holds every member's commitment + share — and
+    /// converges on the identical signature.
+    #[tokio::test]
+    async fn non_member_never_signs_but_still_aggregates() {
+        let (kps, pkp) = trusted_2_of_3();
+        let session = signing_session("a", &["a", "b", "c"], 2);
+        let message = b"non-member aggregates".to_vec();
+
+        let id_a = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "a").unwrap();
+        let id_b = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "b").unwrap();
+
+        // Real Round 1 + Round 2 for the fixed set {a, b}; "c" plays no
+        // part in producing these, only in aggregating them.
+        let mut rng = starlab_core::rng::os_rng();
+        let (nonces_a, commit_a) = frost_core::round1::commit(kps[&id_a].signing_share(), &mut rng);
+        let (nonces_b, commit_b) = frost_core::round1::commit(kps[&id_b].signing_share(), &mut rng);
+        let mut commitments = BTreeMap::new();
+        commitments.insert(id_a, commit_a);
+        commitments.insert(id_b, commit_b);
+        let pkg = frost_core::SigningPackage::new(commitments, &message);
+        let share_a = frost_core::round2::sign(&pkg, &nonces_a, &kps[&id_a]).unwrap();
+        let share_b = frost_core::round2::sign(&pkg, &nonces_b, &kps[&id_b]).unwrap();
+
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = "c".into();
+        state.session = Some(session);
+        // "c" has no key_package/nonces of its own — it never signs.
+        state.public_key_package = Some(pkp);
+        state.signing_message = Some(message);
+        state.signer_set = Some(["a".to_string(), "b".to_string()].into_iter().collect());
+        state.frost_commitments.insert(id_a, commit_a);
+        state.frost_commitments.insert(id_b, commit_b);
+        state.frost_signature_shares.insert(id_a, share_a);
+        state.frost_signature_shares.insert(id_b, share_b);
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // "c" is not in the signer set: must not attempt Round 2.
+        super::try_advance_to_round2::<Secp256K1Sha256TR>(&state, &tx, "c").await;
+        assert_eq!(
+            state.lock().await.frost_signature_shares.len(),
+            2,
+            "non-member must not add its own share"
+        );
+
+        super::try_aggregate::<Secp256K1Sha256TR>(&state, &tx).await;
+
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::Complete { .. }),
+            "non-member must still aggregate to completion: {:?}",
+            guard.signing_state
+        );
+        drop(guard);
+
+        let msg = rx.try_recv().expect("SigningComplete must be emitted");
+        assert!(matches!(msg, Message::SigningComplete { .. }));
+    }
+
+    fn state_with_session(
+        self_id: &str,
+        proposer: &str,
+    ) -> crate::utils::appstate_compat::AppState<Secp256K1Sha256TR> {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = self_id.to_string();
+        state.session = Some(signing_session(proposer, &["a", "b", "c"], 2));
+        state
+    }
+
+    #[tokio::test]
+    async fn signer_set_with_wrong_size_fails_the_ceremony() {
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state_with_session("b", "a")));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let payload = serde_json::to_vec(&["a".to_string()]).unwrap(); // size 1, threshold 2
+
+        super::process_signing_set::<Secp256K1Sha256TR>(
+            state.clone(),
+            "b".into(),
+            "a".into(),
+            payload,
+            tx,
+        )
+        .await;
+
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::Failed { .. }),
+            "wrong-size SIGN_SET must fail the ceremony: {:?}",
+            guard.signing_state
+        );
+    }
+
+    #[tokio::test]
+    async fn signer_set_missing_the_proposer_fails_the_ceremony() {
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state_with_session("c", "a")));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let payload = serde_json::to_vec(&["b".to_string(), "c".to_string()]).unwrap();
+
+        super::process_signing_set::<Secp256K1Sha256TR>(
+            state.clone(),
+            "c".into(),
+            "a".into(),
+            payload,
+            tx,
+        )
+        .await;
+
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::Failed { .. }),
+            "SIGN_SET without the proposer must fail the ceremony: {:?}",
+            guard.signing_state
+        );
+    }
+
+    #[tokio::test]
+    async fn signer_set_with_unknown_device_fails_the_ceremony() {
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state_with_session("b", "a")));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let payload = serde_json::to_vec(&["a".to_string(), "ghost".to_string()]).unwrap();
+
+        super::process_signing_set::<Secp256K1Sha256TR>(
+            state.clone(),
+            "b".into(),
+            "a".into(),
+            payload,
+            tx,
+        )
+        .await;
+
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::Failed { .. }),
+            "SIGN_SET listing an unknown device must fail the ceremony: {:?}",
+            guard.signing_state
+        );
+    }
+
+    #[tokio::test]
+    async fn signer_set_from_a_non_proposer_is_ignored_not_fatal() {
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state_with_session("c", "a")));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let payload = serde_json::to_vec(&["a".to_string(), "b".to_string()]).unwrap();
+
+        // "b" is not the proposer ("a" is) — must be ignored, not fatal.
+        super::process_signing_set::<Secp256K1Sha256TR>(
+            state.clone(),
+            "c".into(),
+            "b".into(),
+            payload,
+            tx,
+        )
+        .await;
+
+        let guard = state.lock().await;
+        assert!(guard.signer_set.is_none());
+        assert!(!matches!(guard.signing_state, SigningState::Failed { .. }));
+    }
+
+    /// A `SIGN_SET` that beats this node's own session into existence (a
+    /// cold-started co-signer) is buffered, then applied once the session
+    /// exists — mirrors the existing `pending_pre_session_commitments` test
+    /// coverage in spirit.
+    #[tokio::test]
+    async fn sign_set_before_session_exists_is_buffered_and_applied_later() {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = "b".into();
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let payload = serde_json::to_vec(&["a".to_string(), "b".to_string()]).unwrap();
+
+        super::process_signing_set::<Secp256K1Sha256TR>(
+            state.clone(),
+            "b".into(),
+            "a".into(),
+            payload,
+            tx.clone(),
+        )
+        .await;
+
+        {
+            let guard = state.lock().await;
+            assert!(
+                guard.signer_set.is_none(),
+                "must not apply before a session exists"
+            );
+            assert_eq!(guard.pending_pre_session_signer_set.len(), 1);
+        }
+
+        {
+            let mut guard = state.lock().await;
+            guard.session = Some(signing_session("a", &["a", "b", "c"], 2));
+        }
+
+        super::drain_pre_session_signer_set::<Secp256K1Sha256TR>(state.clone(), "b".into(), tx)
+            .await;
+
+        let guard = state.lock().await;
+        assert_eq!(
+            guard.signer_set,
+            Some(["a".to_string(), "b".to_string()].into_iter().collect())
+        );
+        assert!(guard.pending_pre_session_signer_set.is_empty());
     }
 }

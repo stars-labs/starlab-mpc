@@ -5,7 +5,9 @@
 //! `#[ignore]` by default (real UDP/ICE on loopback, ~seconds). Run with:
 //!   cargo test -p starlab-cli --test e2e_dkg -- --ignored --nocapture
 
-use starlab_cli::simulate::{SimulateOpts, run_signing_simulation, run_simulation};
+use starlab_cli::simulate::{
+    SimulateOpts, run_signing_simulation, run_signing_simulation_all_signers_online, run_simulation,
+};
 
 fn init_logs() {
     let _ = tracing_subscriber::fmt()
@@ -94,6 +96,64 @@ async fn dkg_then_sign_2_of_2_verifies() {
         result.elapsed_ms,
         result.verified,
         &result.signature[..16.min(result.signature.len())]
+    );
+}
+
+/// Regression test for the signer-set bug: with MORE than `threshold`
+/// signers online, the OLD rule ("run Round 2 the moment I personally see
+/// threshold-many commitments") let different nodes pick different signer
+/// sets — `aggregate` then failed with `UnknownIdentifier`. Reproduces the
+/// browser-extension interop scenario ("ext + 2 CLI", 2-of-3, all 3 online)
+/// entirely inside the CLI simulator: a 2-of-3 wallet where ALL 3 nodes join
+/// the signing ceremony. Every node — including the one the proposer's fixed
+/// set leaves out — must report the identical aggregated signature.
+///
+/// Before the SIGN_SET fix this test failed (nondeterministically — timeout
+/// waiting for `SignDone` on at least one node, or an `UnknownIdentifier`
+/// surfaced as a `SigningFailed` that `drive_signing` doesn't currently
+/// distinguish from a hang) because no prior e2e test drove a 2-of-3 signing
+/// with all 3 nodes participating: `dkg_then_sign_2_of_2_verifies` is 2-of-2
+/// (threshold == nodes, so "more than threshold online" can't happen), and
+/// `bitcoin_account_signs_a_sighash_valid_for_its_p2tr_address` /
+/// `reshare_then_sign_2_of_3_*` are 2-of-3 but only join `threshold`-many
+/// (2) co-signers — the third node never signs. `conformance_matrix` and
+/// `l3_serve_process` don't exercise 3-online signing either.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+signing over loopback; run with --ignored"]
+async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
+    init_logs();
+    let result = run_signing_simulation_all_signers_online(
+        SimulateOpts {
+            nodes: 3,
+            threshold: 2,
+            curve: "secp256k1".into(),
+            signal_url: None,
+            timeout_secs: 120,
+        },
+        "ext + 2 CLI, all 3 online, 2-of-3",
+    )
+    .await
+    .expect("all-signers-online signing simulation ran");
+
+    assert_eq!(
+        result.signatures.len(),
+        3,
+        "all 3 nodes must report a signature"
+    );
+    assert!(
+        result.all_agreed,
+        "nodes disagreed on the aggregated signature: {:?}",
+        result.signatures
+    );
+    assert!(
+        result.verified,
+        "signature did not verify against the group key: {result:?}"
+    );
+    eprintln!(
+        "✅ 2-of-3 sign with all 3 online agreed in {}ms, verified={}, sig={}…",
+        result.elapsed_ms,
+        result.verified,
+        &result.signatures[0][..16.min(result.signatures[0].len())]
     );
 }
 

@@ -241,6 +241,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             // Stage 4: signing-acceptance roster is ceremony-specific.
             // Leaving home means any in-flight ceremony is either done
             // or abandoned — either way the next mount should start empty.
@@ -509,6 +510,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             model.wallet_state.pending_raw_message = raw_for_display;
             // Clear any leftover DKG-creation/join state so SubmitPassword's
             // cold-start *sign* gate (creating_wallet.is_none() &&
@@ -662,8 +664,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         model.wallet_state.pending_sign_message = Some(message_bytes);
                         model.wallet_state.pending_sign_wallet_id = Some(wallet_name.clone());
                         // Also stash session_id so JoinSigning knows which
-                        // session we're joining.
+                        // session we're joining, and the announced
+                        // proposer_id so it knows whose SIGN_SET to trust.
                         model.wallet_state.pending_sign_session_id = Some(session_id.clone());
+                        model.wallet_state.pending_sign_proposer_id =
+                            Some(session.proposer_id.clone());
 
                         info!(
                             "SubmitPassword on signing session {}: dispatching \
@@ -897,6 +902,21 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             })
         }
 
+        Message::ProcessSigningSet {
+            from_device,
+            signer_set_bytes,
+        } => {
+            debug!(
+                "Routing SIGN_SET from {} ({} bytes) to the protocol layer",
+                from_device,
+                signer_set_bytes.len()
+            );
+            Some(Command::ProcessSigningSet {
+                from_device,
+                signer_set_bytes,
+            })
+        }
+
         // Dispatched by the SignTransaction screen (C.3) once the user
         // confirms a message to sign. We assume the wallet is already
         // unlocked — UnlockWallet is dispatched upstream. Kick off the
@@ -1005,6 +1025,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             model.wallet_state.clear_sign_draft();
             // Stage 4: the acceptance roster has served its purpose;
             // retain nothing into the next ceremony.
@@ -1029,6 +1050,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             model.wallet_state.clear_sign_draft();
             // Stage 4: wipe the acceptance roster too so a retry
             // doesn't render as if the prior commitments are still live.
@@ -1221,6 +1243,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 model.wallet_state.pending_sign_message = Some(preview.bytes_to_sign);
                 model.wallet_state.pending_sign_wallet_id = Some(preview.wallet_id);
                 model.wallet_state.pending_sign_session_id = None;
+                model.wallet_state.pending_sign_proposer_id = None;
                 // Same gate as HeadlessSign: SubmitPassword takes the
                 // cold-start *sign* branch only when no DKG creation/join is
                 // live — a just-finished DKG leaves `active_session` set and
@@ -1275,6 +1298,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             let pending_msg = model.wallet_state.pending_sign_message.take();
             let pending_sid = model.wallet_state.pending_sign_session_id.take();
             let pending_wallet = model.wallet_state.pending_sign_wallet_id.take();
+            let pending_proposer = model.wallet_state.pending_sign_proposer_id.take();
 
             match (pending_msg, pending_sid, pending_wallet) {
                 // Joiner path — session_id is present because the user
@@ -1298,9 +1322,17 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     model.push_screen(Screen::SigningProgress {
                         request_id: sid.clone(),
                     });
+                    let proposer_id = pending_proposer.unwrap_or_else(|| {
+                        warn!(
+                            "WalletUnlocked joiner path with no pending_sign_proposer_id — \
+                             the announced session should always have set one"
+                        );
+                        String::new()
+                    });
                     Some(Command::JoinSigning {
                         session_id: sid,
                         message_bytes: msg,
+                        proposer_id,
                     })
                 }
                 // Creator cold-start path — the user pressed Sign on a
@@ -1350,6 +1382,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             model.wallet_state.pending_raw_message = None;
             None
         }
@@ -1633,6 +1666,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.wallet_state.pending_sign_message = None;
             model.wallet_state.pending_sign_wallet_id = None;
             model.wallet_state.pending_sign_session_id = None;
+            model.wallet_state.pending_sign_proposer_id = None;
             model.wallet_state.signing_commitments_received.clear();
             model.wallet_state.signing_shares_received.clear();
             model.ui_state.modal = None;

@@ -71,6 +71,24 @@ pub struct AppState<C: Ciphersuite> {
     /// participants list), so they're held raw and re-fed through
     /// `process_signing_round1` once the session exists.
     pub pending_pre_session_commitments: Vec<(String, Vec<u8>)>,
+    /// The fixed signer set for the active signing ceremony, as device ids.
+    /// `None` until the proposer fixes it locally (itself + the first
+    /// threshold-1 commitments it received) or a non-proposer receives the
+    /// proposer's `SIGN_SET` frame. Round 2 and aggregation are gated on
+    /// this being populated — see `protocal::signing::try_advance_to_round2`
+    /// / `try_aggregate`.
+    pub signer_set: Option<std::collections::BTreeSet<String>>,
+    /// Device ids in the order their Round-1 commitment was accepted into
+    /// `frost_commitments`, self first. Used ONLY by the proposer, to fix
+    /// the signer set deterministically (itself + the first threshold-1
+    /// arrivals) — the same first-come rule as before, but now confined to
+    /// the proposer instead of run redundantly by every node.
+    pub commitment_arrival_order: Vec<String>,
+    /// Raw `SIGN_SET` payloads (from_device_id, json_bytes) that arrived
+    /// before this node had a signing session — mirrors
+    /// `pending_pre_session_commitments`; drained the same way once the
+    /// session exists.
+    pub pending_pre_session_signer_set: Vec<(String, Vec<u8>)>,
     // Additional DKG and other fields
     pub dkg_part1_public_package: Option<Vec<u8>>,
     pub dkg_part1_secret_package: Option<Vec<u8>>,
@@ -248,6 +266,9 @@ where
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
+            signer_set: None,
+            commitment_arrival_order: Vec::new(),
+            pending_pre_session_signer_set: Vec::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
@@ -334,6 +355,9 @@ where
             signing_state: SigningState::Idle,
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
+            signer_set: None,
+            commitment_arrival_order: Vec::new(),
+            pending_pre_session_signer_set: Vec::new(),
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
