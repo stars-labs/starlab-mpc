@@ -1553,24 +1553,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
         Message::WalletExported { wallet_id, path } => {
             leave_transfer_screen(model);
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("Exported wallet '{wallet_id}' to {path}"),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Exported wallet '{wallet_id}' to {path}"),
+            );
             None
         }
         Message::WalletImported { wallet_id } => {
             leave_transfer_screen(model);
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("Imported wallet '{wallet_id}'"),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Imported wallet '{wallet_id}'"),
+            );
             Some(Command::LoadWallets)
         }
         Message::WalletTransferFailed { error } => {
