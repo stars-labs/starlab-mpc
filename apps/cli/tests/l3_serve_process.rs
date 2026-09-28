@@ -248,6 +248,35 @@ async fn dkg_2_of_2_across_serve_processes() {
     b.quit().await;
 }
 
+/// Two wallets back to back on the same long-lived nodes: the second create
+/// must announce a NEW session and run a fresh DKG, not reuse (or be blocked
+/// by) the first ceremony's leftover state.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "spawns serve processes + real WebRTC over loopback; run with --ignored"]
+async fn second_dkg_in_the_same_serve_processes_creates_a_new_wallet() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(starlab_signal_server::run(listener));
+    let ws_url = format!("ws://127.0.0.1:{port}");
+
+    let ks_a = tempfile::TempDir::new().unwrap();
+    let ks_b = tempfile::TempDir::new().unwrap();
+    let mut a = spawn_connected("proc-node-a", &ks_a.path().to_string_lossy(), &ws_url)
+        .await
+        .expect("a connected");
+    let mut b = spawn_connected("proc-node-b", &ks_b.path().to_string_lossy(), &ws_url)
+        .await
+        .expect("b connected");
+
+    let (wallet_1, group_1) = dkg_2of2(&mut a, &mut b).await.expect("first dkg");
+    let (wallet_2, group_2) = dkg_2of2(&mut a, &mut b).await.expect("second dkg");
+    assert_ne!(wallet_1, wallet_2, "second DKG reused the first session");
+    assert_ne!(group_1, group_2, "second DKG reused the first key");
+
+    a.quit().await;
+    b.quit().await;
+}
+
 /// SIG-8: a co-signer running `serve --auto-approve` contributes its share to
 /// an incoming signing request WITHOUT any manual approve command — gated by
 /// the auto-approval policy. Exercises the security-sensitive auto-approve path

@@ -180,6 +180,13 @@ pub enum Message {
     UpdateDKGSessionId {
         real_session_id: String,
     },
+    /// `Command::StartSigning` recorded + announced this signing session on
+    /// AppState. The initiator has no other way to learn the id it minted
+    /// (joiners get it from the announce), so the Elm side mirrors it into
+    /// `active_session` — e.g. for "Copy Session ID".
+    SigningSessionAnnounced {
+        session: crate::protocal::signal::SessionInfo,
+    },
     UpdateParticipants {
         participants: Vec<String>,
     },

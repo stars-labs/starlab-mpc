@@ -672,6 +672,39 @@ async fn try_finalize_unified<C>(
     }
 }
 
+/// Reset `AppState` for a new DKG ceremony (creator or joiner). A node that
+/// already ran a DKG this process still holds that ceremony's session,
+/// `DkgState::Complete`, round packages and mesh-ready flags; left in place,
+/// a second wallet's DKG reuses the old session and its round 1 is dropped as
+/// "FROST already running". Live peer connections are kept (warm mesh).
+fn begin_new_dkg<C: frost_core::Ciphersuite>(
+    state: &mut crate::utils::appstate_compat::AppState<C>,
+) {
+    state.dkg_in_progress = true;
+    state.session = None;
+    state.dkg_state = crate::utils::state::DkgState::Idle;
+    state.received_dkg_packages.clear();
+    state.received_dkg_round2_packages.clear();
+    state.dkg_part1_public_package = None;
+    state.dkg_part1_secret_package = None;
+    state.dkg_part2_secret_package = None;
+    state.dkg_round1_packages.clear();
+    state.dkg_round2_packages.clear();
+    state.round2_secret_package = None;
+    // DKG completion is detected as "public_key_package is set", so the last
+    // wallet's keys must go or the new ceremony "completes" with them.
+    state.key_package = None;
+    state.public_key_package = None;
+    state.group_public_key = None;
+    state.current_wallet_id = None;
+    state.unified_mode = false;
+    state.unified_dkg = None;
+    state.unified_finalize = None;
+    state.own_mesh_ready_sent = false;
+    state.pending_mesh_ready_signals.clear();
+    state.ceremony_outbox.clear();
+}
+
 /// Load an existing wallet's OLD share + metadata from the keystore and seed the
 /// reshare context on `AppState` (keys, ORIGINAL participant set, persist creds,
 /// `reshare_in_progress`). Shared by the reshare initiator (`StartReshare`) and
@@ -989,14 +1022,21 @@ impl Command {
 
                 {
                     let mut state = app_state.lock().await;
-                    if state.dkg_in_progress {
+                    // `dkg_in_progress` outlives a finished ceremony, so only a
+                    // DKG that hasn't ended blocks a new one (second wallet).
+                    let finished = matches!(
+                        state.dkg_state,
+                        crate::utils::state::DkgState::Complete
+                            | crate::utils::state::DkgState::Failed(_)
+                    );
+                    if state.dkg_in_progress && !finished {
                         info!("⚠️ DKG already in progress, skipping duplicate StartDKG");
                         let _ = tx.send(Message::Info {
                             message: "DKG already in progress, please wait...".to_string(),
                         });
                         return Ok(());
                     }
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                 }
 
                 if config.mode == crate::elm::model::WalletMode::Online {
@@ -1019,25 +1059,13 @@ impl Command {
                     // Note: We can't use tokio::spawn here due to Send/Sync constraints
                     // with FROST cryptographic types. For now, show informative messages.
 
-                    // CRITICAL FIX: Check if we already have an active session ID
-                    // This prevents creating new sessions on WebSocket reconnection
-                    let session_id = {
-                        let state = app_state.lock().await;
-                        if let Some(ref session) = state.session {
-                            // Reuse existing session ID to prevent session chaos
-                            info!("🔄 Reusing existing session ID: {}", session.session_id);
-                            session.session_id.clone()
-                        } else {
-                            // Only generate new session ID if we don't have one.
-                            // Bare UUID — the session TYPE is carried in the
-                            // `session_type` field, not parsed from an id prefix,
-                            // so a `dkg_` prefix was just noise. (wallet ids derive
-                            // from the hex either way; see wallet_id_from_session.)
-                            let new_id = uuid::Uuid::new_v4().to_string();
-                            info!("🆕 Creating new session ID: {}", new_id);
-                            new_id
-                        }
-                    };
+                    // Every StartDKG is a new ceremony (duplicates bail at the
+                    // gate above), so always mint a fresh id. Bare UUID — the
+                    // session TYPE is carried in `session_type`, not an id
+                    // prefix. (wallet ids derive from the hex; see
+                    // wallet_id_from_session.)
+                    let session_id = uuid::Uuid::new_v4().to_string();
+                    info!("🆕 Creating new session ID: {}", session_id);
 
                     let _ = tx_clone.send(Message::UpdateDKGSessionId {
                         real_session_id: session_id.clone(),
@@ -1712,23 +1740,11 @@ impl Command {
                     }
                 };
 
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: serde_json::json!({
-                        "session_id": session_id.clone(),
-                        "participant_joined": device_id.clone(),
-                    }),
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx.send(Message::Error {
-                                message: "Primary WS closed mid reshare-join".to_string(),
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
-                }
-
+                // Record the session BEFORE announcing the join: the server
+                // answers our `SessionStatusUpdate` with a `participant_update`
+                // that the relay handler keeps only if `state.session` already
+                // names this session. For the last joiner that frame is the
+                // only full roster it gets, so dropping it stalls the mesh.
                 {
                     let mut state = app_state.lock().await;
                     state.session = Some(crate::protocal::signal::SessionInfo {
@@ -1751,6 +1767,23 @@ impl Command {
                         signing_message_hex: None,
                     });
                 }
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "participant_joined": device_id.clone(),
+                    }),
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx.send(Message::Error {
+                                message: "Primary WS closed mid reshare-join".to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
+                }
+
                 let _ = tx.send(Message::Info {
                     message: format!("🔄 Joined reshare session: {}", session_id),
                 });
@@ -1837,7 +1870,7 @@ impl Command {
                 // at the dedupe check and can't re-announce the session as us.
                 let device_id = {
                     let mut state = app_state.lock().await;
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                     state.device_id.clone()
                 };
                 let tx_clone = tx.clone();
@@ -1858,35 +1891,12 @@ impl Command {
                     }
                 };
 
-                // Send a SessionStatusUpdate so the server+creator learn we're in.
-                let session_update = serde_json::json!({
-                    "session_id": session_id.clone(),
-                    "participant_joined": device_id.clone(),
-                });
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: session_update,
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx_clone.send(Message::Error {
-                                message: "Primary WS channel closed mid-join".to_string(),
-                            });
-                        } else {
-                            let _ = tx_clone.send(Message::Info {
-                                message: format!("✅ Joined session: {}", session_id),
-                            });
-                            let _ = tx_clone.send(Message::UpdateDKGProgress {
-                                round: crate::elm::message::DKGRound::WaitingForParticipants,
-                                progress: 0.2,
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
-                }
-
                 // Provisional session state — curve_type/threshold get overwritten
                 // as soon as the creator's SessionAvailable arrives on the broadcast.
+                // Set BEFORE the `SessionStatusUpdate` below: the relay handler
+                // drops a `participant_update` for a session `state.session`
+                // doesn't name yet, and the last joiner's own update is the
+                // only full roster it receives.
                 {
                     let mut state = app_state.lock().await;
                     // Prefer the curve the joiner already learned from the
@@ -1928,6 +1938,33 @@ impl Command {
                         coordination_type: "Network".to_string(),
                         signing_message_hex: None,
                     });
+                }
+
+                // Send a SessionStatusUpdate so the server+creator learn we're in.
+                let session_update = serde_json::json!({
+                    "session_id": session_id.clone(),
+                    "participant_joined": device_id.clone(),
+                });
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: session_update,
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx_clone.send(Message::Error {
+                                message: "Primary WS channel closed mid-join".to_string(),
+                            });
+                        } else {
+                            let _ = tx_clone.send(Message::Info {
+                                message: format!("✅ Joined session: {}", session_id),
+                            });
+                            let _ = tx_clone.send(Message::UpdateDKGProgress {
+                                round: crate::elm::message::DKGRound::WaitingForParticipants,
+                                progress: 0.2,
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
                 }
 
                 // Capture broadcast subscription + context for the driver task.
@@ -2971,6 +3008,11 @@ impl Command {
                         sid
                     }
                 };
+                // The initiator minted this id here; hand it to the Elm side
+                // (joiners already have it from the announce).
+                if let Some(session) = app_state.lock().await.session.clone() {
+                    let _ = tx.send(Message::SigningSessionAnnounced { session });
+                }
 
                 // Announce over the signal server so any peer that is
                 // joining can discover this signing ceremony. Best-effort —
@@ -3306,7 +3348,8 @@ impl Command {
                 //   1. snapshot state, flag as connecting, drop the stale sender
                 //   2. dial the signal server
                 //   3. mint the outbound mpsc + inbound broadcast, stash in state
-                //   4. send Register, and re-announce our own session if any
+                //   4. send Register, re-announce our own session if any, and
+                //      request the stored-session replay
                 //   5. spawn the sender (mpsc → sink, with 30s ping)
                 //   6. spawn the reader (stream → parse → broadcast + Elm dispatch)
                 //   7. tell the Elm loop we're live
@@ -3332,6 +3375,7 @@ impl Command {
                 if let Some(session) = &params.existing_session {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
+                ws_runtime::send_request_active_sessions(&mut sink).await;
 
                 // Always-on relay handler (peer WebRTC signals +
                 // participant_update) for the whole connection — subscribe

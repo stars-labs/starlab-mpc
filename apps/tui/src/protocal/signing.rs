@@ -50,6 +50,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use frost_core::Ciphersuite;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::{error, info, warn};
@@ -72,6 +73,30 @@ pub const SIGN_SET_PREFIX: &str = "SIGN_SET:";
 /// lets the UI match SigningComplete emissions to the active sign screen
 /// without a queue lookup.
 pub(crate) const INLINE_SIGNING_ID: &str = "inline";
+
+/// Default per-ceremony signing timeout. If a signer the proposer picked
+/// (SIGN_SET) goes offline before its SIGN_SHARE — or too few shareholders
+/// ever commit — every node would otherwise sit in
+/// `CommitmentPhase`/`SharePhase` forever: automatic re-picking inside the
+/// SAME ceremony is unsafe (a signer that already produced a share must
+/// never sign a different package with the same nonces — FROST nonce reuse
+/// leaks the key). So instead we fail cleanly via `fail_and_notify` once this
+/// much time has passed and let the caller retry with a fresh ceremony.
+/// Overridable per-node via `AppState::signing_timeout` (e.g. for tests).
+pub const SIGNING_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// `SIGNING_TIMEOUT`, overridable via the `STARLAB_SIGNING_TIMEOUT_MS`
+/// environment variable — test/e2e use only, so a stuck-ceremony test isn't
+/// stuck itself for the real 120s. Read once per `AppState` construction
+/// (`AppState::new` / `with_device_id_and_server`), mirroring the existing
+/// `PERF_MONITORING` env-flag pattern in `utils::performance`.
+pub fn default_signing_timeout() -> Duration {
+    std::env::var("STARLAB_SIGNING_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(SIGNING_TIMEOUT)
+}
 
 // -----------------------------------------------------------------
 // handle_start_signing — entry point, runs Round 1 + broadcasts
@@ -105,7 +130,7 @@ pub async fn handle_start_signing<C>(
     );
 
     // ---- Preconditions in one short lock
-    let (key_package, session, my_identifier) = {
+    let (key_package, session, my_identifier, epoch, timeout) = {
         let mut guard = state.lock().await;
 
         let Some(kp) = guard.key_package.clone() else {
@@ -155,6 +180,13 @@ pub async fn handle_start_signing<C>(
         // truly stale value slipping through. If a prior ceremony had
         // DIFFERENT participants you'd get cross-contamination, but we don't
         // support concurrent ceremonies this phase.
+        // Identify THIS ceremony so a timer armed for a prior one (aborted or
+        // already complete) can never fail this one — see `signing_epoch` /
+        // the timeout task spawned below.
+        guard.signing_epoch = guard.signing_epoch.wrapping_add(1);
+        let epoch = guard.signing_epoch;
+        let timeout = guard.signing_timeout;
+
         guard.frost_nonces = None;
         guard.signing_message = Some(message.clone());
         guard.ceremony_outbox.clear();
@@ -174,8 +206,13 @@ pub async fn handle_start_signing<C>(
             chain_id: None,
         };
 
-        (kp, session, my_id)
+        (kp, session, my_id, epoch, timeout)
     };
+
+    // Arm the per-ceremony timeout now that the ceremony has actually
+    // started (every early-return above bails before this point, so a
+    // failed precondition never arms a timer for a ceremony that never ran).
+    spawn_signing_timeout(state.clone(), ui_tx.clone(), epoch, timeout);
 
     // ---- FROST Round 1: commit
     let mut rng = starlab_core::rng::os_rng();
@@ -897,6 +934,78 @@ where
 }
 
 // -----------------------------------------------------------------
+// signing timeout — a stuck ceremony fails cleanly instead of hanging
+// -----------------------------------------------------------------
+
+/// Arm the per-ceremony timeout armed by `handle_start_signing`. `epoch` is
+/// the value `AppState.signing_epoch` was just bumped to for THIS ceremony;
+/// when the timer fires it only acts if the epoch is still current AND the
+/// ceremony is still stuck in `CommitmentPhase`/`SharePhase` — so a timer
+/// left over from an aborted or already-completed ceremony can never fail a
+/// newer one, and a ceremony that finished (or already failed) on its own is
+/// left alone.
+fn spawn_signing_timeout<C>(
+    state: Arc<Mutex<AppState<C>>>,
+    ui_tx: UnboundedSender<Message>,
+    epoch: u64,
+    timeout: Duration,
+) where
+    C: Ciphersuite + Send + Sync + 'static,
+{
+    tokio::spawn(async move {
+        tokio::time::sleep(timeout).await;
+
+        let mut guard = state.lock().await;
+        if guard.signing_epoch != epoch {
+            return; // a newer ceremony has since started; this timer is stale
+        }
+        if !matches!(
+            guard.signing_state,
+            SigningState::CommitmentPhase { .. } | SigningState::SharePhase { .. }
+        ) {
+            return; // already completed or failed on its own
+        }
+
+        let reason = describe_timeout_reason(&guard, timeout);
+        fail_and_notify(&mut guard, &ui_tx, reason);
+    });
+}
+
+/// Build a precise "what's missing" reason for a timed-out ceremony:
+/// - the signer set was fixed → name the members whose `SIGN_SHARE` never
+///   arrived (the proposer itself always has one the moment it fixes the
+///   set, so this always names at least one peer).
+/// - still waiting on Round 1 → report how many commitments arrived vs the
+///   threshold (no signer set to name members from yet).
+fn describe_timeout_reason<C: Ciphersuite>(guard: &AppState<C>, timeout: Duration) -> String {
+    let secs = timeout.as_secs();
+    let Some(session) = guard.session.as_ref() else {
+        return format!("signing timed out after {secs}s: no active session");
+    };
+    match guard.signer_set.as_ref() {
+        Some(signer_set) => {
+            let missing: Vec<&str> = signer_set
+                .iter()
+                .filter(|device| {
+                    !canonical_identifier::<C>(&session.participants, device)
+                        .is_some_and(|id| guard.frost_signature_shares.contains_key(&id))
+                })
+                .map(String::as_str)
+                .collect();
+            format!(
+                "signing timed out after {secs}s: no SIGN_SHARE from {}",
+                missing.join(", ")
+            )
+        }
+        None => format!(
+            "signing timed out after {secs}s: only {} of threshold {} commitments arrived",
+            guard.frost_commitments.len(),
+            session.threshold
+        ),
+    }
+}
+
+// -----------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------
 
@@ -1462,5 +1571,171 @@ mod tests {
             Some(["a".to_string(), "b".to_string()].into_iter().collect())
         );
         assert!(guard.pending_pre_session_signer_set.is_empty());
+    }
+
+    // -------------------------------------------------------------
+    // signing timeout — a stuck ceremony fails cleanly instead of hanging
+    // -------------------------------------------------------------
+
+    /// A ceremony stuck in `SharePhase` (fixed signer set, one member's
+    /// `SIGN_SHARE` never arrived) fails once its timeout elapses, naming the
+    /// missing signer, wiping the transient ceremony state, and emitting
+    /// `Message::SigningFailed` — exactly `fail_and_notify`'s contract.
+    #[tokio::test]
+    async fn stuck_share_phase_times_out_naming_the_missing_signer() {
+        let (kps, pkp) = trusted_2_of_3();
+        let session = signing_session("a", &["a", "b", "c"], 2);
+        let message = b"stuck ceremony".to_vec();
+
+        let id_a = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "a").unwrap();
+        let id_b = canonical_identifier::<Secp256K1Sha256TR>(&session.participants, "b").unwrap();
+
+        let mut rng = starlab_core::rng::os_rng();
+        let (nonces_a, commit_a) = frost_core::round1::commit(kps[&id_a].signing_share(), &mut rng);
+        let (_nonces_b, commit_b) =
+            frost_core::round1::commit(kps[&id_b].signing_share(), &mut rng);
+        let mut commitments = BTreeMap::new();
+        commitments.insert(id_a, commit_a);
+        commitments.insert(id_b, commit_b);
+        let pkg = frost_core::SigningPackage::new(commitments, &message);
+        let share_a = frost_core::round2::sign(&pkg, &nonces_a, &kps[&id_a]).unwrap();
+
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.device_id = "a".into();
+        state.session = Some(session);
+        state.public_key_package = Some(pkp);
+        state.signing_message = Some(message);
+        // Signer set is {a, b}; "b" is the shareholder that never sends its
+        // SIGN_SHARE (e.g. shut down right after DKG).
+        state.signer_set = Some(["a".to_string(), "b".to_string()].into_iter().collect());
+        state.frost_commitments.insert(id_a, commit_a);
+        state.frost_commitments.insert(id_b, commit_b);
+        state.frost_signature_shares.insert(id_a, share_a);
+        state.signing_state = SigningState::SharePhase {
+            signing_id: super::INLINE_SIGNING_ID.to_string(),
+            transaction_data: "14 bytes".to_string(),
+            selected_signers: Vec::new(),
+            signing_package: Some(pkg),
+            shares: state.frost_signature_shares.clone(),
+            own_share: Some(share_a),
+            blockchain: String::new(),
+            chain_id: None,
+        };
+        state.signing_epoch = 7;
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        super::spawn_signing_timeout::<Secp256K1Sha256TR>(
+            state.clone(),
+            tx,
+            7,
+            std::time::Duration::from_millis(20),
+        );
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("the timer must fire")
+            .expect("channel must still be open");
+        match msg {
+            Message::SigningFailed { error, .. } => {
+                assert!(
+                    error.contains("timed out") && error.contains("from b"),
+                    "must name the missing signer: {error}"
+                );
+            }
+            other => panic!("expected SigningFailed, got {other:?}"),
+        }
+
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::Failed { .. }),
+            "signing_state must be Failed: {:?}",
+            guard.signing_state
+        );
+        assert!(guard.signer_set.is_none(), "signer_set must be wiped");
+        assert!(
+            guard.frost_signature_shares.is_empty(),
+            "frost_signature_shares must be wiped"
+        );
+        assert!(
+            guard.frost_commitments.is_empty(),
+            "frost_commitments must be wiped"
+        );
+    }
+
+    /// A ceremony that already reached `Complete` before its timer fires must
+    /// be left alone — no spurious `SigningFailed` clobbering a real result.
+    #[tokio::test]
+    async fn timer_is_a_noop_once_the_ceremony_already_completed() {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.signing_epoch = 3;
+        state.signing_state = SigningState::Complete {
+            signing_id: super::INLINE_SIGNING_ID.to_string(),
+            signature: vec![0xaa; 64],
+        };
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Same epoch as the (already-finished) ceremony — the state check,
+        // not the epoch check, is what must save it here.
+        super::spawn_signing_timeout::<Secp256K1Sha256TR>(
+            state.clone(),
+            tx,
+            3,
+            std::time::Duration::from_millis(20),
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "a completed ceremony must not emit SigningFailed"
+        );
+        let guard = state.lock().await;
+        assert!(matches!(guard.signing_state, SigningState::Complete { .. }));
+    }
+
+    /// A timer armed for an earlier ceremony (lower epoch) must not touch a
+    /// newer ceremony that has since started on the same `AppState` — the
+    /// epoch check, not the state check, is what must save it here (the
+    /// newer ceremony is ALSO stuck in `CommitmentPhase`).
+    #[tokio::test]
+    async fn stale_timer_from_a_previous_ceremony_does_not_fail_the_next_one() {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        state.session = Some(signing_session("a", &["a", "b", "c"], 2));
+        state.signing_epoch = 9; // ceremony 9 has already superseded ceremony 8
+        state.signing_state = SigningState::CommitmentPhase {
+            signing_id: super::INLINE_SIGNING_ID.to_string(),
+            transaction_data: "14 bytes".to_string(),
+            selected_signers: Vec::new(),
+            commitments: BTreeMap::new(),
+            own_commitment: None,
+            nonces: None,
+            blockchain: String::new(),
+            chain_id: None,
+        };
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Arm a timer for the OLD ceremony (epoch 8); the live one is 9.
+        super::spawn_signing_timeout::<Secp256K1Sha256TR>(
+            state.clone(),
+            tx,
+            8,
+            std::time::Duration::from_millis(20),
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+        assert!(
+            rx.try_recv().is_err(),
+            "a stale timer must not fail the newer ceremony"
+        );
+        let guard = state.lock().await;
+        assert!(
+            matches!(guard.signing_state, SigningState::CommitmentPhase { .. }),
+            "the newer ceremony's state must be untouched: {:?}",
+            guard.signing_state
+        );
     }
 }
