@@ -192,7 +192,10 @@ impl CeremonyOutbox {
 /// Ceremony frames already delivered to the protocol layer, keyed by sender +
 /// payload. FROST packages are fresh randomness every ceremony, so an exact
 /// repeat is always a resend — including a late resend of a ceremony that has
-/// already finished, which would otherwise pollute the next one.
+/// already finished, which would otherwise pollute the next one. `SIGN_SET`
+/// is the exception: it is just the signer list, identical for every signing
+/// by the same signers, so it is always delivered (applying it twice is a
+/// no-op; dropping it stalls the next signing before round 2).
 #[derive(Debug, Default)]
 pub struct SeenFrames {
     seen: HashSet<u64>,
@@ -204,6 +207,9 @@ impl SeenFrames {
     /// `true` the first time `(from, text)` is seen.
     pub fn first_delivery(&mut self, from: &str, text: &str) -> bool {
         use std::hash::{Hash, Hasher};
+        if text.starts_with(crate::protocal::signing::SIGN_SET_PREFIX) {
+            return true;
+        }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         (from, text).hash(&mut hasher);
         if self.seen.len() >= Self::CAPACITY {
@@ -845,5 +851,14 @@ mod tests {
         assert!(seen.first_delivery("b", "SIGN_COMMIT:x"));
         assert!(!seen.first_delivery("b", "SIGN_COMMIT:x"));
         assert!(seen.first_delivery("c", "SIGN_COMMIT:x"));
+    }
+
+    /// The same signers produce the same SIGN_SET in every signing; the next
+    /// ceremony's copy must still get through.
+    #[test]
+    fn repeated_signer_set_is_always_delivered() {
+        let mut seen = SeenFrames::default();
+        assert!(seen.first_delivery("a", "SIGN_SET:WyJhIiwiYiJd"));
+        assert!(seen.first_delivery("a", "SIGN_SET:WyJhIiwiYiJd"));
     }
 }

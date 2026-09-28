@@ -494,6 +494,17 @@ where
                 self.app.mount(Id::SignatureComplete, Box::new(sc), vec![])?;
                 self.app.active(&Id::SignatureComplete)?;
             }
+            Screen::ExportWallet { .. } | Screen::ImportWallet => {
+                let mut transfer = match self.model.current_screen {
+                    Screen::ExportWallet { ref wallet_id } => {
+                        crate::elm::components::WalletTransferComponent::export(wallet_id.clone())
+                    }
+                    _ => crate::elm::components::WalletTransferComponent::import(),
+                };
+                transfer.set_from_model(&self.model.wallet_state);
+                self.app.mount(Id::WalletTransfer, Box::new(transfer), vec![])?;
+                self.app.active(&Id::WalletTransfer)?;
+            }
             Screen::SigningProgress { ref request_id } => {
                 // Reuse DKGProgressComponent — it already renders the
                 // participant mesh + a round indicator, which is
@@ -685,6 +696,16 @@ where
                 | Message::PasswordSubmitDraft
                 | Message::SignTypeChar(_)
                 | Message::SignBackspace
+                | Message::SignToggleChain
+                | Message::SignSubmit
+                | Message::TransferTypeChar(_)
+                | Message::TransferBackspace
+                | Message::TransferToggleField
+                | Message::TransferSubmit
+                | Message::WalletTransferFailed { .. }
+                // The main menu's items and Manage Wallets' rows come from
+                // the wallet list (e.g. a wallet just imported).
+                | Message::WalletsLoaded { .. }
                 // WalletDetail's accounts table derives from
                 // `ui_state.accounts_shown`, read at mount time.
                 | Message::AccountsShowMore
@@ -799,6 +820,9 @@ where
             // when the DKGProgress slot is empty.
             Screen::SigningProgress { .. } => !self.app.mounted(&Id::DKGProgress),
             Screen::SignatureComplete { .. } => !self.app.mounted(&Id::SignatureComplete),
+            Screen::ExportWallet { .. } | Screen::ImportWallet => {
+                !self.app.mounted(&Id::WalletTransfer)
+            }
             _ => false,
         }
     }
@@ -1074,8 +1098,56 @@ where
             match key.code {
                 KeyCode::Char(c) => return Some(Message::SignTypeChar(c)),
                 KeyCode::Backspace => return Some(Message::SignBackspace),
+                KeyCode::Tab | KeyCode::BackTab => return Some(Message::SignToggleChain),
                 KeyCode::Enter => return Some(Message::SignSubmit),
                 _ => return None,
+            }
+        }
+
+        // Export / Import wallet screens: text entry, same pattern.
+        if matches!(
+            self.model.current_screen,
+            Screen::ExportWallet { .. } | Screen::ImportWallet
+        ) {
+            return match key.code {
+                KeyCode::Char(c) => Some(Message::TransferTypeChar(c)),
+                KeyCode::Backspace => Some(Message::TransferBackspace),
+                KeyCode::Tab | KeyCode::BackTab => Some(Message::TransferToggleField),
+                KeyCode::Enter => Some(Message::TransferSubmit),
+                _ => None,
+            };
+        }
+
+        // Main menu: `i` imports a wallet — the only way in on a fresh device,
+        // where Manage Wallets isn't listed until a wallet exists.
+        if matches!(self.model.current_screen, Screen::MainMenu | Screen::Welcome)
+            && key.code == KeyCode::Char('i')
+        {
+            return Some(Message::ImportWallet);
+        }
+
+        // Manage Wallets: `e` exports the selected wallet, `i` imports one.
+        if matches!(self.model.current_screen, Screen::ManageWallets) {
+            match key.code {
+                KeyCode::Char('e') => {
+                    let selected = self
+                        .model
+                        .ui_state
+                        .selected_indices
+                        .get(&crate::elm::model::ComponentId::WalletList)
+                        .copied()
+                        .unwrap_or(0);
+                    return self
+                        .model
+                        .wallet_state
+                        .wallets
+                        .get(selected)
+                        .map(|w| Message::ExportWallet {
+                            wallet_id: w.session_id.clone(),
+                        });
+                }
+                KeyCode::Char('i') => return Some(Message::ImportWallet),
+                _ => {}
             }
         }
 
@@ -1260,6 +1332,9 @@ where
                 }
                 Screen::SignatureComplete { .. } => {
                     self.app.view(&Id::SignatureComplete, f, main_area);
+                }
+                Screen::ExportWallet { .. } | Screen::ImportWallet => {
+                    self.app.view(&Id::WalletTransfer, f, main_area);
                 }
                 _ => {
                     // Fallback to main menu

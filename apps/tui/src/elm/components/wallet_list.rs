@@ -109,14 +109,54 @@ impl WalletList {
     }
 }
 
+/// Manage Wallets keys (routed by `app.rs::handle_key_event`).
+const KEY_HINTS: &str = "Enter = Sign    e = Export    i = Import    Esc = Back";
+
+/// Details rows for a wallet: its share info, then EVERY account-0 address
+/// of its curve (a secp256k1 wallet has an Ethereum and a Bitcoin account).
+/// BIP-44 all the way: never the raw group-key address — the root key is a
+/// derivation parent only.
+fn details_lines(wallet: &WalletMetadata) -> Vec<String> {
+    let mut lines = vec![format!(
+        "Created: {} | Device: {} | Index: {}/{}",
+        wallet.created_at, wallet.device_id, wallet.participant_index, wallet.total_participants
+    )];
+    let accounts = hex::decode(&wallet.group_public_key)
+        .ok()
+        .and_then(|group| {
+            starlab_core::accounts::account_addresses(&wallet.curve_type, &group, 0).ok()
+        })
+        .unwrap_or_default();
+    if accounts.is_empty() {
+        lines.push("Account 0: (underivable)".to_string());
+    }
+    lines.extend(
+        accounts
+            .into_iter()
+            .map(|(chain, _path, address)| format!("Account 0 ({chain}): {address}")),
+    );
+    lines
+}
+
 impl Component for WalletList {
     fn view(&mut self, frame: &mut Frame, area: Rect) {
+        let details_text = self
+            .wallets
+            .get(self.selected)
+            .map(details_lines)
+            .unwrap_or_default()
+            .into_iter()
+            .chain(std::iter::once(KEY_HINTS.to_string()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let details_height = details_text.lines().count() as u16 + 2; // + borders
+
         // Create layout
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(5),    // List area
-                Constraint::Length(4), // Details area
+                Constraint::Min(5),                 // List area
+                Constraint::Length(details_height), // Details + key hints
             ])
             .split(area);
 
@@ -220,44 +260,19 @@ impl Component for WalletList {
             frame.render_stateful_widget(list, chunks[0], &mut list_state);
         }
 
-        // Render selected wallet details
-        if let Some(wallet) = self.wallets.get(self.selected) {
-            let details = [
-                format!("Created: {}", wallet.created_at),
-                format!("Device: {}", wallet.device_id),
-                format!(
-                    "Index: {}/{}",
-                    wallet.participant_index, wallet.total_participants
-                ),
-            ];
+        // Selected wallet details + the screen's keys.
+        let details_widget = Paragraph::new(details_text)
+            .block(
+                Block::default()
+                    .title("Details")
+                    .borders(TuiBorders::ALL)
+                    .border_type(TuiBorderType::Rounded)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
+            .style(Style::default().fg(Color::Gray))
+            .wrap(ratatui::widgets::Wrap { trim: true });
 
-            // BIP-44 all the way: the displayed address is ACCOUNT 0's
-            // primary chain address (pinned standard path), never the raw
-            // group-key address — the root key is a derivation parent only.
-            let account0 = hex::decode(&wallet.group_public_key)
-                .ok()
-                .and_then(|group| {
-                    starlab_core::accounts::account_addresses(&wallet.curve_type, &group, 0).ok()
-                })
-                .and_then(|addrs| addrs.into_iter().next())
-                .map(|(chain, _path, address)| format!("Account 0 ({}): {}", chain, address))
-                .unwrap_or_else(|| "Account 0: (underivable)".to_string());
-
-            let details_text = format!("{}\n{}", details.join(" | "), account0);
-
-            let details_widget = Paragraph::new(details_text)
-                .block(
-                    Block::default()
-                        .title("Details")
-                        .borders(TuiBorders::ALL)
-                        .border_type(TuiBorderType::Rounded)
-                        .border_style(Style::default().fg(Color::DarkGray)),
-                )
-                .style(Style::default().fg(Color::Gray))
-                .wrap(ratatui::widgets::Wrap { trim: true });
-
-            frame.render_widget(details_widget, chunks[1]);
-        }
+        frame.render_widget(details_widget, chunks[1]);
     }
 
     fn query<'a>(
@@ -330,17 +345,6 @@ impl AppComponent<Message, UserEvent> for WalletList {
                         wallet_id: wallet.session_id.clone(),
                     })
             }
-            Event::Keyboard(KeyEvent {
-                code: Key::Char('e'),
-                modifiers: KeyModifiers::NONE,
-            }) => {
-                // Export wallet
-                self.wallets
-                    .get(self.selected)
-                    .map(|wallet| Message::ExportWallet {
-                        wallet_id: wallet.session_id.clone(),
-                    })
-            }
             Event::User(UserEvent::FocusGained) => {
                 self.focused = true;
                 None
@@ -365,5 +369,36 @@ impl MpcWalletComponent for WalletList {
 
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn details_show_every_account0_address_of_a_secp256k1_wallet() {
+        let wallet = WalletMetadata::new(
+            "w1".to_string(),
+            "dev".to_string(),
+            "secp256k1".to_string(),
+            2,
+            3,
+            1,
+            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        );
+        let lines = details_lines(&wallet);
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("Account 0 (Ethereum): 0x")),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("Account 0 (Bitcoin): bc1p")),
+            "{lines:?}"
+        );
     }
 }

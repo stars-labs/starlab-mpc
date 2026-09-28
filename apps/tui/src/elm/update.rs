@@ -171,14 +171,20 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             if matches!(model.current_screen, Screen::SignTransaction { .. }) {
                 model.wallet_state.clear_sign_draft();
             }
+            if matches!(
+                model.current_screen,
+                Screen::ImportWallet | Screen::ExportWallet { .. }
+            ) {
+                model.wallet_state.reset_transfer_draft(String::new());
+            }
 
             // Check if we're at the root screen (main menu with empty stack)
             if model.navigation_stack.is_empty()
                 && matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
             {
-                // At root level - Esc should quit the app
-                debug!("🚪 At root screen, Esc should quit");
-                return Some(Command::SendMessage(Message::Quit));
+                // Nothing to go back to. Esc must not quit (it's the reflex
+                // "back out" key); Ctrl-C and the Exit item quit.
+                return None;
             }
 
             // Otherwise, navigate back normally
@@ -464,15 +470,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     // announce before we connect, and `announce_session` is a
                     // one-shot broadcast). Once we've already joined this
                     // ceremony, ignore repeat sends so we don't re-fire
-                    // SubmitPassword and clobber it in flight. Keyed on the whole
-                    // ceremony, not just the id: signing on a warm mesh reuses the
-                    // finished DKG session's id, and that invite must not be
-                    // mistaken for a repeat of the DKG join.
-                    if model.active_session.as_ref().is_some_and(|active| {
-                        active.session_id == invite.session_id
-                            && active.session_type == invite.session_type
-                            && active.signing_message_hex == invite.signing_message_hex
-                    }) {
+                    // SubmitPassword and clobber it in flight. Every ceremony
+                    // has its own session id, so the id identifies it.
+                    if model
+                        .active_session
+                        .as_ref()
+                        .is_some_and(|active| active.session_id == invite.session_id)
+                    {
                         return None;
                     }
                     if matches!(invite.session_type, SessionType::DKG) {
@@ -523,7 +527,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // passed a root id (e.g. the desktop's ElmSigningBackend) gets
             // account 0 of the runner curve's primary chain; an explicit
             // child id (the CLI one-shot always sends one) passes through.
-            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            let wallet_id = account_signing_wallet_id(
+                &wallet_id,
+                sign_chain(model.wallet_state.curve_type, false),
+            );
             let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw);
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
@@ -1142,10 +1149,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         // ----- SignTransaction screen input (Phase C.3) -----
         Message::SignTypeChar(c) => {
             model.wallet_state.sign_message_draft.push(c);
+            model.wallet_state.sign_error = None;
             None
         }
         Message::SignBackspace => {
             model.wallet_state.sign_message_draft.pop();
+            model.wallet_state.sign_error = None;
+            None
+        }
+        Message::SignToggleChain => {
+            if model.wallet_state.curve_type == "secp256k1" {
+                model.wallet_state.sign_on_bitcoin = !model.wallet_state.sign_on_bitcoin;
+                model.wallet_state.sign_error = None;
+            }
             None
         }
         Message::SignSubmit => {
@@ -1183,13 +1199,29 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // "BIP-44 all the way": the UI navigates with the ROOT wallet id,
             // but signing must use an ACCOUNT key — map to the account-0
-            // child of the runner curve's primary chain. (No per-account
-            // selection exists on the accounts table yet; when it does, the
-            // selected index slots in here.) The child share is materialized
-            // on demand at unlock time.
-            let wallet_id = account_signing_wallet_id(&wallet_id, model.wallet_state.curve_type);
+            // child of the chosen chain (Tab picks Ethereum or Bitcoin for a
+            // secp256k1 wallet). (No per-account selection exists on the
+            // accounts table yet; when it does, the selected index slots in
+            // here.) The child share is materialized on demand at unlock time.
+            let chain = sign_chain(
+                model.wallet_state.curve_type,
+                model.wallet_state.sign_on_bitcoin,
+            );
+            let wallet_id = account_signing_wallet_id(&wallet_id, chain);
 
-            let raw_message_bytes = model.wallet_state.sign_message_draft.as_bytes().to_vec();
+            // Bitcoin signs a BIP-341 sighash the user supplies as hex;
+            // every other chain signs the typed text.
+            let raw_message_bytes = if chain == "bitcoin" {
+                match parse_sighash(&model.wallet_state.sign_message_draft) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        model.wallet_state.sign_error = Some(e);
+                        return None;
+                    }
+                }
+            } else {
+                model.wallet_state.sign_message_draft.as_bytes().to_vec()
+            };
             let curve = model.wallet_state.curve_type;
             let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw_message_bytes);
 
@@ -1453,6 +1485,103 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             info!("Deleting wallet: {}", wallet_id);
             model.ui_state.modal = None;
             Some(Command::DeleteWallet { wallet_id })
+        }
+
+        // ============= Wallet export / import =============
+        Message::ExportWallet { wallet_id } => {
+            model
+                .wallet_state
+                .reset_transfer_draft(format!("~/starlab-export/{wallet_id}.json"));
+            model.push_screen(Screen::ExportWallet { wallet_id });
+            None
+        }
+        Message::ImportWallet => {
+            model.wallet_state.reset_transfer_draft(String::new());
+            model.push_screen(Screen::ImportWallet);
+            None
+        }
+        Message::TransferTypeChar(c) => {
+            let ws = &mut model.wallet_state;
+            if ws.transfer_focus_password {
+                ws.transfer_password_draft.push(c);
+            } else {
+                ws.transfer_path_draft.push(c);
+            }
+            ws.transfer_error = None;
+            None
+        }
+        Message::TransferBackspace => {
+            let ws = &mut model.wallet_state;
+            if ws.transfer_focus_password {
+                ws.transfer_password_draft.pop();
+            } else {
+                ws.transfer_path_draft.pop();
+            }
+            ws.transfer_error = None;
+            None
+        }
+        Message::TransferToggleField => {
+            model.wallet_state.transfer_focus_password =
+                !model.wallet_state.transfer_focus_password;
+            None
+        }
+        Message::TransferSubmit => {
+            // Both screens need the path and the wallet password: import to
+            // decrypt the file, export to prove the share unlocks before it
+            // is handed out.
+            let ws = &mut model.wallet_state;
+            if ws.transfer_path_draft.trim().is_empty() {
+                ws.transfer_error = Some("Enter a file path".to_string());
+                return None;
+            }
+            if ws.transfer_password_draft.is_empty() {
+                ws.transfer_error = Some("Enter the wallet password".to_string());
+                return None;
+            }
+            let path = expand_home(ws.transfer_path_draft.trim());
+            let keystore_path = ws.keystore_path.clone();
+            let password = std::mem::take(&mut ws.transfer_password_draft);
+            match &model.current_screen {
+                Screen::ExportWallet { wallet_id } => Some(Command::ExportWallet {
+                    wallet_id: wallet_id.clone(),
+                    path,
+                    password,
+                    keystore_path,
+                }),
+                Screen::ImportWallet => Some(Command::ImportWallet {
+                    path,
+                    password,
+                    keystore_path,
+                }),
+                _ => None,
+            }
+        }
+        Message::WalletExported { wallet_id, path } => {
+            leave_transfer_screen(model);
+            model.ui_state.notifications.push(Notification {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Exported wallet '{wallet_id}' to {path}"),
+                kind: NotificationKind::Success,
+                timestamp: Utc::now(),
+                dismissible: true,
+            });
+            None
+        }
+        Message::WalletImported { wallet_id } => {
+            leave_transfer_screen(model);
+            model.ui_state.notifications.push(Notification {
+                id: Uuid::new_v4().to_string(),
+                text: format!("Imported wallet '{wallet_id}'"),
+                kind: NotificationKind::Success,
+                timestamp: Utc::now(),
+                dismissible: true,
+            });
+            Some(Command::LoadWallets)
+        }
+        Message::WalletTransferFailed { error } => {
+            warn!("{}", error);
+            model.wallet_state.transfer_error = Some(error);
+            None
         }
 
         // ============= Wallet Creation Flow =============
@@ -3414,26 +3543,56 @@ fn short_session_id(id: &str) -> String {
     }
 }
 
-/// Render the multi-line body for the creator-side Confirm-Signing
-/// modal. Shows the user-typed message (UTF-8 preview), the bytes
-/// FROST will actually sign (EIP-191 hash for secp256k1, same as raw
-/// for ed25519), and the wallet's threshold so the user knows how
-/// many co-signers are being recruited.
+/// Back from the Export/Import screen to wherever it was opened (Manage
+/// Wallets, or the main menu for an import on a fresh device).
+fn leave_transfer_screen(model: &mut Model) {
+    model.wallet_state.reset_transfer_draft(String::new());
+    model.pop_screen();
+    model.ui_state.focus = if matches!(model.current_screen, Screen::ManageWallets) {
+        crate::elm::model::ComponentId::WalletList
+    } else {
+        crate::elm::model::ComponentId::MainMenu
+    };
+}
+
+/// A typed file path, with a leading `~/` expanded to `$HOME`.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var("HOME")) {
+        (Some(rest), Ok(home)) => std::path::Path::new(&home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
+}
+
+/// The chain a signature is made for: a secp256k1 wallet signs as its
+/// Ethereum account, or its Bitcoin account when chosen; ed25519 is Solana.
+fn sign_chain(curve_type: &str, bitcoin: bool) -> &'static str {
+    match (curve_type, bitcoin) {
+        ("secp256k1", true) => "bitcoin",
+        ("secp256k1", false) => "ethereum",
+        _ => "solana",
+    }
+}
+
+/// A Bitcoin sighash typed as hex (`0x` optional); must be exactly 32 bytes.
+fn parse_sighash(input: &str) -> Result<Vec<u8>, String> {
+    const HINT: &str = "Bitcoin signs a 32-byte sighash: enter 64 hex characters";
+    let trimmed = input.trim();
+    let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    match hex::decode(hex_str) {
+        Ok(bytes) if bytes.len() == 32 => Ok(bytes),
+        _ => Err(HINT.to_string()),
+    }
+}
+
 /// "BIP-44 all the way": signing must NEVER use the root key. Map a root
-/// wallet id to its account-0 child for the runner curve's primary chain
-/// (ethereum for secp256k1, solana for ed25519); ids that already name an
-/// account child (`{parent}-{chain}-{account}`) pass through unchanged.
-/// The child share is materialized on demand at unlock time (the user has
-/// just typed the password) by `Command::UnlockWallet`.
-fn account_signing_wallet_id(wallet_id: &str, curve_type: &str) -> String {
+/// wallet id to its account-0 child on `chain` (see [`sign_chain`]); ids
+/// that already name an account child (`{parent}-{chain}-{account}`) pass
+/// through unchanged. The child share is materialized on demand at unlock
+/// time (the user has just typed the password) by `Command::UnlockWallet`.
+fn account_signing_wallet_id(wallet_id: &str, chain: &str) -> String {
     if starlab_core::accounts::parse_child_wallet_id(wallet_id).is_some() {
         return wallet_id.to_string();
     }
-    let chain = if curve_type == "secp256k1" {
-        "ethereum"
-    } else {
-        "solana"
-    };
     format!("{wallet_id}-{chain}-0")
 }
 
@@ -3468,6 +3627,11 @@ fn signing_payload(wallet_id: &str, raw: Vec<u8>) -> (Vec<u8>, Option<Vec<u8>>) 
     }
 }
 
+/// Render the multi-line body for the creator-side Confirm-Signing
+/// modal. Shows the user-typed message (UTF-8 preview), the bytes
+/// FROST will actually sign (EIP-191 hash for an Ethereum account, the
+/// raw bytes otherwise), and the wallet's threshold so the user knows how
+/// many co-signers are being recruited.
 fn preview_lines(
     wallet_id: &str,
     curve: &str,
@@ -3590,6 +3754,14 @@ mod tests {
             cmd,
             Some(Command::SendMessage(Message::NavigateBack))
         ));
+    }
+
+    #[test]
+    fn back_on_the_main_menu_does_not_quit() {
+        let mut model = Model::new("test".to_string());
+        model.current_screen = Screen::MainMenu;
+        assert!(update(&mut model, Message::NavigateBack).is_none());
+        assert_eq!(model.current_screen, Screen::MainMenu);
     }
 
     #[test]
@@ -3758,32 +3930,6 @@ mod tests {
         model.session_invites.push(dkg_invite("s1"));
         model.active_session = Some(dkg_invite("s1"));
         assert!(headless_join(&mut model, "s1").is_none());
-    }
-
-    #[test]
-    fn headless_join_signing_that_reuses_the_dkg_session_id_is_joined() {
-        // Warm-path signing announces under the finished DKG session's id; the
-        // joiner's active_session still holds that DKG session.
-        let mut model = Model::new("dev".to_string());
-        model.active_session = Some(dkg_invite("s1"));
-        let signing = SessionInfo {
-            session_type: SessionType::Signing {
-                wallet_name: "w-ethereum-0".to_string(),
-                curve_type: "secp256k1".to_string(),
-                blockchain: "ethereum".to_string(),
-                group_public_key: "02ab".to_string(),
-            },
-            signing_message_hex: Some("deadbeef".to_string()),
-            ..dkg_invite("s1")
-        };
-        model.session_invites.push(signing.clone());
-        match headless_join(&mut model, "s1") {
-            Some(Command::SendMessage(Message::SubmitPassword { value })) => {
-                assert_eq!(value, "pw");
-            }
-            other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
-        }
-        assert_eq!(model.active_session, Some(signing));
     }
 
     #[test]
@@ -3979,25 +4125,6 @@ mod tests {
         join(&mut model, "s1");
         update(&mut model, Message::CancelDKG);
         assert!(model.wallet_state.joining_session.is_none());
-    }
-
-    /// StartSigning's warm path reuses the DKG session id, so a co-signer
-    /// whose `active_session` is still the finished DKG must not treat the
-    /// signing invite as "already joined".
-    #[test]
-    fn headless_join_signing_reusing_dkg_session_id_is_not_skipped() {
-        let mut model = Model::new("dev".to_string());
-        model.active_session = Some(dkg_invite("s1"));
-        let mut signing = dkg_invite("s1");
-        signing.session_type = SessionType::Signing {
-            wallet_name: "w-ethereum-0".to_string(),
-            curve_type: "secp256k1".to_string(),
-            blockchain: "secp256k1".to_string(),
-            group_public_key: String::new(),
-        };
-        model.session_invites.push(signing.clone());
-        join(&mut model, "s1");
-        assert_eq!(model.active_session, Some(signing));
     }
 
     #[test]
@@ -4208,20 +4335,20 @@ mod tests {
     #[test]
     fn account_signing_wallet_id_maps_root_to_account0_child() {
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3", "secp256k1"),
+            account_signing_wallet_id("19caa3cf46d3", sign_chain("secp256k1", false)),
             "19caa3cf46d3-ethereum-0"
         );
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3", "ed25519"),
+            account_signing_wallet_id("19caa3cf46d3", sign_chain("ed25519", false)),
             "19caa3cf46d3-solana-0"
         );
         // Already-a-child ids pass through untouched, any chain/account.
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "secp256k1"),
+            account_signing_wallet_id("19caa3cf46d3-bitcoin-7", "ethereum"),
             "19caa3cf46d3-bitcoin-7"
         );
         assert_eq!(
-            account_signing_wallet_id("19caa3cf46d3-sui-2", "ed25519"),
+            account_signing_wallet_id("19caa3cf46d3-sui-2", "solana"),
             "19caa3cf46d3-sui-2"
         );
     }
@@ -4470,5 +4597,266 @@ mod tests {
             }
             other => panic!("expected CopyToClipboard, got {:?}", other),
         }
+    }
+
+    const ROOT: &str = "19caa3cf46d3";
+
+    /// A model on the SignTransaction screen for `ROOT`.
+    fn sign_screen(curve: &'static str) -> Model {
+        let mut model = Model::new("dev".to_string());
+        model.wallet_state.curve_type = curve;
+        model.current_screen = Screen::SignTransaction {
+            wallet_id: ROOT.to_string(),
+        };
+        model
+    }
+
+    fn type_draft(model: &mut Model, text: &str) {
+        for c in text.chars() {
+            update(model, Message::SignTypeChar(c));
+        }
+    }
+
+    #[test]
+    fn bitcoin_choice_signs_the_raw_sighash_as_the_bitcoin_account() {
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, &format!("0x{}", "5a".repeat(32)));
+        update(&mut model, Message::SignSubmit);
+
+        let preview = model
+            .wallet_state
+            .pending_sign_preview
+            .expect("SignSubmit must stash a preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-bitcoin-0"));
+        assert_eq!(preview.bytes_to_sign, vec![0x5a; 32]);
+    }
+
+    #[test]
+    fn bitcoin_choice_rejects_input_that_is_not_a_32_byte_sighash() {
+        for bad in ["hello", "0x5a5a", &"5a".repeat(33)] {
+            let mut model = sign_screen("secp256k1");
+            update(&mut model, Message::SignToggleChain);
+            type_draft(&mut model, bad);
+            assert!(update(&mut model, Message::SignSubmit).is_none());
+            assert!(model.wallet_state.pending_sign_preview.is_none(), "{bad}");
+            assert!(model.wallet_state.sign_error.is_some(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn toggling_back_signs_as_the_ethereum_account() {
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, "hello");
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-ethereum-0"));
+    }
+
+    #[test]
+    fn ed25519_wallets_have_no_bitcoin_choice() {
+        let mut model = sign_screen("ed25519");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, "hello");
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+        assert_eq!(preview.wallet_id, format!("{ROOT}-solana-0"));
+    }
+
+    /// The Bitcoin choice's (wallet id, payload), signed by a threshold of the
+    /// account shares derived the way UnlockWallet derives them, is a BIP-340
+    /// signature valid for the account's bc1p address.
+    #[test]
+    fn bitcoin_account_signature_verifies_for_its_p2tr_address() {
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
+        let mut model = sign_screen("secp256k1");
+        update(&mut model, Message::SignToggleChain);
+        type_draft(&mut model, &"a7".repeat(32));
+        update(&mut model, Message::SignSubmit);
+        let preview = model.wallet_state.pending_sign_preview.expect("preview");
+
+        let (_, chain, account) =
+            starlab_core::accounts::parse_child_wallet_id(&preview.wallet_id).expect("child id");
+        let path = starlab_core::DerivationPath::parse(
+            &starlab_core::accounts::standard_path(chain, account).expect("path"),
+        )
+        .expect("valid path");
+        let (shares, root) =
+            starlab_core::resharing::dkg_keypackages::<Secp>(3, 2, 41).expect("dkg");
+        let signers: Vec<_> = [1u16, 2]
+            .iter()
+            .map(|i| {
+                let blob = crate::elm::command::encode_keystore_blob::<Secp>(&shares[i], &root)
+                    .expect("encode");
+                let (child, _) = crate::elm::command::derive_child_for_curve::<Secp>(&blob, &path)
+                    .expect("derive");
+                crate::elm::command::decode_keystore_blob::<Secp>(&child).expect("decode")
+            })
+            .collect();
+
+        let mut rng = starlab_core::rng::os_rng();
+        let mut nonces = std::collections::BTreeMap::new();
+        let mut commitments = std::collections::BTreeMap::new();
+        for (kp, _) in &signers {
+            let (n, c) = frost_core::round1::commit(kp.signing_share(), &mut rng);
+            nonces.insert(*kp.identifier(), n);
+            commitments.insert(*kp.identifier(), c);
+        }
+        let package = frost_core::SigningPackage::new(commitments, &preview.bytes_to_sign);
+        let mut sig_shares = std::collections::BTreeMap::new();
+        for (kp, _) in &signers {
+            let share =
+                frost_core::round2::sign(&package, &nonces[kp.identifier()], kp).expect("sign");
+            sig_shares.insert(*kp.identifier(), share);
+        }
+        let signature =
+            frost_core::aggregate(&package, &sig_shares, &signers[0].1).expect("aggregate");
+
+        let group = root.verifying_key().serialize().expect("group");
+        let address = starlab_core::accounts::account_addresses("secp256k1", &group, 0)
+            .expect("addresses")
+            .into_iter()
+            .find(|(chain, _, _)| chain == "Bitcoin")
+            .map(|(_, _, address)| address)
+            .expect("bitcoin address");
+        assert!(address.starts_with("bc1p"), "{address}");
+        let valid = starlab_core::accounts::verify_taproot_signature(
+            &address,
+            &preview.bytes_to_sign,
+            &signature.serialize().expect("sig"),
+        )
+        .expect("verify");
+        assert!(valid, "signature must verify for {address}");
+    }
+
+    fn type_transfer(model: &mut Model, text: &str) {
+        for c in text.chars() {
+            update(model, Message::TransferTypeChar(c));
+        }
+    }
+
+    #[test]
+    fn export_writes_the_selected_wallet_to_the_typed_path() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        model.wallet_state.keystore_path = "/ks".to_string();
+        update(
+            &mut model,
+            Message::ExportWallet {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert_eq!(
+            model.wallet_state.transfer_path_draft,
+            "~/starlab-export/w1.json"
+        );
+        model.wallet_state.transfer_path_draft = "/backup/w1.json".to_string();
+
+        // The share is only handed out once the password proves it unlocks.
+        assert!(update(&mut model, Message::TransferSubmit).is_none());
+        assert!(model.wallet_state.transfer_error.is_some());
+        update(&mut model, Message::TransferToggleField);
+        type_transfer(&mut model, "pw");
+
+        match update(&mut model, Message::TransferSubmit) {
+            Some(Command::ExportWallet {
+                wallet_id,
+                path,
+                password,
+                keystore_path,
+            }) => {
+                assert_eq!(wallet_id, "w1");
+                assert_eq!(path, std::path::PathBuf::from("/backup/w1.json"));
+                assert_eq!(password, "pw");
+                assert_eq!(keystore_path, "/ks");
+            }
+            other => panic!("expected ExportWallet, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn import_needs_a_password_then_hands_path_and_password_to_the_executor() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        assert_eq!(model.current_screen, Screen::ImportWallet);
+        type_transfer(&mut model, "/backup/w1.json");
+
+        assert!(update(&mut model, Message::TransferSubmit).is_none());
+        assert!(model.wallet_state.transfer_error.is_some());
+
+        update(&mut model, Message::TransferToggleField);
+        type_transfer(&mut model, "pw");
+        match update(&mut model, Message::TransferSubmit) {
+            Some(Command::ImportWallet { path, password, .. }) => {
+                assert_eq!(path, std::path::PathBuf::from("/backup/w1.json"));
+                assert_eq!(password, "pw");
+            }
+            other => panic!("expected ImportWallet, got {:?}", other),
+        }
+        assert!(
+            model.wallet_state.transfer_password_draft.is_empty(),
+            "password must not outlive the submit"
+        );
+    }
+
+    #[test]
+    fn a_finished_import_returns_to_manage_wallets_and_reloads_the_list() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        let cmd = update(
+            &mut model,
+            Message::WalletImported {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert!(matches!(cmd, Some(Command::LoadWallets)));
+        assert_eq!(model.current_screen, Screen::ManageWallets);
+        assert_eq!(
+            model.ui_state.focus,
+            crate::elm::model::ComponentId::WalletList
+        );
+    }
+
+    /// On a fresh device the import starts from the main menu (no Manage
+    /// Wallets entry yet); it must hand focus back to the menu, or the next
+    /// arrow keys move a list that isn't on screen.
+    #[test]
+    fn an_import_from_the_main_menu_returns_focus_to_the_menu() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::MainMenu;
+        update(&mut model, Message::ImportWallet);
+        update(
+            &mut model,
+            Message::WalletImported {
+                wallet_id: "w1".to_string(),
+            },
+        );
+        assert_eq!(model.current_screen, Screen::MainMenu);
+        assert_eq!(
+            model.ui_state.focus,
+            crate::elm::model::ComponentId::MainMenu
+        );
+    }
+
+    #[test]
+    fn a_failed_import_stays_on_screen_with_the_error() {
+        let mut model = Model::new("dev".to_string());
+        model.current_screen = Screen::ManageWallets;
+        update(&mut model, Message::ImportWallet);
+        update(
+            &mut model,
+            Message::WalletTransferFailed {
+                error: "Import failed: Invalid password".to_string(),
+            },
+        );
+        assert_eq!(model.current_screen, Screen::ImportWallet);
+        assert_eq!(
+            model.wallet_state.transfer_error.as_deref(),
+            Some("Import failed: Invalid password")
+        );
     }
 }

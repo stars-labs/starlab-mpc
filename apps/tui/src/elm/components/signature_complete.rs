@@ -127,14 +127,7 @@ impl Component for SignatureCompleteComponent {
         );
 
         // Signature hex.
-        let sig_label = if info.signed_hash.is_some() {
-            format!(
-                "FROST signature ({} bytes) — ecrecover-ready personal_sign:",
-                info.signature.len()
-            )
-        } else {
-            format!("FROST signature ({} bytes):", info.signature.len())
-        };
+        let sig_label = signature_label(&info.wallet_id, info.signature.len());
         frame.render_widget(
             Paragraph::new(sig_label).style(Style::default().fg(Color::Yellow)),
             rows[3],
@@ -220,6 +213,22 @@ impl MpcWalletComponent for SignatureCompleteComponent {
     }
 }
 
+/// What kind of signature the account produced. secp256k1 FROST is the
+/// BIP-340 suite: a Schnorr signature, which spends a Taproot output but is
+/// NOT ecrecover-able on Ethereum.
+fn signature_label(wallet_id: &str, len: usize) -> String {
+    match starlab_core::accounts::parse_child_wallet_id(wallet_id) {
+        Some((_, "bitcoin", _)) => {
+            format!("BIP-340 Schnorr signature ({len} bytes) — Taproot key-path spend:")
+        }
+        Some((_, "ethereum", _)) => format!(
+            "BIP-340 Schnorr signature ({len} bytes) over the EIP-191 hash (not ecrecover-compatible):"
+        ),
+        Some(_) => format!("Ed25519 signature ({len} bytes):"),
+        None => format!("FROST signature ({len} bytes):"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,9 +266,18 @@ mod tests {
         assert!(c.info.is_none());
     }
 
-    /// When signed_hash is populated, render must label the signature
-    /// as `ecrecover-ready personal_sign` so users know it's usable
-    /// as an Ethereum `personal_sign` output (not just a FROST blob).
+    #[test]
+    fn signature_label_names_the_scheme_per_chain() {
+        assert!(
+            signature_label("r-bitcoin-0", 64).starts_with("BIP-340 Schnorr signature (64 bytes)")
+        );
+        assert!(signature_label("r-ethereum-0", 64).contains("not ecrecover-compatible"));
+        assert!(signature_label("r-solana-0", 64).starts_with("Ed25519 signature"));
+        assert!(!signature_label("r-ethereum-0", 64).contains("ecrecover-ready"));
+    }
+
+    /// An Ethereum account signs the EIP-191 hash of the typed message;
+    /// the screen shows both, and names the signature as BIP-340 Schnorr.
     #[test]
     fn signed_hash_present_renders_ethereum_labels() {
         use ratatui::Terminal;
@@ -268,10 +286,10 @@ mod tests {
         let ws = WalletState {
             last_completed_signature: Some(CompletedSignatureInfo {
                 request_id: "inline".into(),
-                wallet_id: "w".into(),
+                wallet_id: "w-ethereum-0".into(),
                 message: b"hello".to_vec(),
                 signed_hash: Some(vec![0xDEu8; 32]),
-                signature: vec![0xAAu8; 65],
+                signature: vec![0xAAu8; 64],
                 verified: true,
             }),
             ..Default::default()
@@ -299,8 +317,8 @@ mod tests {
             "signed_hash Some must produce the EIP-191 label; got: {rendered}"
         );
         assert!(
-            rendered.contains("personal_sign"),
-            "must advertise Ethereum personal_sign compatibility"
+            rendered.contains("BIP-340 Schnorr signature (64 bytes)"),
+            "must name the signature scheme; got: {rendered}"
         );
         assert!(
             rendered.contains("\"hello\""),
