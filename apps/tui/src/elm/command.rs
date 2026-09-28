@@ -51,12 +51,19 @@ pub enum Command {
     DeleteWallet {
         wallet_id: String,
     },
+    /// Write the wallet's encrypted share file(s) to `path`
+    /// (`Keystore::export_share`, which checks `password` unlocks them).
     ExportWallet {
         wallet_id: String,
         path: PathBuf,
+        password: String,
+        keystore_path: String,
     },
+    /// Validate + add an exported share file (`Keystore::import_share`).
     ImportWallet {
         path: PathBuf,
+        password: String,
+        keystore_path: String,
     },
 
     // DKG operations
@@ -672,6 +679,180 @@ async fn try_finalize_unified<C>(
     }
 }
 
+/// A new signing session proposed by this node, under a fresh id. The signer
+/// set comes from the wallet's keystore metadata (written at DKG finalize);
+/// a wallet without it falls back to the live session's set.
+fn signing_session(
+    wallet_id: &str,
+    chain: &str,
+    group_pubkey_hex: &str,
+    self_device_id: &str,
+    metadata: Option<&crate::keystore::WalletMetadata>,
+    live: Option<&crate::protocal::signal::SessionInfo>,
+) -> crate::protocal::signal::SessionInfo {
+    let (threshold, total, participants) = match (metadata, live) {
+        (Some(m), _) if !m.participants.is_empty() => {
+            (m.threshold, m.total_participants, m.participants.clone())
+        }
+        (_, Some(s)) => (s.threshold, s.total, s.participants.clone()),
+        (Some(m), None) => {
+            warn!(
+                "StartSigning: wallet {} has no participants list — peers can't \
+                 join. Re-run DKG to regenerate.",
+                wallet_id
+            );
+            (m.threshold, m.total_participants, Vec::new())
+        }
+        (None, None) => {
+            warn!(
+                "StartSigning: wallet {} not in keystore — empty signer set",
+                wallet_id
+            );
+            (0, 0, Vec::new())
+        }
+    };
+    crate::protocal::signal::SessionInfo {
+        session_id: format!("sign_{}", uuid::Uuid::new_v4()),
+        proposer_id: self_device_id.to_string(),
+        total,
+        threshold,
+        participants,
+        session_type: crate::protocal::signal::SessionType::Signing {
+            wallet_name: wallet_id.to_string(),
+            curve_type: chain.to_string(),
+            blockchain: chain.to_string(),
+            group_public_key: group_pubkey_hex.to_string(),
+        },
+        curve_type: chain.to_string(),
+        coordination_type: "Network".to_string(),
+        signing_message_hex: None,
+    }
+}
+
+/// The `blockchain` a signing announce carries — a real chain name (the
+/// extension's session-parse.ts and the desktop read it to pick the account
+/// that signs), never the curve. An account child `{root}-{chain}-{n}` names
+/// its chain; a root id falls back to its keystore metadata, then to the
+/// curve's canonical chain. (#32)
+fn announce_chain(
+    wallet_id: &str,
+    metadata: Option<&crate::keystore::WalletMetadata>,
+    curve: &str,
+) -> String {
+    if let Some((_, chain, _)) = starlab_core::accounts::parse_child_wallet_id(wallet_id) {
+        return chain.to_string();
+    }
+    metadata
+        .and_then(|w| {
+            w.blockchains
+                .first()
+                .map(|b| b.blockchain.clone())
+                .or_else(|| w.blockchain.clone())
+        })
+        .unwrap_or_else(|| {
+            if curve == "ed25519" {
+                "solana".to_string()
+            } else {
+                "ethereum".to_string()
+            }
+        })
+}
+
+/// Export every key share `wallet_id` has (`Keystore::export_share`) to
+/// `path`. A single-curve wallet writes `path` itself; a unified wallet has
+/// one share per curve, written as `<stem>-<curve>.<ext>` next to `path`.
+/// Returns the files written.
+fn export_wallet_shares(
+    ks: &crate::keystore::Keystore,
+    wallet_id: &str,
+    path: &std::path::Path,
+    password: &str,
+) -> crate::keystore::Result<Vec<PathBuf>> {
+    let curves: Vec<String> = ks
+        .list_wallets()
+        .into_iter()
+        .filter(|w| w.session_id == wallet_id)
+        .map(|w| w.curve_type.clone())
+        .collect();
+    if curves.is_empty() {
+        return Err(crate::keystore::KeystoreError::WalletNotFound(
+            wallet_id.to_string(),
+        ));
+    }
+    // Validate + serialize every share before writing any file.
+    let exports = curves
+        .iter()
+        .map(|curve| Ok((curve, ks.export_share(wallet_id, curve, password)?)))
+        .collect::<crate::keystore::Result<Vec<_>>>()?;
+    // A key share backup is private to the user: directories we create are
+    // 0700 and the files 0600 (unix), never world-readable.
+    if let Some(parent) = path.parent() {
+        let mut dirs = std::fs::DirBuilder::new();
+        dirs.recursive(true);
+        #[cfg(unix)]
+        std::os::unix::fs::DirBuilderExt::mode(&mut dirs, 0o700);
+        dirs.create(parent)?;
+    }
+    let mut written = Vec::new();
+    for (curve, json) in exports {
+        let target = if curves.len() == 1 {
+            path.to_path_buf()
+        } else {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            let ext = path.extension().map(|e| e.to_string_lossy().into_owned());
+            let name = match ext {
+                Some(ext) => format!("{stem}-{curve}.{ext}"),
+                None => format!("{stem}-{curve}"),
+            };
+            path.with_file_name(name)
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        std::io::Write::write_all(&mut options.open(&target)?, json.as_bytes())?;
+        // `mode` only applies when the file is created; tighten an
+        // overwritten one too.
+        #[cfg(unix)]
+        std::fs::set_permissions(&target, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+        written.push(target);
+    }
+    Ok(written)
+}
+
+/// Reset `AppState` for a new DKG ceremony (creator or joiner). A node that
+/// already ran a DKG this process still holds that ceremony's session,
+/// `DkgState::Complete`, round packages and mesh-ready flags; left in place,
+/// a second wallet's DKG reuses the old session and its round 1 is dropped as
+/// "FROST already running". Live peer connections are kept (warm mesh).
+fn begin_new_dkg<C: frost_core::Ciphersuite>(
+    state: &mut crate::utils::appstate_compat::AppState<C>,
+) {
+    state.dkg_in_progress = true;
+    state.session = None;
+    state.dkg_state = crate::utils::state::DkgState::Idle;
+    state.received_dkg_packages.clear();
+    state.received_dkg_round2_packages.clear();
+    state.dkg_part1_public_package = None;
+    state.dkg_part1_secret_package = None;
+    state.dkg_part2_secret_package = None;
+    state.dkg_round1_packages.clear();
+    state.dkg_round2_packages.clear();
+    state.round2_secret_package = None;
+    // DKG completion is detected as "public_key_package is set", so the last
+    // wallet's keys must go or the new ceremony "completes" with them.
+    state.key_package = None;
+    state.public_key_package = None;
+    state.group_public_key = None;
+    state.current_wallet_id = None;
+    state.unified_mode = false;
+    state.unified_dkg = None;
+    state.unified_finalize = None;
+    state.own_mesh_ready_sent = false;
+    state.pending_mesh_ready_signals.clear();
+    state.ceremony_outbox.clear();
+}
+
 /// Load an existing wallet's OLD share + metadata from the keystore and seed the
 /// reshare context on `AppState` (keys, ORIGINAL participant set, persist creds,
 /// `reshare_in_progress`). Shared by the reshare initiator (`StartReshare`) and
@@ -874,10 +1055,74 @@ impl Command {
         C: crate::utils::curve_traits::CurveIdentifier,
     {
         match self {
+            Command::ExportWallet {
+                wallet_id,
+                path,
+                password,
+                keystore_path,
+            } => {
+                let device_id = app_state.lock().await.device_id.clone();
+                let result = crate::keystore::Keystore::new(&keystore_path, &device_id)
+                    .and_then(|ks| export_wallet_shares(&ks, &wallet_id, &path, &password));
+                drop(password);
+                let _ = tx.send(match result {
+                    Ok(written) => Message::WalletExported {
+                        wallet_id,
+                        path: written
+                            .iter()
+                            .map(|p| p.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    },
+                    Err(e) => Message::WalletTransferFailed {
+                        error: format!("Export failed: {e}"),
+                    },
+                });
+            }
+
+            Command::ImportWallet {
+                path,
+                password,
+                keystore_path,
+            } => {
+                let device_id = app_state.lock().await.device_id.clone();
+                let result = crate::keystore::Keystore::new(&keystore_path, &device_id).and_then(
+                    |mut ks| {
+                        let file = std::fs::read(&path)?;
+                        let wallet = ks.import_share(&file, &password)?;
+                        Ok((ks, wallet))
+                    },
+                );
+                drop(password);
+                match result {
+                    Ok((ks, wallet)) => {
+                        // Publish the keystore that holds the import so the
+                        // next LoadWallets lists it.
+                        app_state.lock().await.keystore = Some(std::sync::Arc::new(ks));
+                        let _ = tx.send(Message::WalletImported {
+                            wallet_id: wallet.session_id,
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Message::WalletTransferFailed {
+                            error: format!("Import failed: {e}"),
+                        });
+                    }
+                }
+            }
+
             Command::LoadWallets => {
                 info!("Loading wallets from keystore");
 
-                let state = app_state.lock().await;
+                let mut state = app_state.lock().await;
+                // Rescan disk: another Keystore instance (e.g. a front-end's
+                // wallet import) may have written files this cache hasn't seen.
+                if let Some(current) = state.keystore.clone() {
+                    match crate::keystore::Keystore::new(current.base_path(), current.device_id()) {
+                        Ok(fresh) => state.keystore = Some(std::sync::Arc::new(fresh)),
+                        Err(e) => warn!("LoadWallets: keystore rescan failed: {}", e),
+                    }
+                }
                 if let Some(ref keystore) = state.keystore {
                     let wallets = keystore.list_wallets();
                     // Convert Vec<&WalletMetadata> to Vec<WalletMetadata> by cloning
@@ -981,14 +1226,21 @@ impl Command {
 
                 {
                     let mut state = app_state.lock().await;
-                    if state.dkg_in_progress {
+                    // `dkg_in_progress` outlives a finished ceremony, so only a
+                    // DKG that hasn't ended blocks a new one (second wallet).
+                    let finished = matches!(
+                        state.dkg_state,
+                        crate::utils::state::DkgState::Complete
+                            | crate::utils::state::DkgState::Failed(_)
+                    );
+                    if state.dkg_in_progress && !finished {
                         info!("⚠️ DKG already in progress, skipping duplicate StartDKG");
                         let _ = tx.send(Message::Info {
                             message: "DKG already in progress, please wait...".to_string(),
                         });
                         return Ok(());
                     }
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                 }
 
                 if config.mode == crate::elm::model::WalletMode::Online {
@@ -1011,25 +1263,13 @@ impl Command {
                     // Note: We can't use tokio::spawn here due to Send/Sync constraints
                     // with FROST cryptographic types. For now, show informative messages.
 
-                    // CRITICAL FIX: Check if we already have an active session ID
-                    // This prevents creating new sessions on WebSocket reconnection
-                    let session_id = {
-                        let state = app_state.lock().await;
-                        if let Some(ref session) = state.session {
-                            // Reuse existing session ID to prevent session chaos
-                            info!("🔄 Reusing existing session ID: {}", session.session_id);
-                            session.session_id.clone()
-                        } else {
-                            // Only generate new session ID if we don't have one.
-                            // Bare UUID — the session TYPE is carried in the
-                            // `session_type` field, not parsed from an id prefix,
-                            // so a `dkg_` prefix was just noise. (wallet ids derive
-                            // from the hex either way; see wallet_id_from_session.)
-                            let new_id = uuid::Uuid::new_v4().to_string();
-                            info!("🆕 Creating new session ID: {}", new_id);
-                            new_id
-                        }
-                    };
+                    // Every StartDKG is a new ceremony (duplicates bail at the
+                    // gate above), so always mint a fresh id. Bare UUID — the
+                    // session TYPE is carried in `session_type`, not an id
+                    // prefix. (wallet ids derive from the hex; see
+                    // wallet_id_from_session.)
+                    let session_id = uuid::Uuid::new_v4().to_string();
+                    info!("🆕 Creating new session ID: {}", session_id);
 
                     let _ = tx_clone.send(Message::UpdateDKGSessionId {
                         real_session_id: session_id.clone(),
@@ -1704,23 +1944,11 @@ impl Command {
                     }
                 };
 
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: serde_json::json!({
-                        "session_id": session_id.clone(),
-                        "participant_joined": device_id.clone(),
-                    }),
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx.send(Message::Error {
-                                message: "Primary WS closed mid reshare-join".to_string(),
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
-                }
-
+                // Record the session BEFORE announcing the join: the server
+                // answers our `SessionStatusUpdate` with a `participant_update`
+                // that the relay handler keeps only if `state.session` already
+                // names this session. For the last joiner that frame is the
+                // only full roster it gets, so dropping it stalls the mesh.
                 {
                     let mut state = app_state.lock().await;
                     state.session = Some(crate::protocal::signal::SessionInfo {
@@ -1743,6 +1971,23 @@ impl Command {
                         signing_message_hex: None,
                     });
                 }
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "participant_joined": device_id.clone(),
+                    }),
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx.send(Message::Error {
+                                message: "Primary WS closed mid reshare-join".to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
+                }
+
                 let _ = tx.send(Message::Info {
                     message: format!("🔄 Joined reshare session: {}", session_id),
                 });
@@ -1829,7 +2074,7 @@ impl Command {
                 // at the dedupe check and can't re-announce the session as us.
                 let device_id = {
                     let mut state = app_state.lock().await;
-                    state.dkg_in_progress = true;
+                    begin_new_dkg(&mut state);
                     state.device_id.clone()
                 };
                 let tx_clone = tx.clone();
@@ -1850,35 +2095,12 @@ impl Command {
                     }
                 };
 
-                // Send a SessionStatusUpdate so the server+creator learn we're in.
-                let session_update = serde_json::json!({
-                    "session_id": session_id.clone(),
-                    "participant_joined": device_id.clone(),
-                });
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: session_update,
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx_clone.send(Message::Error {
-                                message: "Primary WS channel closed mid-join".to_string(),
-                            });
-                        } else {
-                            let _ = tx_clone.send(Message::Info {
-                                message: format!("✅ Joined session: {}", session_id),
-                            });
-                            let _ = tx_clone.send(Message::UpdateDKGProgress {
-                                round: crate::elm::message::DKGRound::WaitingForParticipants,
-                                progress: 0.2,
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
-                }
-
                 // Provisional session state — curve_type/threshold get overwritten
                 // as soon as the creator's SessionAvailable arrives on the broadcast.
+                // Set BEFORE the `SessionStatusUpdate` below: the relay handler
+                // drops a `participant_update` for a session `state.session`
+                // doesn't name yet, and the last joiner's own update is the
+                // only full roster it receives.
                 {
                     let mut state = app_state.lock().await;
                     // Prefer the curve the joiner already learned from the
@@ -1920,6 +2142,33 @@ impl Command {
                         coordination_type: "Network".to_string(),
                         signing_message_hex: None,
                     });
+                }
+
+                // Send a SessionStatusUpdate so the server+creator learn we're in.
+                let session_update = serde_json::json!({
+                    "session_id": session_id.clone(),
+                    "participant_joined": device_id.clone(),
+                });
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: session_update,
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx_clone.send(Message::Error {
+                                message: "Primary WS channel closed mid-join".to_string(),
+                            });
+                        } else {
+                            let _ = tx_clone.send(Message::Info {
+                                message: format!("✅ Joined session: {}", session_id),
+                            });
+                            let _ = tx_clone.send(Message::UpdateDKGProgress {
+                                round: crate::elm::message::DKGRound::WaitingForParticipants,
+                                progress: 0.2,
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
                 }
 
                 // Capture broadcast subscription + context for the driver task.
@@ -2861,108 +3110,42 @@ impl Command {
                     )
                 };
 
-                // Record the session on AppState so the protocol layer's
-                // broadcast helper has somewhere to read `participants`
-                // from. Two paths:
-                //
-                // 1. Warm — a session already lives on AppState (from
-                //    the prior DKG in this run, or a previous sign).
-                //    Mutate its session_type to Signing + reuse the
-                //    existing participant list + session_id.
-                //
-                // 2. Cold — no session. Rebuild one from the persisted
-                //    wallet metadata we just unlocked: threshold,
-                //    total_participants and the participant device_id
-                //    list were written at DKG finalize time (see
-                //    `WalletMetadata::participants`). Mint a fresh
-                //    signing session_id and stamp it on AppState so
-                //    joiners can discover us. If the metadata lacks a
-                //    participant list (pre-participants-field wallet),
-                //    degrade to empty — the announcement will go out
-                //    with `participants=[]` and `canonical_identifier`
-                //    on the peer side will reject, but we fail loudly
-                //    later rather than silently producing a broken
-                //    ceremony.
+                // Record THIS ceremony's session on AppState (the protocol
+                // layer's broadcast helper reads `participants` from it).
+                // Every signing gets a fresh id: co-signers dedupe requests
+                // per session id, so reusing one (e.g. the finished DKG's)
+                // hides the new request and the ceremony hangs in round 1.
+                // The live WebRTC mesh is keyed by peer, not session, so it
+                // is reused either way.
                 let session_id = {
                     let mut state = app_state.lock().await;
-                    if state.session.is_some() {
-                        // Warm path
-                        let sid = state.session.as_ref().unwrap().session_id.clone();
-                        if let Some(ref mut session) = state.session {
-                            use crate::protocal::signal::SessionType;
-                            session.session_type = SessionType::Signing {
-                                wallet_name: request.wallet_id.clone(),
-                                curve_type: request.chain.clone(),
-                                blockchain: request.chain.clone(),
-                                group_public_key: group_pubkey_hex.clone(),
-                            };
-                            // StartSigning always means WE are proposing this
-                            // ceremony — refresh proposer_id even on a warm
-                            // session, whose stale value is whoever announced
-                            // the last one (the DKG creator, or an earlier
-                            // signing's proposer).
-                            session.proposer_id = self_device_id.clone();
-                        }
-                        sid
-                    } else {
-                        // Cold path — reconstruct from keystore metadata.
-                        let wallet_meta = state
+                    let session = signing_session(
+                        &request.wallet_id,
+                        &request.chain,
+                        &group_pubkey_hex,
+                        &self_device_id,
+                        state
                             .keystore
                             .as_ref()
-                            .and_then(|ks| ks.get_wallet(&request.wallet_id).cloned());
-
-                        let (cold_threshold, cold_total, cold_participants) = match wallet_meta {
-                            Some(m) => {
-                                let ps = m.participants.clone();
-                                if ps.is_empty() {
-                                    warn!(
-                                        "StartSigning cold-start: wallet {} has no \
-                                         participants list in metadata (pre-field-add \
-                                         wallet?) — announce will have participants=[] \
-                                         and peers can't join. Re-run DKG to regenerate.",
-                                        request.wallet_id
-                                    );
-                                }
-                                (m.threshold, m.total_participants, ps)
-                            }
-                            None => {
-                                warn!(
-                                    "StartSigning cold-start: wallet {} not in keystore \
-                                     cache — announce will have empty metadata",
-                                    request.wallet_id
-                                );
-                                (0, 0, Vec::new())
-                            }
-                        };
-
-                        let sid = format!("sign_{}", uuid::Uuid::new_v4());
-                        state.session = Some(crate::protocal::signal::SessionInfo {
-                            session_id: sid.clone(),
-                            proposer_id: self_device_id.clone(),
-                            total: cold_total,
-                            threshold: cold_threshold,
-                            participants: cold_participants,
-                            session_type: crate::protocal::signal::SessionType::Signing {
-                                wallet_name: request.wallet_id.clone(),
-                                curve_type: request.chain.clone(),
-                                blockchain: request.chain.clone(),
-                                group_public_key: group_pubkey_hex.clone(),
-                            },
-                            curve_type: request.chain.clone(),
-                            coordination_type: "Network".to_string(),
-                            signing_message_hex: None,
-                        });
-                        info!(
-                            "StartSigning cold-start: rebuilt session {} with \
-                             {}-of-{} + {} participants from wallet metadata",
-                            sid,
-                            cold_threshold,
-                            cold_total,
-                            state.session.as_ref().unwrap().participants.len()
-                        );
-                        sid
-                    }
+                            .and_then(|ks| ks.get_wallet(&request.wallet_id)),
+                        state.session.as_ref(),
+                    );
+                    info!(
+                        "StartSigning: session {} ({}-of-{}, {} participants)",
+                        session.session_id,
+                        session.threshold,
+                        session.total,
+                        session.participants.len()
+                    );
+                    let sid = session.session_id.clone();
+                    state.session = Some(session);
+                    sid
                 };
+                // The initiator minted this id here; hand it to the Elm side
+                // (joiners already have it from the announce).
+                if let Some(session) = app_state.lock().await.session.clone() {
+                    let _ = tx.send(Message::SigningSessionAnnounced { session });
+                }
 
                 // Announce over the signal server so any peer that is
                 // joining can discover this signing ceremony. Best-effort —
@@ -2987,31 +3170,18 @@ impl Command {
                             .map(|s| s.participants.clone())
                             .unwrap_or_default()
                     };
-                    // The `blockchain` field must be a real chain name (the
-                    // extension's session-parse.ts reads it), not the curve.
-                    // `request.chain` is set to the curve upstream (the headless
-                    // sign API has no per-chain context), so resolve the wallet's
-                    // actual primary chain from keystore metadata, falling back
-                    // to the curve's canonical chain. (#32)
+                    // `request.chain` is the curve (the headless sign API has
+                    // no per-chain context); see `announce_chain`.
                     let announce_blockchain = {
                         let state = app_state.lock().await;
-                        state
-                            .keystore
-                            .as_ref()
-                            .and_then(|ks| ks.get_wallet(&request.wallet_id))
-                            .and_then(|w| {
-                                w.blockchains
-                                    .first()
-                                    .map(|b| b.blockchain.clone())
-                                    .or_else(|| w.blockchain.clone())
-                            })
-                            .unwrap_or_else(|| {
-                                if announced_curve == "ed25519" {
-                                    "solana".to_string()
-                                } else {
-                                    "ethereum".to_string()
-                                }
-                            })
+                        announce_chain(
+                            &request.wallet_id,
+                            state
+                                .keystore
+                                .as_ref()
+                                .and_then(|ks| ks.get_wallet(&request.wallet_id)),
+                            announced_curve,
+                        )
                     };
                     let session_info = serde_json::json!({
                         "session_id": session_id.clone(),
@@ -3115,75 +3285,48 @@ impl Command {
                     state.device_id.clone()
                 };
 
-                // Cold-joiner path: if AppState.session is None
-                // (fresh boot, no prior DKG in this run), rebuild it
-                // from the just-unlocked wallet's keystore metadata —
-                // same shape as StartSigning's cold path. Without this
-                // `protocal::signing::broadcast_signing_frame` has no
-                // participant list to enumerate.
-                //
-                // Warm joiner path: session carries over from the DKG
-                // that ran earlier in the same process; leave everything
-                // alone EXCEPT proposer_id (its session_type may already be
-                // Signing from an earlier ceremony; the protocol layer
-                // doesn't care). proposer_id DOES need refreshing every
-                // time: a warm session's proposer_id is whatever announced
-                // it last (the DKG creator, or an earlier signing's
-                // proposer) — not necessarily whoever is proposing THIS
-                // ceremony, which is exactly what the just-accepted
-                // announce (`proposer_id` here) tells us.
+                // Record the announced ceremony on AppState under ITS id,
+                // with the proposer the announce named (whose SIGN_SET we
+                // trust). The signer set comes from the just-unlocked
+                // wallet's metadata (`current_wallet_id`, set by
+                // UnlockWallet); without it, keep the live session's set
+                // (e.g. a DKG that just ran in this process).
                 {
                     let mut state = app_state.lock().await;
-                    if let Some(session) = state.session.as_mut() {
-                        session.proposer_id = proposer_id.clone();
-                    }
-                    if state.session.is_none() {
-                        // Find the wallet by its session_id-derived id.
-                        // The current_wallet_id was set by UnlockWallet.
-                        let (meta, keystore_path) = (
-                            state.keystore.as_ref().and_then(|ks| {
-                                state
-                                    .current_wallet_id
-                                    .as_ref()
-                                    .and_then(|id| ks.get_wallet(id).cloned())
-                            }),
-                            state.signal_server_url.clone(),
-                        );
-                        let _ = keystore_path; // unused; kept for clarity
-                        match meta {
-                            Some(m) => {
-                                info!(
-                                    "JoinSigning cold-joiner: rebuilt session {} from \
-                                     wallet metadata ({}-of-{}, {} participants)",
-                                    session_id,
-                                    m.threshold,
-                                    m.total_participants,
-                                    m.participants.len()
-                                );
-                                state.session = Some(crate::protocal::signal::SessionInfo {
-                                    session_id: session_id.clone(),
-                                    proposer_id: proposer_id.clone(),
-                                    total: m.total_participants,
-                                    threshold: m.threshold,
-                                    participants: m.participants.clone(),
-                                    session_type: crate::protocal::signal::SessionType::Signing {
-                                        wallet_name: m.session_id.clone(),
-                                        curve_type: m.curve_type.clone(),
-                                        blockchain: m.curve_type.clone(),
-                                        group_public_key: m.group_public_key.clone(),
-                                    },
-                                    curve_type: m.curve_type,
-                                    coordination_type: "Network".to_string(),
-                                    signing_message_hex: None,
-                                });
-                            }
-                            None => {
-                                warn!(
-                                    "JoinSigning cold-joiner: no wallet metadata for \
-                                     current_wallet_id — peers list will be empty"
-                                );
-                            }
+                    let meta = state.keystore.as_ref().and_then(|ks| {
+                        state
+                            .current_wallet_id
+                            .as_ref()
+                            .and_then(|id| ks.get_wallet(id).cloned())
+                    });
+                    match (meta, state.session.as_mut()) {
+                        (Some(m), _) if !m.participants.is_empty() => {
+                            state.session = Some(crate::protocal::signal::SessionInfo {
+                                session_id: session_id.clone(),
+                                proposer_id: proposer_id.clone(),
+                                total: m.total_participants,
+                                threshold: m.threshold,
+                                participants: m.participants.clone(),
+                                session_type: crate::protocal::signal::SessionType::Signing {
+                                    wallet_name: m.session_id.clone(),
+                                    curve_type: m.curve_type.clone(),
+                                    blockchain: m.curve_type.clone(),
+                                    group_public_key: m.group_public_key.clone(),
+                                },
+                                curve_type: m.curve_type,
+                                coordination_type: "Network".to_string(),
+                                signing_message_hex: None,
+                            });
                         }
+                        (_, Some(live)) => {
+                            live.session_id = session_id.clone();
+                            live.proposer_id = proposer_id.clone();
+                        }
+                        (_, None) => warn!(
+                            "JoinSigning: no wallet metadata or live session for {} — \
+                             peers list will be empty",
+                            session_id
+                        ),
                     }
                 }
 
@@ -3298,7 +3441,8 @@ impl Command {
                 //   1. snapshot state, flag as connecting, drop the stale sender
                 //   2. dial the signal server
                 //   3. mint the outbound mpsc + inbound broadcast, stash in state
-                //   4. send Register, and re-announce our own session if any
+                //   4. send Register, re-announce our own session if any, and
+                //      request the stored-session replay
                 //   5. spawn the sender (mpsc → sink, with 30s ping)
                 //   6. spawn the reader (stream → parse → broadcast + Elm dispatch)
                 //   7. tell the Elm loop we're live
@@ -3324,6 +3468,7 @@ impl Command {
                 if let Some(session) = &params.existing_session {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
+                ws_runtime::send_request_active_sessions(&mut sink).await;
 
                 // Always-on relay handler (peer WebRTC signals +
                 // participant_update) for the whole connection — subscribe
@@ -3641,5 +3786,187 @@ mod account_wallet_tests {
         .expect_err("must fail");
         assert!(err.contains(PARENT), "error must name the parent: {err}");
         assert!(ks.get_wallet(&format!("{PARENT}-ethereum-1")).is_none());
+    }
+
+    /// Run one command against a node whose device id is `device-1`.
+    async fn run(cmd: Command) -> Message {
+        let mut state = crate::utils::appstate_compat::AppState::<Secp>::new();
+        state.device_id = "device-1".to_string();
+        let app_state = std::sync::Arc::new(tokio::sync::Mutex::new(state));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        cmd.execute::<Secp>(tx, &app_state).await.expect("execute");
+        rx.recv().await.expect("a result message")
+    }
+
+    /// The TUI's export → import commands move a wallet into a fresh
+    /// keystore with its group key intact; a wrong password is reported.
+    #[tokio::test]
+    async fn export_then_import_commands_move_a_wallet_between_keystores() {
+        let (src_dir, _ks, group_hex) = keystore_with_parent();
+        let out = tempfile::tempdir().expect("tempdir");
+        let file = out.path().join("w.json");
+        let src_path = src_dir.path().to_string_lossy().into_owned();
+        let refused = run(Command::ExportWallet {
+            wallet_id: PARENT.to_string(),
+            path: file.clone(),
+            password: "nope".to_string(),
+            keystore_path: src_path.clone(),
+        })
+        .await;
+        assert!(
+            matches!(refused, Message::WalletTransferFailed { .. }),
+            "{refused:?}"
+        );
+        assert!(!file.exists(), "no file for a password that doesn't unlock");
+
+        let exported = run(Command::ExportWallet {
+            wallet_id: PARENT.to_string(),
+            path: file.clone(),
+            password: PW.to_string(),
+            keystore_path: src_path,
+        })
+        .await;
+        assert!(
+            matches!(exported, Message::WalletExported { .. }),
+            "{exported:?}"
+        );
+
+        let dst_dir = tempfile::tempdir().expect("tempdir");
+        let dst_path = dst_dir.path().to_string_lossy().into_owned();
+        let wrong = run(Command::ImportWallet {
+            path: file.clone(),
+            password: "nope".to_string(),
+            keystore_path: dst_path.clone(),
+        })
+        .await;
+        assert!(
+            matches!(wrong, Message::WalletTransferFailed { .. }),
+            "{wrong:?}"
+        );
+
+        let imported = run(Command::ImportWallet {
+            path: file,
+            password: PW.to_string(),
+            keystore_path: dst_path.clone(),
+        })
+        .await;
+        assert_eq!(
+            imported,
+            Message::WalletImported {
+                wallet_id: PARENT.to_string()
+            }
+        );
+        let ks = crate::keystore::Keystore::new(&dst_path, "device-1").expect("reopen");
+        assert_eq!(
+            ks.get_wallet(PARENT).expect("listed").group_public_key,
+            group_hex
+        );
+    }
+
+    /// A unified wallet holds one share per curve under the same id; export
+    /// writes each to `<stem>-<curve>.json`, and both import back.
+    #[test]
+    fn unified_wallet_exports_one_file_per_curve() {
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut ks = crate::keystore::Keystore::new(dir.path(), "device-1").expect("keystore");
+        let (ed_kps, ed_pp) = dkg_keypackages::<Ed>(3, 2, 5).expect("dkg ed");
+        let (k_kps, k_pp) = dkg_keypackages::<Secp>(3, 2, 6).expect("dkg secp");
+        let hex_of = |b: Vec<u8>| hex::encode(b);
+        ks.create_wallet_unified(
+            "u1",
+            2,
+            3,
+            1,
+            vec!["alice".into(), "bob".into(), "carol".into()],
+            None,
+            PW,
+            &hex_of(ed_pp.verifying_key().serialize().unwrap()),
+            &encode_keystore_blob::<Ed>(&ed_kps[&1], &ed_pp).unwrap(),
+            &hex_of(k_pp.verifying_key().serialize().unwrap().to_vec()),
+            &encode_keystore_blob::<Secp>(&k_kps[&1], &k_pp).unwrap(),
+        )
+        .expect("unified wallet");
+
+        let out = tempfile::tempdir().expect("tempdir");
+        let backup_dir = out.path().join("starlab-export");
+        let written =
+            export_wallet_shares(&ks, "u1", &backup_dir.join("u1.json"), PW).expect("export");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode();
+            assert_eq!(mode(&backup_dir) & 0o777, 0o700, "created dir is private");
+            for file in &written {
+                assert_eq!(mode(file) & 0o777, 0o600, "share file is private");
+            }
+        }
+        let mut names: Vec<_> = written
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["u1-ed25519.json", "u1-secp256k1.json"]);
+
+        let dst = tempfile::tempdir().expect("tempdir");
+        let mut restored = crate::keystore::Keystore::new(dst.path(), "device-1").expect("fresh");
+        for file in &written {
+            restored
+                .import_share(&std::fs::read(file).unwrap(), PW)
+                .expect("import");
+        }
+        assert_eq!(restored.list_wallets().len(), 2);
+    }
+
+    /// The announce names the account child's chain, not the wallet's
+    /// primary one: a Bitcoin sign must not tell co-signers "ethereum".
+    #[test]
+    fn signing_announce_carries_the_account_childs_chain() {
+        let (_dir, ks, _) = keystore_with_parent();
+        let meta = ks.get_wallet(PARENT);
+        assert_eq!(
+            announce_chain(&format!("{PARENT}-bitcoin-0"), meta, "secp256k1"),
+            "bitcoin"
+        );
+        assert_eq!(
+            announce_chain(&format!("{PARENT}-ethereum-3"), meta, "secp256k1"),
+            "ethereum"
+        );
+        assert_eq!(announce_chain("r00t-solana-0", None, "ed25519"), "solana");
+        // Root ids keep the metadata / curve fallback.
+        assert_eq!(announce_chain(PARENT, None, "secp256k1"), "ethereum");
+        assert_eq!(announce_chain(PARENT, None, "ed25519"), "solana");
+    }
+
+    /// Consecutive signings on one wallet — even with the finished DKG still
+    /// live on AppState — are announced under distinct, fresh session ids,
+    /// with the signer set from the wallet's metadata.
+    #[test]
+    fn consecutive_signings_get_fresh_session_ids() {
+        let (_dir, ks, group) = keystore_with_parent();
+        let meta = ks.get_wallet(PARENT);
+        let dkg = crate::protocal::signal::SessionInfo {
+            session_id: "dkg-session".to_string(),
+            proposer_id: "alice".to_string(),
+            total: 3,
+            threshold: 2,
+            participants: vec!["alice".into(), "bob".into(), "carol".into()],
+            session_type: crate::protocal::signal::SessionType::DKG,
+            curve_type: "secp256k1".to_string(),
+            coordination_type: "Network".to_string(),
+            signing_message_hex: None,
+        };
+        let first = signing_session(PARENT, "secp256k1", &group, "bob", meta, Some(&dkg));
+        let second = signing_session(PARENT, "secp256k1", &group, "bob", meta, Some(&first));
+
+        assert_ne!(first.session_id, dkg.session_id);
+        assert_ne!(first.session_id, second.session_id);
+        assert_eq!(second.proposer_id, "bob");
+        assert_eq!(second.participants, ["alice", "bob", "carol"]);
+        assert_eq!((second.threshold, second.total), (2, 3));
+
+        // No metadata (wallet only in memory): the live session's set.
+        let from_live = signing_session(PARENT, "secp256k1", &group, "bob", None, Some(&dkg));
+        assert_eq!(from_live.participants, dkg.participants);
     }
 }

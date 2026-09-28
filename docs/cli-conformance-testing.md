@@ -200,10 +200,13 @@ and, where a GUI exposes it, a cross-client case (§5.3).
 > would silently miss a pre-announced session. Fix: a `HeadlessRefreshSessions`
 > message (→ `Command::LoadSessions`) plus a `HeadlessRunner::refresh_sessions()`
 > helper, and the CLI `list_sessions` command now triggers a real server replay
-> (previously it only answered from the local cache). The LIFE-4 test asserts the
-> explicit replay works and *records* (without yet asserting) that auto-on-connect
-> replay is still extension-only — a candidate follow-up if headless auto-replay is
-> wanted.
+> (previously it only answered from the local cache). The Rust core now also
+> sends `request_active_sessions` right after `register` on every (re)connect, so
+> the server answers it after registering us: a session announced before that is
+> replayed, one announced after arrives live. Without it a joiner whose `register`
+> the server handled a moment after the creator's `announce_session` never saw the
+> session (a CI flake: "timed out after 20s waiting for event"). LIFE-4 asserts
+> both the on-connect replay and the explicit one.
 
 ### 3.4 Error & edge cases
 

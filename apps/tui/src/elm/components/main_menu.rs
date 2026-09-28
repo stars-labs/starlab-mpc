@@ -143,7 +143,7 @@ impl MainMenu {
 
     fn get_status_summary(&self) -> String {
         if self.wallet_count == 0 {
-            "🔒 No wallets configured - Create your first MPC wallet".to_string()
+            "🔒 No wallets configured - create one, or press i to import a backup".to_string()
         } else if self.wallet_count == 1 {
             "✅ 1 wallet configured and ready for operations".to_string()
         } else {
@@ -397,7 +397,7 @@ impl MainMenu {
 
         // Controls
         let controls = if self.focused {
-            "🎮 Navigation: ↑↓ Select Options • Enter: Execute • Esc: Exit Application"
+            "🎮 Navigation: ↑↓ Select Options • Enter: Execute • i: Import Wallet • Ctrl-C: Quit"
         } else {
             "💡 Press any key to begin • Professional MPC Wallet Management System"
         };

@@ -33,8 +33,12 @@ use crate::elm::Message;
 /// What a backend needs to run one threshold-signing ceremony.
 #[derive(Debug, Clone)]
 pub struct BackendSignRequest {
-    /// Keystore wallet id (NOT the CoreState index).
+    /// Keystore wallet id (NOT the CoreState index). Unused when joining a
+    /// peer's session — the announce names the wallet.
     pub wallet_id: String,
+    /// `Some(session_id)` joins a PEER's announced signing session as a
+    /// co-signer; `None` announces a new ceremony from this device.
+    pub session_id: Option<String>,
     /// Hex-encoded bytes to sign (pre-hashed by the caller where the chain
     /// demands it — e.g. EIP-191/keccak for EVM).
     pub message_hex: String,
@@ -58,6 +62,8 @@ pub struct SignatureOutcome {
 #[async_trait]
 pub trait SigningBackend: Send + Sync {
     async fn sign(&self, req: BackendSignRequest) -> CoreResult<SignatureOutcome>;
+    /// Decline a peer's signing session this device will not co-sign.
+    async fn decline(&self, session_id: &str) -> CoreResult<()>;
 }
 
 /// Events the backend cares about, extracted from the elm message stream.
@@ -129,21 +135,31 @@ impl SigningBackend for ElmSigningBackend {
         // Subscribe BEFORE dispatching so a fast completion can't race past us.
         let mut rx = self.events.subscribe();
 
-        self.runner_tx
-            .send(Message::HeadlessSign {
+        let start = match req.session_id.clone() {
+            // Co-signer: the same joiner path the TUI's JoinSession screen and
+            // the CLI use (SubmitPassword → UnlockWallet → JoinSigning).
+            Some(session_id) => Message::HeadlessJoinSession {
+                session_id,
+                password: req.password.clone(),
+                label: String::new(),
+            },
+            None => Message::HeadlessSign {
                 wallet_id: req.wallet_id.clone(),
                 message: req.message_hex.clone(),
                 encoding: "hex".to_string(),
                 password: req.password.clone(),
-            })
-            .map_err(|e| CoreError::Dkg(format!("signing runner gone: {e}")))?;
+            },
+        };
+        self.runner_tx
+            .send(start)
+            .map_err(|e| CoreError::Signing(format!("signing runner gone: {e}")))?;
 
         let deadline = tokio::time::sleep(req.timeout);
         tokio::pin!(deadline);
         loop {
             tokio::select! {
                 _ = &mut deadline => {
-                    return Err(CoreError::Dkg(format!(
+                    return Err(CoreError::Signing(format!(
                         "signing ceremony timed out after {:?} — co-signers may be offline or \
                          never approved",
                         req.timeout
@@ -154,17 +170,25 @@ impl SigningBackend for ElmSigningBackend {
                         return Ok(SignatureOutcome { signature_hex, message_hash_hex });
                     }
                     Ok(SigningEvent::Failed { error }) => {
-                        return Err(CoreError::Dkg(format!("signing failed: {error}")));
+                        return Err(CoreError::Signing(format!("signing failed: {error}")));
                     }
                     // Lagged: we missed events under burst — keep waiting for
                     // the next one rather than failing the ceremony.
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => {
-                        return Err(CoreError::Dkg("signing event stream closed".into()));
+                        return Err(CoreError::Signing("signing event stream closed".into()));
                     }
                 },
             }
         }
+    }
+
+    async fn decline(&self, session_id: &str) -> CoreResult<()> {
+        self.runner_tx
+            .send(Message::DeclineSigningRequest {
+                session_id: session_id.to_string(),
+            })
+            .map_err(|e| CoreError::Signing(format!("signing runner gone: {e}")))
     }
 }
 
@@ -176,6 +200,7 @@ mod tests {
     fn req(timeout_ms: u64) -> BackendSignRequest {
         BackendSignRequest {
             wallet_id: "w1".into(),
+            session_id: None,
             message_hex: "deadbeef".into(),
             password: "pw".into(),
             timeout: Duration::from_millis(timeout_ms),
@@ -259,5 +284,43 @@ mod tests {
         let (_tx2, _) = unbounded_channel::<Message>();
         let out = backend.sign(req(2_000)).await.unwrap();
         assert_eq!(out.signature_hex, "0x02");
+    }
+
+    #[tokio::test]
+    async fn joins_a_peer_session_instead_of_announcing() {
+        let (backend, _h) = fake_runner(|msg| match msg {
+            Message::HeadlessJoinSession {
+                session_id,
+                password,
+                ..
+            } => {
+                assert_eq!(session_id, "peer-session");
+                assert_eq!(password, "pw");
+                Some(Message::SigningComplete {
+                    request_id: "r".into(),
+                    message: vec![0xde, 0xad, 0xbe, 0xef],
+                    signature: vec![0xcc; 64],
+                })
+            }
+            Message::HeadlessSign { .. } => panic!("co-signer must not announce a new ceremony"),
+            _ => None,
+        });
+        let mut join = req(2_000);
+        join.session_id = Some("peer-session".into());
+        let out = backend.sign(join).await.unwrap();
+        assert_eq!(out.signature_hex, format!("0x{}", "cc".repeat(64)));
+    }
+
+    #[tokio::test]
+    async fn decline_routes_to_the_engine_decline_path() {
+        let (tx, mut rx) = unbounded_channel::<Message>();
+        let (backend, _sink) = ElmSigningBackend::new(tx);
+        backend.decline("peer-session").await.unwrap();
+        match rx.recv().await {
+            Some(Message::DeclineSigningRequest { session_id }) => {
+                assert_eq!(session_id, "peer-session")
+            }
+            other => panic!("expected DeclineSigningRequest, got {other:?}"),
+        }
     }
 }

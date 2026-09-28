@@ -154,19 +154,9 @@ impl Bridge {
                     }
                 }
                 Message::SessionDiscovered { session } => {
-                    // Dedup per (kind, id), NOT id alone: the warm signing path
-                    // REUSES the DKG session id (StartSigning just flips the
-                    // existing session's type to Signing), so an id-only dedup
-                    // would suppress the signing_request for a session whose id
-                    // we already saw during DKG — silently breaking discovery
-                    // for co-signers (incl. auto-approve). Keying on kind lets a
-                    // dkg→signing transition on the same id surface once each.
-                    let dedup_key = match &session.session_type {
-                        SessionType::Signing { .. } => format!("sign:{}", session.session_id),
-                        SessionType::Reshare { .. } => format!("reshare:{}", session.session_id),
-                        SessionType::DKG => format!("dkg:{}", session.session_id),
-                    };
-                    if self.announced_sessions.insert(dedup_key) {
+                    // Dedup per session id — every ceremony (DKG, signing,
+                    // reshare) is announced under its own id.
+                    if self.announced_sessions.insert(session.session_id.clone()) {
                         // Signing sessions surface as a signing_request (a
                         // co-signer can approve by joining); DKG sessions as
                         // session_available.

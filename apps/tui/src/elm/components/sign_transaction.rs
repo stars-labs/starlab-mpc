@@ -46,6 +46,9 @@ pub struct SignTransactionComponent {
     group_pubkey_short: String,
     message_preview: String,
     error: Option<String>,
+    /// A secp256k1 wallet can sign as its Ethereum or Bitcoin account.
+    chain_choice: bool,
+    bitcoin: bool,
     focused: bool,
 }
 
@@ -62,6 +65,9 @@ impl SignTransactionComponent {
     /// `PasswordPromptComponent::set_from_model`.
     pub fn set_from_model(&mut self, ws: &WalletState) {
         self.message_preview = ws.sign_message_draft.clone();
+        self.error = ws.sign_error.clone();
+        self.chain_choice = ws.curve_type == "secp256k1";
+        self.bitcoin = self.chain_choice && ws.sign_on_bitcoin;
 
         // Pull the wallet's group pubkey from the loaded wallet list so
         // the user has a visual cross-check that they're signing with
@@ -81,8 +87,17 @@ impl SignTransactionComponent {
             .unwrap_or_else(|| "(not in cached list)".to_string());
     }
 
-    pub fn set_error(&mut self, error: Option<String>) {
-        self.error = error;
+    /// "Chain: Ethereum · Tab: Bitcoin" for a wallet with a chain choice.
+    fn chain_line(&self) -> Option<String> {
+        if !self.chain_choice {
+            return None;
+        }
+        let (current, other) = if self.bitcoin {
+            ("Bitcoin (Taproot)", "Ethereum")
+        } else {
+            ("Ethereum", "Bitcoin")
+        };
+        Some(format!("Chain: {current}    Tab: switch to {other}"))
     }
 }
 
@@ -113,15 +128,23 @@ impl Component for SignTransactionComponent {
             .split(inner);
 
         // Group-key cross-check.
-        let group_line = Paragraph::new(format!("Group key: {}", self.group_pubkey_short))
-            .style(Style::default().fg(Color::DarkGray));
+        let mut header = format!("Group key: {}", self.group_pubkey_short);
+        if let Some(chain) = self.chain_line() {
+            header.push('\n');
+            header.push_str(&chain);
+        }
+        let group_line = Paragraph::new(header).style(Style::default().fg(Color::DarkGray));
         frame.render_widget(group_line, rows[0]);
 
         // Message input with caret.
         let content = format!("{}_", self.message_preview);
         let msg_widget = Paragraph::new(content).wrap(Wrap { trim: false }).block(
             Block::default()
-                .title(" Message to sign ")
+                .title(if self.bitcoin {
+                    " Sighash to sign (32-byte hex) "
+                } else {
+                    " Message to sign "
+                })
                 .borders(Borders::ALL)
                 .border_type(BorderType::Rounded)
                 .border_style(Style::default().fg(Color::Yellow)),
@@ -137,9 +160,13 @@ impl Component for SignTransactionComponent {
         }
 
         // Hints.
-        let hints = Paragraph::new("Enter = Sign    Esc = Cancel")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
+        let hints = Paragraph::new(if self.chain_choice {
+            "Enter = Sign    Tab = Chain    Esc = Cancel"
+        } else {
+            "Enter = Sign    Esc = Cancel"
+        })
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray));
         frame.render_widget(hints, rows[4]);
     }
 
@@ -215,6 +242,35 @@ mod tests {
             "short pubkey must include the leading chars; got {:?}",
             c.group_pubkey_short
         );
+    }
+
+    #[test]
+    fn secp256k1_wallet_offers_the_bitcoin_account() {
+        let ws = WalletState {
+            curve_type: "secp256k1",
+            sign_on_bitcoin: true,
+            sign_error: Some("bad sighash".to_string()),
+            ..Default::default()
+        };
+        let mut c = SignTransactionComponent::new("w");
+        c.set_from_model(&ws);
+        assert_eq!(
+            c.chain_line().as_deref(),
+            Some("Chain: Bitcoin (Taproot)    Tab: switch to Ethereum")
+        );
+        assert_eq!(c.error.as_deref(), Some("bad sighash"));
+    }
+
+    #[test]
+    fn ed25519_wallet_has_no_chain_choice() {
+        let ws = WalletState {
+            curve_type: "ed25519",
+            sign_on_bitcoin: true,
+            ..Default::default()
+        };
+        let mut c = SignTransactionComponent::new("w");
+        c.set_from_model(&ws);
+        assert!(c.chain_line().is_none());
     }
 
     #[test]

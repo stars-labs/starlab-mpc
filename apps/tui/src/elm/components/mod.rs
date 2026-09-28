@@ -24,6 +24,7 @@ pub mod wallet_complete;
 // Signing components (Phase C)
 pub mod sign_transaction;
 pub mod signature_complete;
+pub mod wallet_transfer;
 
 // Main exports
 pub use create_wallet::CreateWalletComponent;
@@ -43,6 +44,7 @@ pub use dkg_progress::DKGProgressComponent;
 pub use sign_transaction::SignTransactionComponent;
 pub use signature_complete::SignatureCompleteComponent;
 pub use wallet_complete::WalletCompleteComponent;
+pub use wallet_transfer::WalletTransferComponent;
 
 use tuirealm::component::AppComponent;
 
@@ -80,6 +82,8 @@ pub enum Id {
     SignTransaction,
     /// Mount slot for the SignatureComplete success screen (Phase C.5).
     SignatureComplete,
+    /// Mount slot for the Export / Import wallet screens.
+    WalletTransfer,
 }
 
 /// User events emitted by components

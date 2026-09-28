@@ -116,6 +116,23 @@ pub(crate) async fn send_register(sink: &mut WsSink, device_id: &str) {
     }
 }
 
+/// Ask the server to replay every stored session (`request_active_sessions`).
+/// Sent right after `Register` on the same socket, so the server handles it
+/// after we are registered: a session announced before that point comes back
+/// in the replay, one announced after reaches us as a live broadcast. Without
+/// it, a peer whose `Register` the server processes a moment after another
+/// device's `announce_session` never discovers that session.
+pub(crate) async fn send_request_active_sessions(sink: &mut WsSink) {
+    match serde_json::to_string(&starlab_signal_server::ClientMsg::RequestActiveSessions) {
+        Ok(json) => {
+            if let Err(e) = sink.send(WsMessage::text(json)).await {
+                error!("Failed to request the active-session replay: {}", e);
+            }
+        }
+        Err(e) => error!("Failed to serialize RequestActiveSessions: {}", e),
+    }
+}
+
 /// Re-broadcast our own session after a reconnect so peers that missed the
 /// initial `AnnounceSession` can still discover us. No-op for joiners (their
 /// session's `proposer_id` is someone else — server broadcasts already cover
