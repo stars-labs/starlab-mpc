@@ -103,7 +103,7 @@ pub async fn handle_trigger_dkg_round1<C>(
     self_device_id: String,
     _internal_cmd_tx: tokio::sync::mpsc::UnboundedSender<crate::utils::state::InternalCommand<C>>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + Send + Sync + 'static + crate::utils::curve_traits::CurveIdentifier,
 {
     info!(
         "🎯🎯🎯 handle_trigger_dkg_round1 CALLED! Device: {}",
@@ -326,6 +326,16 @@ pub async fn handle_trigger_dkg_round1<C>(
             }
         }
     }
+
+    // Packages that arrived before our session knew every participant.
+    let early = std::mem::take(&mut state.lock().await.pending_dkg_round1);
+    for (from_device_id, package_bytes) in early {
+        info!(
+            "DKG Round 1: replaying early package from {}",
+            from_device_id
+        );
+        process_dkg_round1(state.clone(), from_device_id, package_bytes).await;
+    }
 }
 
 /// Process DKG Round 1 package - Real FROST implementation
@@ -340,10 +350,23 @@ pub async fn process_dkg_round1<C>(
 {
     let mut guard = state.lock().await;
 
-    // Get session to determine sender's identifier
+    // Until the session lists every participant, the sender's identifier
+    // (its position in the sorted list) can't be derived — it may even be
+    // missing. A fast peer's package can land here first: keep it and replay
+    // it once our Round 1 starts (all participants joined by then). Dropping
+    // it stalled the DKG for good.
     let session = match &guard.session {
-        Some(s) => s.clone(),
-        None => return,
+        Some(s) if s.participants.len() >= s.total as usize => s.clone(),
+        _ => {
+            info!(
+                "DKG Round 1 package from {} before the session is complete; buffering",
+                from_device_id
+            );
+            guard
+                .pending_dkg_round1
+                .push((from_device_id, package_bytes));
+            return;
+        }
     };
 
     // Determine sender's identifier from the canonicalised participant list —
@@ -1040,5 +1063,52 @@ mod wallet_id_tests {
             assert!(!id.is_empty());
             assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
         }
+    }
+}
+
+#[cfg(test)]
+mod early_round1_tests {
+    use super::process_dkg_round1;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use crate::utils::appstate_compat::AppState;
+    use frost_ed25519::Ed25519Sha512;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn dkg_session(participants: &[&str], total: u16) -> SessionInfo {
+        SessionInfo {
+            session_id: "sim-dkg".to_string(),
+            proposer_id: "a".to_string(),
+            total,
+            threshold: 2,
+            participants: participants.iter().map(|s| s.to_string()).collect(),
+            session_type: SessionType::DKG,
+            curve_type: "ed25519".to_string(),
+            coordination_type: "Network".to_string(),
+            signing_message_hex: None,
+        }
+    }
+
+    /// A peer's package that beats our view of the full cohort is kept for
+    /// replay, not dropped (the sender may not even be listed yet).
+    #[tokio::test]
+    async fn round1_package_before_the_session_is_complete_is_buffered() {
+        let mut state = AppState::<Ed25519Sha512>::new();
+        state.session = Some(dkg_session(&["b"], 3));
+        let state = Arc::new(Mutex::new(state));
+        process_dkg_round1(state.clone(), "c".to_string(), vec![1, 2, 3]).await;
+        let guard = state.lock().await;
+        assert_eq!(
+            guard.pending_dkg_round1,
+            vec![("c".to_string(), vec![1, 2, 3])]
+        );
+        assert!(guard.dkg_round1_packages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn round1_package_before_any_session_is_buffered() {
+        let state = Arc::new(Mutex::new(AppState::<Ed25519Sha512>::new()));
+        process_dkg_round1(state.clone(), "c".to_string(), vec![9]).await;
+        assert_eq!(state.lock().await.pending_dkg_round1.len(), 1);
     }
 }

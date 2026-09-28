@@ -346,9 +346,9 @@ async fn wrong_password_rejected_cleanly() {
 
 /// LIFE-4: a session announced before a node connects is still discoverable.
 /// node 1 connects after node 0's announce (missing the live broadcast) and
-/// must find the session via the RequestActiveSessions replay. Also reports
-/// whether discovery happened automatically on connect (the extension's
-/// behavior) — currently the headless/CLI path needs an explicit refresh.
+/// must find the session via the RequestActiveSessions replay — automatically
+/// on connect (the runner requests it right after `Register`, like the
+/// extension), and again on an explicit refresh.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[ignore = "real WebRTC/WS over loopback; run with --ignored"]
 async fn late_joiner_discovers_via_replay() {
@@ -357,7 +357,7 @@ async fn late_joiner_discovers_via_replay() {
 
     match run_late_join_discovery_simulation(opts(2, 2)).await {
         Ok(r) => rows.push(Row {
-            ok: r.discovered_after_refresh,
+            ok: r.discovered_on_connect && r.discovered_after_refresh,
             detail: format!(
                 "after_refresh={} on_connect={} {}ms",
                 r.discovered_after_refresh, r.discovered_on_connect, r.elapsed_ms
