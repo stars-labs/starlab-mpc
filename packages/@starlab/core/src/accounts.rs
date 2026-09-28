@@ -10,15 +10,29 @@
 //! Every client deriving account `i` of the same wallet MUST land on the
 //! same address; keeping the path table AND the per-chain address encoding
 //! in one place is what guarantees it byte-for-byte.
+//!
+//! **Ethereum signs with the threshold-ECDSA key** (curve tag
+//! [`ECDSA_CURVE`] = `"secp256k1-ecdsa"`, see [`crate::ecdsa`]): an EOA only
+//! accepts ECDSA, so a wallet's Ethereum account is the ECDSA key's child at
+//! `m/44'/60'/0'/0/n` (plain additive child, no BIP-86 tweak) and its address
+//! is what [`account_addresses`] lists for that key. The FROST secp256k1
+//! (BIP-340) key keeps Bitcoin. Until the clients hold an ECDSA share (plan
+//! stages 2-3) the FROST secp256k1 key still lists an Ethereum row; that row
+//! is removed when they switch.
 
+pub use crate::ecdsa::ECDSA_CURVE;
 use crate::errors::{FrostError, Result};
-use crate::hd_derivation::{DerivationPath, derive_child_verifying_key_path};
+use crate::hd_derivation::{
+    DerivationPath, derive_child_public_key_raw, derive_child_verifying_key_path,
+};
 
 /// (config key, display name) of the chains a curve's key controls.
 /// EVM L2s share the Ethereum address and are deliberately not listed.
 pub fn chains_for_curve(curve: &str) -> &'static [(&'static str, &'static str)] {
     if curve == "ed25519" {
         &[("solana", "Solana"), ("sui", "Sui")]
+    } else if curve == ECDSA_CURVE {
+        &[("ethereum", "Ethereum")]
     } else {
         &[("ethereum", "Ethereum"), ("bitcoin", "Bitcoin")]
     }
@@ -74,7 +88,7 @@ pub fn standard_path(chain: &str, account: u32) -> Option<String> {
 /// canonical chains; unknown combinations error.
 pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Result<String> {
     match (chain.to_ascii_lowercase().as_str(), curve) {
-        ("ethereum" | "eth", "secp256k1") => {
+        ("ethereum" | "eth", "secp256k1" | ECDSA_CURVE) => {
             // keccak256(uncompressed X‖Y)[12..]. FROST serializes compressed,
             // so decompress first (hashing compressed bytes gives a WRONG
             // address that doesn't correspond to the signing key).
@@ -156,6 +170,12 @@ pub fn account_verifying_key(
             derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(group_key_bytes, &path)
         }
         "secp256k1" => derive_child_verifying_key_path::<frost_secp256k1_tr::Secp256K1Sha256TR>(
+            group_key_bytes,
+            &path,
+        ),
+        // Same additive-offset math on the same group, without the Taproot
+        // finalize: exactly the child `ecdsa::hd::StarlabHd` signs for.
+        ECDSA_CURVE => derive_child_public_key_raw::<frost_secp256k1_tr::Secp256K1Sha256TR>(
             group_key_bytes,
             &path,
         ),
