@@ -29,7 +29,6 @@ pub mod signature_complete;
 pub use create_wallet::CreateWalletComponent;
 pub use main_menu::MainMenu;
 pub use modal::ModalComponent;
-pub use notification::NotificationBar;
 pub use wallet_detail::WalletDetail;
 pub use wallet_list::WalletList;
 
@@ -68,7 +67,6 @@ pub enum Id {
     CreateWallet,
     Modal, // Alias for ModalDialog
     ModalDialog,
-    NotificationBar,
     ModeSelection,
     ThresholdConfig,
     JoinSession,

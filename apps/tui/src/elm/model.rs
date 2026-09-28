@@ -8,6 +8,7 @@ use crate::protocal::signal::SessionInfo;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 /// The complete application state
 #[derive(Debug, Clone)]
@@ -408,7 +409,15 @@ impl Default for NetworkState {
 pub struct UIState {
     pub focus: ComponentId,
     pub modal: Option<Modal>,
+    /// Live toasts, oldest first. Only the newest is drawn (bottom status
+    /// line). Push through [`UIState::notify`], never directly — it collapses
+    /// repeats and stamps the expiry.
     pub notifications: Vec<Notification>,
+    /// Mirror attention-worthy events (signing request, DKG / signing
+    /// done or failed) to a desktop notification. Off by default (headless,
+    /// tests); the `starlab-tui` binary turns it on unless
+    /// `--no-desktop-notify`.
+    pub desktop_notify: bool,
     pub input_buffer: String,
     pub scroll_position: u16,
     pub selected_indices: HashMap<ComponentId, usize>,
@@ -430,6 +439,7 @@ impl Default for UIState {
             focus: ComponentId::MainMenu,
             modal: None,
             notifications: Vec::new(),
+            desktop_notify: false,
             input_buffer: String::new(),
             scroll_position: 0,
             selected_indices: HashMap::new(),
@@ -681,14 +691,12 @@ impl PartialEq for Modal {
     }
 }
 
-/// Notification types
+/// A toast shown on the bottom status line until it expires.
 #[derive(Debug, Clone)]
 pub struct Notification {
-    pub id: String,
     pub text: String,
     pub kind: NotificationKind,
-    pub timestamp: DateTime<Utc>,
-    pub dismissible: bool,
+    pub expires_at: Instant,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -697,6 +705,52 @@ pub enum NotificationKind {
     Success,
     Warning,
     Error,
+}
+
+impl NotificationKind {
+    /// How long a toast of this kind stays up. Problems linger longer so a
+    /// user glancing back at the terminal still catches them.
+    pub fn ttl(&self) -> Duration {
+        match self {
+            NotificationKind::Info | NotificationKind::Success => Duration::from_secs(5),
+            NotificationKind::Warning | NotificationKind::Error => Duration::from_secs(10),
+        }
+    }
+}
+
+impl UIState {
+    /// The single entry point for toasts. A repeat of the newest toast (same
+    /// kind + text) refreshes its expiry instead of stacking a duplicate.
+    pub fn notify(&mut self, kind: NotificationKind, text: impl Into<String>) {
+        self.notify_at(kind, text, Instant::now());
+    }
+
+    /// [`UIState::notify`] with an injected clock, for tests.
+    pub fn notify_at(&mut self, kind: NotificationKind, text: impl Into<String>, now: Instant) {
+        let text = text.into();
+        let expires_at = now + kind.ttl();
+        match self.notifications.last_mut() {
+            Some(last) if last.kind == kind && last.text == text => last.expires_at = expires_at,
+            _ => self.notifications.push(Notification {
+                text,
+                kind,
+                expires_at,
+            }),
+        }
+    }
+
+    /// Drop expired toasts. Returns true if anything was removed, so the
+    /// caller knows to redraw.
+    pub fn prune_expired(&mut self, now: Instant) -> bool {
+        let before = self.notifications.len();
+        self.notifications.retain(|n| n.expires_at > now);
+        self.notifications.len() != before
+    }
+
+    /// The toast the status line shows: the newest one.
+    pub fn current_notification(&self) -> Option<&Notification> {
+        self.notifications.last()
+    }
 }
 
 /// Progress information for long-running operations
@@ -763,5 +817,77 @@ impl Model {
         model.wallet_state.keystore_path = state.keystore_path;
         model.current_screen = Screen::MainMenu; // Always start at main menu
         model
+    }
+}
+
+#[cfg(test)]
+mod notification_tests {
+    use super::*;
+
+    #[test]
+    fn repeat_of_newest_collapses_and_refreshes_expiry() {
+        let mut ui = UIState::default();
+        let t0 = Instant::now();
+        ui.notify_at(NotificationKind::Warning, "Disconnected from network", t0);
+        let later = t0 + Duration::from_secs(3);
+        ui.notify_at(
+            NotificationKind::Warning,
+            "Disconnected from network",
+            later,
+        );
+        assert_eq!(ui.notifications.len(), 1);
+        assert_eq!(
+            ui.notifications[0].expires_at,
+            later + Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn same_text_different_kind_is_not_collapsed() {
+        let mut ui = UIState::default();
+        ui.notify(NotificationKind::Info, "x");
+        ui.notify(NotificationKind::Error, "x");
+        assert_eq!(ui.notifications.len(), 2);
+    }
+
+    #[test]
+    fn repeat_of_an_older_toast_is_a_new_entry() {
+        let mut ui = UIState::default();
+        ui.notify(NotificationKind::Info, "a");
+        ui.notify(NotificationKind::Info, "b");
+        ui.notify(NotificationKind::Info, "a");
+        let texts: Vec<_> = ui.notifications.iter().map(|n| n.text.as_str()).collect();
+        assert_eq!(texts, ["a", "b", "a"]);
+        assert_eq!(ui.current_notification().unwrap().text, "a");
+    }
+
+    #[test]
+    fn info_and_success_expire_after_5s_warning_and_error_after_10s() {
+        let mut ui = UIState::default();
+        let t0 = Instant::now();
+        ui.notify_at(NotificationKind::Info, "info", t0);
+        ui.notify_at(NotificationKind::Success, "ok", t0);
+        ui.notify_at(NotificationKind::Warning, "warn", t0);
+        ui.notify_at(NotificationKind::Error, "err", t0);
+
+        assert!(!ui.prune_expired(t0 + Duration::from_millis(4_999)));
+        assert_eq!(ui.notifications.len(), 4);
+
+        assert!(ui.prune_expired(t0 + Duration::from_secs(5)));
+        let texts: Vec<_> = ui.notifications.iter().map(|n| n.text.as_str()).collect();
+        assert_eq!(texts, ["warn", "err"]);
+
+        assert!(ui.prune_expired(t0 + Duration::from_secs(10)));
+        assert!(ui.current_notification().is_none());
+    }
+
+    #[test]
+    fn collapsed_repeat_outlives_the_original_expiry() {
+        let mut ui = UIState::default();
+        let t0 = Instant::now();
+        ui.notify_at(NotificationKind::Info, "same", t0);
+        ui.notify_at(NotificationKind::Info, "same", t0 + Duration::from_secs(4));
+        assert!(!ui.prune_expired(t0 + Duration::from_secs(6)));
+        assert!(ui.prune_expired(t0 + Duration::from_secs(9)));
     }
 }

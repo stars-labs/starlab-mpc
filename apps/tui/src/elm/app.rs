@@ -3,9 +3,8 @@
 //! This is the main application that brings together the Model, Update, View, and Commands
 //! to create a fully functional TUI application following the Elm Architecture pattern.
 
-use crate::elm::components::{
-    Id, MainMenu, ModalComponent, NotificationBar, WalletDetail, WalletList,
-};
+use crate::elm::components::notification::{render_status_line, split_status_line};
+use crate::elm::components::{Id, MainMenu, ModalComponent, WalletDetail, WalletList};
 use crate::elm::message::Message;
 use crate::elm::model::{Model, Screen};
 use crate::elm::update::update;
@@ -625,22 +624,12 @@ where
             }
         }
 
-        // Always mount modal and notification components (they control
-        // their own visibility). `set_from_model` populates each with
-        // the current Model state so their `view()` renders the live
-        // data — without this step both would draw empty even though
-        // the Model had pending toasts / modal.
+        // Always mount the modal component (it controls its own
+        // visibility). `set_from_model` populates it with the current
+        // Model state so its `view()` renders the live data.
         let mut modal_component = ModalComponent::default();
         modal_component.set_from_model(&self.model);
         self.app.mount(Id::Modal, Box::new(modal_component), vec![])?;
-
-        let mut notification_bar = NotificationBar::default();
-        notification_bar.set_from_model(&self.model);
-        self.app.mount(
-            Id::NotificationBar,
-            Box::new(notification_bar),
-            vec![]
-        )?;
 
         Ok(())
     }
@@ -832,6 +821,11 @@ where
             tokio::select! {
                 // Handle terminal events
                 _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                    // Idle tick: clear expired toasts even when no
+                    // message arrives to trigger a redraw.
+                    if self.model.ui_state.prune_expired(std::time::Instant::now()) {
+                        self.render()?;
+                    }
                     // Check for crossterm events with a proper timeout
                     if crossterm::event::poll(Duration::from_millis(10))? {
                         match crossterm::event::read() {
@@ -1173,12 +1167,10 @@ where
     fn render(&mut self) -> anyhow::Result<()> {
         debug!("🎨 Rendering UI - Current screen: {:?}", self.model.current_screen);
 
-        // Dynamic overlays (notifications, modals) are populated at mount
-        // time but their source-of-truth is `Model.ui_state.*`, which
-        // can change without triggering a full screen remount. Refresh
-        // both slots here so a newly-pushed toast or modal is visible
-        // on the very next frame instead of waiting for the next
-        // unrelated remount.
+        // The modal is populated at mount time but its source of truth is
+        // `Model.ui_state.modal`, which can change without triggering a
+        // full screen remount. Refresh the slot here so a new modal is
+        // visible on the very next frame.
         //
         // IMPORTANT: use `remount` not `mount`. `mount` errors out
         // silently if the component is already mounted (returns
@@ -1191,33 +1183,11 @@ where
             .app
             .remount(Id::Modal, Box::new(fresh_modal), vec![]);
 
-        let mut fresh_notifs = NotificationBar::default();
-        fresh_notifs.set_from_model(&self.model);
-        let _ = self
-            .app
-            .remount(Id::NotificationBar, Box::new(fresh_notifs), vec![]);
-
         self.terminal.raw_mut().draw(|f| {
-            // Create main layout
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(if self.model.ui_state.notifications.is_empty() { 0 } else { 3 }),
-                    Constraint::Min(0),
-                ])
-                .split(f.area());
-
-            // Render notification bar if there are notifications
-            if !self.model.ui_state.notifications.is_empty() {
-                self.app.view(&Id::NotificationBar, f, chunks[0]);
-            }
-
-            // Render main content based on screen
-            let main_area = if self.model.ui_state.notifications.is_empty() {
-                f.area()
-            } else {
-                chunks[1]
-            };
+            // Screens own everything above the last row; the last row is
+            // the notification status line. Nothing overlaps a screen.
+            let (main_area, status_area) = split_status_line(f.area());
+            render_status_line(f, status_area, self.model.ui_state.current_notification());
 
             // Render active component
             match self.model.current_screen {
@@ -1276,6 +1246,12 @@ where
         })?;
 
         Ok(())
+    }
+
+    /// Mirror attention-worthy events (signing request, DKG / signing
+    /// done or failed) to desktop notifications. Off unless enabled.
+    pub fn set_desktop_notify(&mut self, enabled: bool) {
+        self.model.ui_state.desktop_notify = enabled;
     }
 
     /// Get a message sender for external use

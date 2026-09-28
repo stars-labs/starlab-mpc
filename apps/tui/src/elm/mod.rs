@@ -7,6 +7,7 @@
 pub mod app;
 pub mod command;
 pub mod components;
+pub mod desktop_notify;
 pub mod error_help;
 pub mod headless;
 pub mod log_safe;
