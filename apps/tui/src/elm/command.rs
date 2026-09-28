@@ -1704,23 +1704,11 @@ impl Command {
                     }
                 };
 
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: serde_json::json!({
-                        "session_id": session_id.clone(),
-                        "participant_joined": device_id.clone(),
-                    }),
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx.send(Message::Error {
-                                message: "Primary WS closed mid reshare-join".to_string(),
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
-                }
-
+                // Record the session BEFORE announcing the join: the server
+                // answers our `SessionStatusUpdate` with a `participant_update`
+                // that the relay handler keeps only if `state.session` already
+                // names this session. For the last joiner that frame is the
+                // only full roster it gets, so dropping it stalls the mesh.
                 {
                     let mut state = app_state.lock().await;
                     state.session = Some(crate::protocal::signal::SessionInfo {
@@ -1743,6 +1731,23 @@ impl Command {
                         signing_message_hex: None,
                     });
                 }
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: serde_json::json!({
+                        "session_id": session_id.clone(),
+                        "participant_joined": device_id.clone(),
+                    }),
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx.send(Message::Error {
+                                message: "Primary WS closed mid reshare-join".to_string(),
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize reshare SessionStatusUpdate: {}", e),
+                }
+
                 let _ = tx.send(Message::Info {
                     message: format!("🔄 Joined reshare session: {}", session_id),
                 });
@@ -1850,35 +1855,12 @@ impl Command {
                     }
                 };
 
-                // Send a SessionStatusUpdate so the server+creator learn we're in.
-                let session_update = serde_json::json!({
-                    "session_id": session_id.clone(),
-                    "participant_joined": device_id.clone(),
-                });
-                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
-                    session_info: session_update,
-                };
-                match serde_json::to_string(&status_msg) {
-                    Ok(json) => {
-                        if ws_tx.send(json).is_err() {
-                            let _ = tx_clone.send(Message::Error {
-                                message: "Primary WS channel closed mid-join".to_string(),
-                            });
-                        } else {
-                            let _ = tx_clone.send(Message::Info {
-                                message: format!("✅ Joined session: {}", session_id),
-                            });
-                            let _ = tx_clone.send(Message::UpdateDKGProgress {
-                                round: crate::elm::message::DKGRound::WaitingForParticipants,
-                                progress: 0.2,
-                            });
-                        }
-                    }
-                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
-                }
-
                 // Provisional session state — curve_type/threshold get overwritten
                 // as soon as the creator's SessionAvailable arrives on the broadcast.
+                // Set BEFORE the `SessionStatusUpdate` below: the relay handler
+                // drops a `participant_update` for a session `state.session`
+                // doesn't name yet, and the last joiner's own update is the
+                // only full roster it receives.
                 {
                     let mut state = app_state.lock().await;
                     // Prefer the curve the joiner already learned from the
@@ -1920,6 +1902,33 @@ impl Command {
                         coordination_type: "Network".to_string(),
                         signing_message_hex: None,
                     });
+                }
+
+                // Send a SessionStatusUpdate so the server+creator learn we're in.
+                let session_update = serde_json::json!({
+                    "session_id": session_id.clone(),
+                    "participant_joined": device_id.clone(),
+                });
+                let status_msg = starlab_signal_server::ClientMsg::SessionStatusUpdate {
+                    session_info: session_update,
+                };
+                match serde_json::to_string(&status_msg) {
+                    Ok(json) => {
+                        if ws_tx.send(json).is_err() {
+                            let _ = tx_clone.send(Message::Error {
+                                message: "Primary WS channel closed mid-join".to_string(),
+                            });
+                        } else {
+                            let _ = tx_clone.send(Message::Info {
+                                message: format!("✅ Joined session: {}", session_id),
+                            });
+                            let _ = tx_clone.send(Message::UpdateDKGProgress {
+                                round: crate::elm::message::DKGRound::WaitingForParticipants,
+                                progress: 0.2,
+                            });
+                        }
+                    }
+                    Err(e) => error!("Serialize SessionStatusUpdate: {}", e),
                 }
 
                 // Capture broadcast subscription + context for the driver task.
@@ -3298,7 +3307,8 @@ impl Command {
                 //   1. snapshot state, flag as connecting, drop the stale sender
                 //   2. dial the signal server
                 //   3. mint the outbound mpsc + inbound broadcast, stash in state
-                //   4. send Register, and re-announce our own session if any
+                //   4. send Register, re-announce our own session if any, and
+                //      request the stored-session replay
                 //   5. spawn the sender (mpsc → sink, with 30s ping)
                 //   6. spawn the reader (stream → parse → broadcast + Elm dispatch)
                 //   7. tell the Elm loop we're live
@@ -3324,6 +3334,7 @@ impl Command {
                 if let Some(session) = &params.existing_session {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
+                ws_runtime::send_request_active_sessions(&mut sink).await;
 
                 // Always-on relay handler (peer WebRTC signals +
                 // participant_update) for the whole connection — subscribe
