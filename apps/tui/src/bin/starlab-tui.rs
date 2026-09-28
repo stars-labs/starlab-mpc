@@ -44,6 +44,12 @@ struct Args {
     /// the connection.
     #[arg(long)]
     room: Option<String>,
+
+    /// Don't raise desktop notifications (signing requests, DKG / signing
+    /// results). They are best-effort anyway: without a D-Bus session bus
+    /// (SSH, headless) nothing is shown.
+    #[arg(long)]
+    no_desktop_notify: bool,
 }
 
 /// A "strong" room the hosted multi-tenant server will accept: ≥16 chars of
@@ -149,6 +155,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Log file: {}", log_path.display());
     info!("Signal server: {}", args.signal_server);
     info!("Offline mode: {}", args.offline);
+    info!("Desktop notifications: {}", !args.no_desktop_notify);
 
     // Check if we're in a TTY environment
     if !std::io::stdout().is_terminal() {
@@ -162,6 +169,7 @@ async fn main() -> anyhow::Result<()> {
         device_id,
         with_room(&args.signal_server, args.room.as_deref()),
         args.offline,
+        !args.no_desktop_notify,
     )
     .await
 }
@@ -171,6 +179,7 @@ async fn run_elm_tui(
     device_id: String,
     signal_server: String,
     offline: bool,
+    desktop_notify: bool,
 ) -> anyhow::Result<()> {
     use crossterm::{
         execute,
@@ -191,6 +200,7 @@ async fn run_elm_tui(
 
     // Create and initialize Elm app
     let mut elm_app = ElmApp::new(device_id.clone(), app_state.clone())?;
+    elm_app.set_desktop_notify(desktop_notify);
 
     // Initialize keystore automatically
     let keystore_path = format!(
@@ -278,7 +288,16 @@ fn expand_home(path: &str) -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::expand_home;
+    use super::{Args, expand_home};
+    use clap::Parser;
+
+    #[test]
+    fn desktop_notify_is_on_by_default_and_the_flag_turns_it_off() {
+        let args = Args::parse_from(["starlab-tui"]);
+        assert!(!args.no_desktop_notify);
+        let args = Args::parse_from(["starlab-tui", "--no-desktop-notify"]);
+        assert!(args.no_desktop_notify);
+    }
 
     #[test]
     fn expands_leading_tilde_only() {

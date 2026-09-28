@@ -5,16 +5,16 @@
 //! to execute side effects.
 
 use crate::elm::command::Command;
+use crate::elm::desktop_notify;
 use crate::elm::message::{DKGRound, Message};
 use crate::elm::model::{
-    ConnectionStatus, CreateWalletState, Modal, Model, Notification, NotificationKind, Operation,
+    ConnectionStatus, CreateWalletState, Modal, Model, NotificationKind, Operation,
     PendingSignPreview, ProgressInfo, Screen, WalletConfig, WalletMode,
 };
 use crate::protocal::signal::{SessionInfo, SessionType};
 use chrono::Utc;
 use crossterm::event::{KeyCode, KeyModifiers};
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
 
 /// Mark the local DKG state as "Round 1 in progress" so the DKGProgress
 /// component renders the cyan "Round 1" label and a ~25% progress bar the
@@ -79,6 +79,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         "Processing message: {}",
         crate::elm::log_safe::redacted(&msg)
     );
+    // Toasts expire by time; drop stale ones before this message can add
+    // more. (The app loop also prunes on its idle tick so an expired toast
+    // disappears without waiting for the next message.)
+    model.ui_state.prune_expired(std::time::Instant::now());
 
     match msg {
         // ============= Navigation Messages =============
@@ -1040,13 +1044,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     verified: true,
                 });
 
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("🎉 Signature complete for '{}'", wallet_id),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("🎉 Signature complete for '{}'", wallet_id),
+            );
+            desktop_notify::send(
+                model.ui_state.desktop_notify,
+                "Signature complete",
+                &format!("Wallet '{wallet_id}' signed the message."),
+            );
 
             // Drop any leftover pending-sign state — the flow is over.
             model.wallet_state.pending_sign_message = None;
@@ -1069,6 +1075,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::SigningFailed { request_id, error } => {
             error!("Signing ceremony {} failed: {}", request_id, error);
+            desktop_notify::send(model.ui_state.desktop_notify, "Signing failed", &error);
             model.ui_state.modal = Some(Modal::Error {
                 title: "Signing Failed".to_string(),
                 message: crate::elm::error_help::signing(&error),
@@ -1136,13 +1143,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 }
             });
 
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: notif_text,
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(NotificationKind::Success, notif_text);
             None
         }
 
@@ -1168,13 +1169,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Empty-message check: FROST will happily sign an empty byte
             // string, but doing so accidentally would be awful UX.
             if model.wallet_state.sign_message_draft.is_empty() {
-                model.ui_state.notifications.push(Notification {
-                    id: Uuid::new_v4().to_string(),
-                    text: "Message is empty — type something to sign".to_string(),
-                    kind: NotificationKind::Warning,
-                    timestamp: Utc::now(),
-                    dismissible: true,
-                });
+                model.ui_state.notify(
+                    NotificationKind::Warning,
+                    "Message is empty — type something to sign",
+                );
                 return None;
             }
 
@@ -1339,13 +1337,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // Mark the wallet as unlocked so subsequent SignSubmits on
             // the same wallet don't ask for the password again.
             model.wallet_state.wallet_unlocked_id = Some(wallet_id.clone());
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("🔓 Wallet '{}' unlocked", wallet_id),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("🔓 Wallet '{}' unlocked", wallet_id),
+            );
 
             let pending_msg = model.wallet_state.pending_sign_message.take();
             let pending_sid = model.wallet_state.pending_sign_session_id.take();
@@ -1558,24 +1553,18 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
         Message::WalletExported { wallet_id, path } => {
             leave_transfer_screen(model);
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("Exported wallet '{wallet_id}' to {path}"),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Exported wallet '{wallet_id}' to {path}"),
+            );
             None
         }
         Message::WalletImported { wallet_id } => {
             leave_transfer_screen(model);
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("Imported wallet '{wallet_id}'"),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Imported wallet '{wallet_id}'"),
+            );
             Some(Command::LoadWallets)
         }
         Message::WalletTransferFailed { error } => {
@@ -1779,14 +1768,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.ui_state.modal = None;
 
             // Show success notification
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("Wallet '{}' created successfully!", result.wallet_id),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-            model.ui_state.notifications.push(notification);
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Wallet '{}' created successfully!", result.wallet_id),
+            );
 
             // Navigate back to main menu to show updated menu with Sign Transaction
             model.go_home();
@@ -1797,6 +1782,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::DKGFailed { error } => {
             error!("DKG failed: {}", error);
+            desktop_notify::send(
+                model.ui_state.desktop_notify,
+                "Wallet creation failed",
+                &error,
+            );
 
             // Show error modal - always stay on current screen so user can retry or press Esc to go back
             model.ui_state.modal = Some(Modal::Error {
@@ -1977,13 +1967,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // a subsequent wallet-creation flow won't collide.
             model.wallet_state.dkg_round = DKGRound::Complete;
             model.wallet_state.dkg_in_progress = false;
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!("🎉 DKG complete — group key {}…", &group_pubkey_hex[..16]),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("🎉 DKG complete — group key {}…", &group_pubkey_hex[..16]),
+            );
 
             // Auto-trigger the keystore persistence step. The password was
             // collected on `PasswordPrompt` and stashed on
@@ -2116,18 +2103,20 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             // the PasswordPrompt roundtrip.
             model.wallet_state.wallet_unlocked_id = Some(wallet_id.clone());
 
-            model.ui_state.notifications.push(Notification {
-                id: Uuid::new_v4().to_string(),
-                text: format!(
+            desktop_notify::send(
+                model.ui_state.desktop_notify,
+                "Wallet created",
+                &format!("DKG complete — wallet '{wallet_id}' is ready."),
+            );
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!(
                     "✅ Wallet '{}' created with {} chain address{}",
                     wallet_id,
                     addresses.len(),
                     if addresses.len() == 1 { "" } else { "es" }
                 ),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            });
+            );
 
             // We want Esc/Enter on WalletComplete to land on MainMenu,
             // not DKGProgress or PasswordPrompt (which are stale). Clear
@@ -2220,14 +2209,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.network_state.reconnect_attempts = 0;
 
             // Show success notification
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text: "Connected to network".to_string(),
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-            model.ui_state.notifications.push(notification);
+            model
+                .ui_state
+                .notify(NotificationKind::Success, "Connected to network");
 
             // Chain follow-up work: redraw the WS-status-aware screens, and if
             // the user is already on Join Session, re-run discovery over the
@@ -2257,14 +2241,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.network_state.reconnect_attempts += 1;
 
             // Show warning notification
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text: "Disconnected from network".to_string(),
-                kind: NotificationKind::Warning,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-            model.ui_state.notifications.push(notification);
+            model
+                .ui_state
+                .notify(NotificationKind::Warning, "Disconnected from network");
 
             // Remount UI immediately if we're on a screen that displays WebSocket status,
             // since the mounted component captured the old (connected) state at mount time.
@@ -2958,13 +2937,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                             "ModeSelection: Online selected but WebSocket is {:?} — blocking submit",
                             model.network_state.connection_status
                         );
-                        model.ui_state.notifications.push(Notification {
-                            id: Uuid::new_v4().to_string(),
-                            text: "Online mode requires an active WebSocket connection. Wait for reconnection or switch to Offline mode.".to_string(),
-                            kind: NotificationKind::Warning,
-                            timestamp: Utc::now(),
-                            dismissible: true,
-                        });
+                        model.ui_state.notify(NotificationKind::Warning, "Online mode requires an active WebSocket connection. Wait for reconnection or switch to Offline mode.");
                         return None;
                     }
 
@@ -3200,27 +3173,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         // ============= Notifications =============
         Message::ShowNotification { text, kind } => {
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text,
-                kind,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-
-            // Clone the id before moving notification
-            let id = notification.id.clone();
-            model.ui_state.notifications.push(notification);
-
-            // Auto-dismiss after 5 seconds
-            Some(Command::ScheduleMessage {
-                delay_ms: 5000,
-                message: Box::new(Message::ClearNotification { id }),
-            })
-        }
-
-        Message::ClearNotification { id } => {
-            model.ui_state.notifications.retain(|n| n.id != id);
+            model.ui_state.notify(kind, text);
             None
         }
 
@@ -3281,14 +3234,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             error!("Error: {}", message);
             model.ui_state.error_message = Some(message.clone());
 
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text: message,
-                kind: NotificationKind::Error,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-            model.ui_state.notifications.push(notification);
+            model.ui_state.notify(NotificationKind::Error, message);
 
             None
         }
@@ -3297,14 +3243,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             info!("Success: {}", message);
             model.ui_state.success_message = Some(message.clone());
 
-            let notification = Notification {
-                id: Uuid::new_v4().to_string(),
-                text: message,
-                kind: NotificationKind::Success,
-                timestamp: Utc::now(),
-                dismissible: true,
-            };
-            model.ui_state.notifications.push(notification);
+            model.ui_state.notify(NotificationKind::Success, message);
 
             None
         }
@@ -3426,6 +3365,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     k = session.threshold,
                     n = session.total,
                 );
+                desktop_notify::send(
+                    model.ui_state.desktop_notify,
+                    "Signing request",
+                    &format!(
+                        "{} asks you to sign with wallet '{}'",
+                        session.proposer_id, wallet_name
+                    ),
+                );
                 model.ui_state.modal = Some(Modal::Confirm {
                     title: "📝 Signing Request".to_string(),
                     message: message_body,
@@ -3491,14 +3438,10 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             model.session_invites.retain(|s| s.session_id != session_id);
             model.ui_state.modal = None;
             if existed {
-                let notification = Notification {
-                    id: Uuid::new_v4().to_string(),
-                    text: format!("Declined signing request {}", short_session_id(&session_id)),
-                    kind: NotificationKind::Info,
-                    timestamp: Utc::now(),
-                    dismissible: true,
-                };
-                model.ui_state.notifications.push(notification);
+                model.ui_state.notify(
+                    NotificationKind::Info,
+                    format!("Declined signing request {}", short_session_id(&session_id)),
+                );
             }
             None
         }

@@ -462,10 +462,6 @@ pub enum Message {
         text: String,
         kind: NotificationKind,
     },
-    ClearNotification {
-        id: String,
-    },
-    ClearAllNotifications,
 
     // Progress updates
     StartProgress {
