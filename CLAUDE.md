@@ -32,13 +32,14 @@ Shared FROST cryptographic implementation used by all Rust targets. Key modules:
 - `unified_dkg.rs` — Runs FROST DKG for ed25519 + secp256k1 simultaneously from a single root secret
 - `hd_derivation.rs` — BIP-44 style HD key derivation using additive scalar offsets (no extra DKG rounds); `AccountKeyFinalize` turns a secp256k1 account child into its BIP-86 output key (share path and public-only path alike)
 - `traits.rs` — `FrostCurve` trait abstracting over curve operations
-- `ed25519.rs` / `secp256k1.rs` — Curve implementations. secp256k1 FROST is the BIP-340 / Taproot suite (`frost-secp256k1-tr`): signatures spend Bitcoin P2TR; EVM needs ECDSA (threshold ECDSA via cggmp24 is the planned EVM path)
+- `ed25519.rs` / `secp256k1.rs` — Curve implementations. secp256k1 FROST is the BIP-340 / Taproot suite (`frost-secp256k1-tr`): signatures spend Bitcoin P2TR; EVM needs ECDSA (see `ecdsa/`)
 - `accounts.rs` — BIP-44/86 account model (Bitcoin = P2TR `bc1p…` on `m/86'/0'/0'/0/n`; `verify_taproot_signature` checks a BIP-340 sig against an address), the single source of truth for ALL clients: `Wallet → Account(index) → per-chain address`, derivation paths pinned here; address derivation is public-only (no key share / password needed)
 - `curve_registry.rs` — Tag → ciphersuite table; object-safe `CurveDkg` so multi-curve DKG loops over registered curves instead of hard-coded arms
 - `resharing.rs` — Share refresh via `frost_core::keys::refresh`: rotate shares / drop a device WITHOUT changing the group public key (see `docs/RECOVERY_AND_RESHARING.md`)
 - `keystore.rs` — Encrypted key share storage (PBKDF2 + AES-256-GCM); legacy-ciphertext fixtures in its tests pin the on-disk format
 - `rng.rs` — RNG bridge: rand_core 0.10 RNGs → the rand_core 0.6 traits frost 3.0 takes
 - `root_secret.rs` — Root entropy → deterministic per-curve RNGs via HKDF
+- `ecdsa/` — Threshold ECDSA (secp256k1, `cggmp24` 0.7) for EVM accounts, curve tag `secp256k1-ecdsa`. `EcdsaCeremony` is a sync, transport-agnostic driver over round_based's state machine (aux-info / keygen / signing; feed `receive(sender, bytes)`, `proceed()`, drain `take_outgoing()`; parties addressed by keygen index; wire format v1 = 35-byte header + CBOR, see `ecdsa/driver.rs`); `execution_id(session, protocol, participants)`; `pregenerate_primes` (slow — ~1.5 min native, ~5 min wasm; do it in the background); `EcdsaKeyShare` (serde, keystore plaintext); `hd::StarlabHd` plugs our `hd_derivation` math into cggmp24 so signing at `m/44'/60'/0'/0/n` matches `accounts.rs`. Full interactive signing only — no presignatures; no key refresh (cggmp24 has none)
 
 ### Applications
 - **`apps/tui/`** — Terminal UI (Ratatui) with Elm architecture (`src/elm/` for Model/Update/View). Exposes `lib.rs` (the Elm core + `core::*Manager` + `HeadlessRunner`) so the desktop app (`stars-labs/starlab-desktop`) can reuse the business logic cross-repo. Supports online (WebRTC mesh) and offline (SD card air-gap) DKG modes.
@@ -100,6 +101,7 @@ When changing `starlab-client::core` (`WalletManager`, `SessionManager`, `DkgMan
 ## Dependencies
 
 FROST: `frost-core` 3.0, `frost-ed25519` 3.0, `frost-secp256k1-tr` 3.0 (ZCash implementations; secp256k1 is BIP-340 only — the vanilla suite is gone). frost 3.0 still bounds its APIs on `rand_core 0.6`, while our own RNG stack is `rand_core`/`rand_chacha` 0.10 + `getrandom` 0.4 — always pass RNGs via `starlab_core::rng` (`os_rng()`, `ChaCha20Rng`, `FrostRng<R>` bridge), never a direct old `rand_core`.
+Threshold ECDSA: `cggmp24` `=0.7.0-alpha.3` (features `curve-secp256k1`, `hd-wallet`, `state-machine`; default `backend-num-bigint`, builds for wasm32) with `cggmp24-keygen` / `paillier-zk` pinned `=0.7.0-alpha.3` (alpha.4 breaks alpha.3); `round-based` / `hd-wallet` / `generic-ec` are used through cggmp24's re-exports; `ciborium` (CBOR) encodes protocol messages. cggmp24 also takes `rand_core 0.6` RNGs — pass `starlab_core::rng` ones. The root `Cargo.toml` optimizes the bigint/Paillier crates in dev/test profiles (otherwise the ECDSA tests take >10 min).
 Crypto: `sha2`, `sha3`, `k256`, `aes-gcm`, `argon2`, `pbkdf2` (keystore KDF — used in both `starlab-client::keystore::encryption` and `starlab-core::keystore`), `hkdf` (root-secret expansion in `starlab-core`), `hmac` (both HKDF and BIP-32-style HD derivation in `starlab-core`'s `hd_derivation.rs`). No direct `ed25519-dalek` — ed25519 curve ops go through `frost-ed25519` which pulls `curve25519-dalek` transitively.
 Dev environment: Nix flake (`nix develop`) provides all system deps including graphics libs.
 

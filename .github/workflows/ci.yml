@@ -34,6 +34,12 @@ jobs:
         run: cargo test -p starlab-cli -p starlab-signal-server --locked
              && cargo test -p starlab-client --lib --locked
 
+      # Core crypto: FROST + threshold ECDSA (cggmp24). The ECDSA module runs
+      # real aux-info / keygen / signing ceremonies in-process (~1-2 min).
+      - name: Core crypto tests (FROST + threshold ECDSA)
+        run: cargo test -p starlab-core --locked
+        timeout-minutes: 15
+
       # The end-to-end tests are #[ignore] by default (real WebRTC over
       # loopback). They gate the job: they pass on GitHub's shared runners.
       - name: End-to-end DKG + threshold signing (real FROST/WebRTC)

@@ -42,7 +42,23 @@ the signature `ecrecover`s (k256) to the account's Ethereum address from
 `accounts.rs`; public-only child address == signing child address for
 accounts 0..3; execution-id separation (replayed message from another
 session rejected); share serde round-trip.
-**Status**: Not Started
+**Status**: Complete — `starlab-core::ecdsa` (`EcdsaCeremony` driver, CBOR
+wire format v1, `StarlabHd`, `EcdsaKeyShare`, `pregenerate_primes`).
+Findings that shape later stages:
+- Safe-prime generation (num-bigint) measured at ~94 s per party natively
+  (release, 3 runs: 98/75/110 s) and ~5.4 min in wasm/node (299/347 s).
+  Background pre-generation is mandatory; the extension must do it in a
+  worker well before a DKG.
+- Aux info costs ~18 s CPU per party natively (single thread); signing
+  ~3 s per signer. Run ceremonies off the UI/async thread
+  (`EcdsaCeremony` is `!Send`: create and drive it on one thread/worker).
+- `accounts.rs` lists Ethereum for curve `secp256k1-ecdsa`; the FROST
+  secp256k1 key still lists an Ethereum row until stage 2/3 switch the
+  clients (then `curve_for_chain("ethereum")` → `secp256k1-ecdsa` and the
+  FROST row is removed).
+- cggmp24 0.7.0-alpha.3 must be built with `cggmp24-keygen` /
+  `paillier-zk` pinned to `=0.7.0-alpha.3` (alpha.4 moved to generic-ec
+  0.5 and breaks the build) — pinned in `starlab-core/Cargo.toml`.
 
 ## Stage 2: CLI (conformance oracle) + wire protocol
 **Goal**: `starlab-cli` runs ECDSA DKG (with aux info) and ECDSA signing over
