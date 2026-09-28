@@ -475,6 +475,77 @@ impl Keystore {
         Ok(decrypted_data)
     }
 
+    /// The directory this keystore reads and writes.
+    pub fn base_path(&self) -> &Path {
+        &self.base_path
+    }
+
+    /// Export one key share as a portable file: the same v2 `WalletFile`
+    /// JSON that lives on disk (still encrypted with the wallet password),
+    /// so a share file copied by hand imports too. `password` must unlock
+    /// it and the payload must be a valid FROST share for `curve_type` —
+    /// we never hand out a file that would fail to import.
+    pub fn export_share(
+        &self,
+        wallet_id: &str,
+        curve_type: &str,
+        password: &str,
+    ) -> Result<String> {
+        check_wallet_id(wallet_id)?;
+        let path = self
+            .base_path
+            .join(&self.device_id)
+            .join(curve_type)
+            .join(format!("{wallet_id}.json"));
+        let file = File::open(&path)
+            .map_err(|_| KeystoreError::WalletNotFound(format!("{wallet_id} ({curve_type})")))?;
+        let wallet_file: WalletFile = serde_json::from_reader(file)
+            .map_err(|e| KeystoreError::General(format!("Failed to parse wallet JSON: {e}")))?;
+        let blob = decrypt_wallet_file(&wallet_file, password)?;
+        validate_share(&wallet_file.metadata, &blob)?;
+        serde_json::to_string_pretty(&wallet_file)
+            .map_err(|e| KeystoreError::SerializationError(e.to_string()))
+    }
+
+    /// Import a share file produced by [`Self::export_share`] (or copied from
+    /// another keystore). The password must unlock it and the payload must
+    /// be a FROST share for its curve whose group key matches the metadata.
+    /// The file is stored as-is (same encryption) under this keystore's
+    /// device directory. An existing wallet with the same id + curve is
+    /// never overwritten.
+    pub fn import_share(&mut self, file_json: &[u8], password: &str) -> Result<WalletMetadata> {
+        let wallet_file: WalletFile = serde_json::from_slice(file_json)
+            .map_err(|e| KeystoreError::General(format!("Not a Starlab key share file: {e}")))?;
+        if wallet_file.version != "2.0" || !wallet_file.encrypted {
+            return Err(KeystoreError::General(format!(
+                "Unsupported key share file (version {}, encrypted {}); expected an encrypted v2.0 file",
+                wallet_file.version, wallet_file.encrypted
+            )));
+        }
+        let metadata = wallet_file.metadata.clone();
+        check_wallet_id(&metadata.session_id)?;
+        let blob = decrypt_wallet_file(&wallet_file, password)?;
+        validate_share(&metadata, &blob)?;
+
+        let wallet_dir = self
+            .base_path
+            .join(&self.device_id)
+            .join(&metadata.curve_type);
+        let target = wallet_dir.join(format!("{}.json", metadata.session_id));
+        if target.exists() {
+            return Err(KeystoreError::General(format!(
+                "Wallet {} ({}) is already in keystore",
+                metadata.session_id, metadata.curve_type
+            )));
+        }
+        fs::create_dir_all(&wallet_dir)?;
+        let mut file = File::create(&target)?;
+        serde_json::to_writer_pretty(&mut file, &wallet_file)
+            .map_err(|e| KeystoreError::General(format!("Failed to write wallet JSON: {e}")))?;
+        self.reload_wallet_cache()?;
+        Ok(metadata)
+    }
+
     /// Migrates legacy files to the new self-contained format
     fn migrate_legacy_files(&mut self) -> Result<()> {
         // Check if legacy index.json exists
@@ -733,6 +804,91 @@ impl Keystore {
     }
 }
 
+/// Wallet ids become file names — refuse anything that could escape the
+/// curve directory.
+fn check_wallet_id(wallet_id: &str) -> Result<()> {
+    if wallet_id.is_empty()
+        || wallet_id.contains('/')
+        || wallet_id.contains('\\')
+        || wallet_id.contains("..")
+    {
+        return Err(KeystoreError::General(format!(
+            "Invalid wallet id {wallet_id:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Decrypt a `WalletFile` payload. A wrong password surfaces as
+/// [`KeystoreError::InvalidPassword`].
+fn decrypt_wallet_file(wallet_file: &WalletFile, password: &str) -> Result<Vec<u8>> {
+    use base64::{Engine as _, engine::general_purpose};
+    let encrypted = general_purpose::STANDARD
+        .decode(&wallet_file.data)
+        .map_err(|e| KeystoreError::General(format!("Failed to decode base64 data: {e}")))?;
+    decrypt_data(&encrypted, password).map_err(|e| match e {
+        KeystoreError::DecryptionError(_) => KeystoreError::InvalidPassword,
+        other => other,
+    })
+}
+
+/// frost's binary package header is `[version: u8][crc32(ciphersuite id): 4
+/// bytes BE]`; this is the short id of the pre-Taproot (vanilla)
+/// `FROST-secp256k1-SHA256-v1` suite. A keystore blob is
+/// `[kp_len: u32][KeyPackage][pkp_len: u32][PublicKeyPackage]`, so the
+/// KeyPackage's suite id sits at bytes 5..9.
+const VANILLA_SECP256K1_SHORT_ID: [u8; 4] = [0xee, 0xd6, 0xb1, 0xb1];
+const BLOB_SUITE_ID: std::ops::Range<usize> = 5..9;
+
+/// The decrypted payload must be a FROST share for the metadata's curve,
+/// internally consistent, and carry the metadata's group key.
+fn validate_share(metadata: &WalletMetadata, blob: &[u8]) -> Result<()> {
+    let group_key = match metadata.curve_type.as_str() {
+        "secp256k1" => {
+            if blob.get(BLOB_SUITE_ID) == Some(VANILLA_SECP256K1_SHORT_ID.as_slice()) {
+                return Err(KeystoreError::General(
+                    "Not a BIP-340/Taproot secp256k1 FROST share (pre-Taproot vanilla \
+                     secp256k1 shares are not supported)"
+                        .to_string(),
+                ));
+            }
+            share_group_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(blob)?
+        }
+        "ed25519" => share_group_key::<frost_ed25519::Ed25519Sha512>(blob)?,
+        other => {
+            return Err(KeystoreError::General(format!(
+                "Unsupported curve {other:?} (expected secp256k1 or ed25519)"
+            )));
+        }
+    };
+    if !group_key.eq_ignore_ascii_case(&metadata.group_public_key) {
+        return Err(KeystoreError::General(
+            "Key share does not match the wallet's group public key".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Decode a `(KeyPackage, PublicKeyPackage)` blob and return its group key
+/// (hex), checking both halves agree.
+fn share_group_key<C: frost_core::Ciphersuite>(blob: &[u8]) -> Result<String> {
+    let (key_package, public_key_package) = crate::elm::command::decode_keystore_blob::<C>(blob)
+        .map_err(|e| {
+            KeystoreError::General(format!("Not a valid {} FROST key share: {e}", C::ID))
+        })?;
+    if key_package.verifying_key() != public_key_package.verifying_key() {
+        return Err(KeystoreError::General(
+            "Key share is inconsistent: KeyPackage and PublicKeyPackage disagree on the group key"
+                .to_string(),
+        ));
+    }
+    let bytes = public_key_package
+        .verifying_key()
+        .serialize()
+        .map_err(|e| KeystoreError::SerializationError(format!("{e:?}")))?;
+    Ok(hex::encode(bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -872,6 +1028,210 @@ mod tests {
         assert!(
             file.metadata.participants.is_empty(),
             "missing participants field must default to empty Vec"
+        );
+    }
+}
+
+/// Export → import of real FROST shares between keystores.
+#[cfg(test)]
+mod share_transfer_tests {
+    use super::*;
+    use crate::elm::command::{decode_keystore_blob, encode_keystore_blob};
+    use frost_ed25519::Ed25519Sha512 as Ed;
+    use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
+    use starlab_core::resharing::dkg_keypackages;
+    use tempfile::TempDir;
+
+    const PW: &str = "correct-horse-battery";
+
+    /// Keystore A (device-a) holding participant 1's share of a fresh
+    /// 2-of-3 wallet. Returns the dir guard, the keystore, the wallet id,
+    /// all key packages and the public key package.
+    fn keystore_with_share<C: frost_core::Ciphersuite>(
+        curve: &str,
+    ) -> (
+        TempDir,
+        Keystore,
+        String,
+        std::collections::BTreeMap<u16, frost_core::keys::KeyPackage<C>>,
+        frost_core::keys::PublicKeyPackage<C>,
+    ) {
+        let dir = TempDir::new().unwrap();
+        let mut ks = Keystore::new(dir.path(), "device-a").unwrap();
+        let (kps, pp) = dkg_keypackages::<C>(3, 2, 42).unwrap();
+        let blob = encode_keystore_blob::<C>(&kps[&1], &pp).unwrap();
+        let group_hex = hex::encode(pp.verifying_key().serialize().unwrap());
+        let id = ks
+            .create_wallet_multi_chain(
+                "w-transfer",
+                curve,
+                vec![],
+                2,
+                3,
+                &group_hex,
+                &blob,
+                PW,
+                vec![],
+                None,
+                1,
+                vec!["device-a".into(), "device-b".into(), "device-c".into()],
+                Some("Savings".into()),
+            )
+            .unwrap();
+        (dir, ks, id, kps, pp)
+    }
+
+    fn account0(curve: &str, group_hex: &str) -> Vec<(String, String, String)> {
+        starlab_core::accounts::account_addresses(curve, &hex::decode(group_hex).unwrap(), 0)
+            .unwrap()
+    }
+
+    #[test]
+    fn secp256k1_share_round_trips_and_still_signs() {
+        use frost_secp256k1_tr as frost;
+        let (_a, ks_a, id, kps, pp) = keystore_with_share::<Secp>("secp256k1");
+        let exported = ks_a.export_share(&id, "secp256k1", PW).unwrap();
+
+        let dir_b = TempDir::new().unwrap();
+        let mut ks_b = Keystore::new(dir_b.path(), "device-restore").unwrap();
+        let meta = ks_b.import_share(exported.as_bytes(), PW).unwrap();
+
+        let original = ks_a.get_wallet(&id).unwrap();
+        assert_eq!(meta.session_id, id);
+        assert_eq!(meta.group_public_key, original.group_public_key);
+        assert_eq!((meta.threshold, meta.total_participants), (2, 3));
+        assert_eq!(meta.display_name(), "Savings");
+        assert_eq!(
+            account0("secp256k1", &meta.group_public_key),
+            account0("secp256k1", &original.group_public_key)
+        );
+        assert!(ks_b.get_wallet(&id).is_some(), "cache reloaded");
+
+        // The imported share + another participant's share sign 2-of-3.
+        let blob = ks_b.load_wallet_file(&id, PW).unwrap();
+        let (imported, imported_pp) = decode_keystore_blob::<Secp>(&blob).unwrap();
+        assert_eq!(imported_pp.verifying_key(), pp.verifying_key());
+        let signers = [imported, kps[&2].clone()];
+        let mut rng = starlab_core::rng::os_rng();
+        let msg = b"import/export round trip";
+        let mut nonces = std::collections::BTreeMap::new();
+        let mut commitments = std::collections::BTreeMap::new();
+        for kp in &signers {
+            let (n, c) = frost::round1::commit(kp.signing_share(), &mut rng);
+            nonces.insert(*kp.identifier(), n);
+            commitments.insert(*kp.identifier(), c);
+        }
+        let package = frost::SigningPackage::new(commitments, msg);
+        let mut shares = std::collections::BTreeMap::new();
+        for kp in &signers {
+            let share = frost::round2::sign(&package, &nonces[kp.identifier()], kp).unwrap();
+            shares.insert(*kp.identifier(), share);
+        }
+        let signature = frost::aggregate(&package, &shares, &imported_pp).unwrap();
+        imported_pp
+            .verifying_key()
+            .verify(msg, &signature)
+            .expect("signature from the imported share verifies");
+    }
+
+    #[test]
+    fn ed25519_share_round_trips() {
+        let (_a, ks_a, id, _kps, pp) = keystore_with_share::<Ed>("ed25519");
+        let exported = ks_a.export_share(&id, "ed25519", PW).unwrap();
+        let dir_b = TempDir::new().unwrap();
+        let mut ks_b = Keystore::new(dir_b.path(), "device-restore").unwrap();
+        let meta = ks_b.import_share(exported.as_bytes(), PW).unwrap();
+        assert_eq!(
+            meta.group_public_key,
+            hex::encode(pp.verifying_key().serialize().unwrap())
+        );
+        let blob = ks_b.load_wallet_file(&id, PW).unwrap();
+        let (_, pp_b) = decode_keystore_blob::<Ed>(&blob).unwrap();
+        assert_eq!(pp_b.verifying_key(), pp.verifying_key());
+    }
+
+    #[test]
+    fn wrong_password_is_rejected_on_export_and_import() {
+        let (_a, ks_a, id, _, _) = keystore_with_share::<Secp>("secp256k1");
+        assert!(matches!(
+            ks_a.export_share(&id, "secp256k1", "wrong-password"),
+            Err(KeystoreError::InvalidPassword)
+        ));
+        let exported = ks_a.export_share(&id, "secp256k1", PW).unwrap();
+        let dir_b = TempDir::new().unwrap();
+        let mut ks_b = Keystore::new(dir_b.path(), "device-restore").unwrap();
+        let err = ks_b
+            .import_share(exported.as_bytes(), "wrong-password")
+            .unwrap_err();
+        assert!(matches!(err, KeystoreError::InvalidPassword));
+        assert_eq!(err.to_string(), "Invalid password");
+        assert!(ks_b.list_wallets().is_empty());
+    }
+
+    #[test]
+    fn duplicate_import_is_refused() {
+        let (_a, mut ks_a, id, _, _) = keystore_with_share::<Secp>("secp256k1");
+        let exported = ks_a.export_share(&id, "secp256k1", PW).unwrap();
+        let err = ks_a.import_share(exported.as_bytes(), PW).unwrap_err();
+        assert!(err.to_string().contains("already in keystore"), "{err}");
+    }
+
+    /// Replace the frost header suite id (bytes 1..5 of every package) in a
+    /// `[len][kp][len][pkp]` blob.
+    fn rewrite_suite_id(blob: &[u8], from: [u8; 4], to: [u8; 4]) -> Vec<u8> {
+        let mut out = blob.to_vec();
+        let mut pos = 0;
+        while pos < out.len() {
+            let len = u32::from_le_bytes(out[pos..pos + 4].try_into().unwrap()) as usize;
+            let id = pos + 5..pos + 9;
+            assert_eq!(out[id.clone()], from, "suite id at the package header");
+            out[id].copy_from_slice(&to);
+            pos += 4 + len;
+        }
+        out
+    }
+
+    #[test]
+    fn vanilla_secp256k1_share_is_rejected_clearly() {
+        let (_a, ks_a, id, kps, pp) = keystore_with_share::<Secp>("secp256k1");
+        let tr_blob = encode_keystore_blob::<Secp>(&kps[&1], &pp).unwrap();
+        // crc32("FROST-secp256k1-SHA256-TR-v1") — the header layout this
+        // detection relies on.
+        assert_eq!(tr_blob[BLOB_SUITE_ID], [0x23, 0x0f, 0x8a, 0xb3]);
+        let vanilla_blob = rewrite_suite_id(
+            &tr_blob,
+            [0x23, 0x0f, 0x8a, 0xb3],
+            VANILLA_SECP256K1_SHORT_ID,
+        );
+        let exported = ks_a.export_share(&id, "secp256k1", PW).unwrap();
+        let mut file: WalletFile = serde_json::from_str(&exported).unwrap();
+        use base64::{Engine as _, engine::general_purpose};
+        file.data = general_purpose::STANDARD.encode(
+            crate::keystore::encryption::encrypt_data_with_method(
+                &vanilla_blob,
+                PW,
+                crate::keystore::encryption::KeyDerivation::Pbkdf2,
+            )
+            .unwrap(),
+        );
+
+        let dir_b = TempDir::new().unwrap();
+        let mut ks_b = Keystore::new(dir_b.path(), "device-restore").unwrap();
+        let err = ks_b
+            .import_share(serde_json::to_string(&file).unwrap().as_bytes(), PW)
+            .unwrap_err();
+        assert!(err.to_string().contains("BIP-340/Taproot"), "{err}");
+        assert!(ks_b.list_wallets().is_empty());
+    }
+
+    #[test]
+    fn non_share_files_are_rejected_clearly() {
+        let dir = TempDir::new().unwrap();
+        let mut ks = Keystore::new(dir.path(), "d").unwrap();
+        let err = ks.import_share(b"{\"hello\":1}", PW).unwrap_err();
+        assert!(
+            err.to_string().contains("Not a Starlab key share file"),
+            "{err}"
         );
     }
 }
