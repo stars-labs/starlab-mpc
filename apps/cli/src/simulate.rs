@@ -91,6 +91,9 @@ enum Evt {
         signature: String,
         message: String,
     },
+    SignFailed {
+        error: String,
+    },
     ReshareDone {
         group_key: String,
     },
@@ -138,6 +141,11 @@ fn watcher() -> (
                     let _ = tx.send(Evt::SignDone {
                         signature: hex::encode(signature),
                         message: hex::encode(message),
+                    });
+                }
+                Message::SigningFailed { error, .. } => {
+                    let _ = tx.send(Evt::SignFailed {
+                        error: error.clone(),
                     });
                 }
                 _ => {}
@@ -504,6 +512,99 @@ pub async fn run_signing_simulation_all_signers_online(
         group_public_key: c.group_key,
         signatures,
         all_agreed,
+        verified,
+        elapsed_ms: started.elapsed().as_millis(),
+    })
+}
+
+/// Outcome of a signing-timeout-then-retry run — see
+/// [`run_signing_timeout_then_retry_simulation`].
+#[derive(Debug, Serialize)]
+pub struct SigningTimeoutRetryResult {
+    /// The `fail_and_notify` reason from the FIRST (stuck) ceremony.
+    pub timeout_reason: String,
+    /// Aggregated signature (hex) from the SECOND (retried) ceremony.
+    pub retried_signature: String,
+    pub retried_message: String,
+    /// True iff `retried_signature` verifies against the group key.
+    pub verified: bool,
+    pub elapsed_ms: u128,
+}
+
+impl SigningTimeoutRetryResult {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into())
+    }
+}
+
+/// Drive the per-ceremony signing timeout (design: `protocal::signing::
+/// SIGNING_TIMEOUT`) end to end: node 0 announces a signing ceremony that NO
+/// co-signer ever joins (a picked signer that's unreachable — down, or never
+/// approves the request), so node 0 alone can never reach `threshold`
+/// commitments and must fail cleanly ON ITS OWN once the timeout elapses
+/// (rather than hang forever). A SECOND ceremony, with a real co-signer
+/// joining, must then succeed and verify — proving the timeout wipes the
+/// ceremony state cleanly enough for a fresh attempt.
+///
+/// Automatic re-picking of a DIFFERENT signer inside the SAME ceremony is not
+/// how this is fixed (FROST nonce reuse would leak the key if a signer that
+/// already produced a share signed a different package with the same
+/// nonces) — hence "fail, then a fresh retry" rather than "swap and
+/// continue".
+///
+/// Needs `STARLAB_SIGNING_TIMEOUT_MS` set (by the caller, before any node is
+/// spawned) to something short — the real default is 120s, far too long for
+/// a test to sit through.
+pub async fn run_signing_timeout_then_retry_simulation(
+    opts: SimulateOpts,
+    message: &str,
+) -> anyhow::Result<SigningTimeoutRetryResult> {
+    let started = Instant::now();
+    let mut c = dkg_cluster(&opts).await?;
+    if !c.agreed {
+        anyhow::bail!("DKG did not agree; aborting signing-timeout test");
+    }
+    let wallet_id = c.outcomes[0].wallet_id.clone();
+
+    // First ceremony: node 0 announces; nobody joins. Node 0 never
+    // accumulates more than its own commitment, so it must time out on its
+    // own rather than hang.
+    c.senders[0].send(Message::HeadlessSign {
+        wallet_id: wallet_id.clone(),
+        message: message.to_string(),
+        encoding: "utf8".into(),
+        password: "sim-password-0".into(),
+    })?;
+    let timeout_reason = match wait_for(&mut c.receivers[0], opts.timeout_secs, |e| {
+        matches!(e, Evt::SignFailed { .. })
+    })
+    .await?
+    {
+        Evt::SignFailed { error } => error,
+        _ => unreachable!(),
+    };
+
+    // Retry: a fresh ceremony, with a real co-signer, must succeed.
+    let (signature, signed_message) = drive_signing(
+        &c.senders,
+        &mut c.receivers,
+        wallet_id,
+        message,
+        "utf8",
+        (opts.threshold as usize).saturating_sub(1),
+        opts.timeout_secs,
+    )
+    .await?
+    .remove(0);
+    shut_down(c.senders, c.receivers).await;
+
+    let verified =
+        verify_signature(&opts.curve, &c.group_key, &signed_message, &signature).unwrap_or(false);
+
+    Ok(SigningTimeoutRetryResult {
+        timeout_reason,
+        retried_signature: signature,
+        retried_message: signed_message,
         verified,
         elapsed_ms: started.elapsed().as_millis(),
     })
@@ -937,10 +1038,8 @@ impl LateJoinResult {
 /// the `RequestActiveSessions` replay.
 ///
 /// Also records whether the late node discovered it WITHOUT an explicit
-/// refresh — i.e. whether the headless runner auto-replays on connect the way
-/// the browser extension does. (It currently does not; the headless/CLI path
-/// needs an explicit refresh — `discovered_on_connect` captures that parity
-/// gap rather than asserting it.)
+/// refresh — the runner requests the replay itself right after `Register`, the
+/// way the browser extension does, so `discovered_on_connect` must be true.
 pub async fn run_late_join_discovery_simulation(
     opts: SimulateOpts,
 ) -> anyhow::Result<LateJoinResult> {

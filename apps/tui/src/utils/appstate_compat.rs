@@ -62,6 +62,17 @@ pub struct AppState<C: Ciphersuite> {
     pub webrtc_initiation_in_progress: bool,
     pub webrtc_initiation_started_at: Option<std::time::Instant>,
     pub signing_state: SigningState<C>,
+    /// Monotonically increasing counter, bumped by
+    /// `protocal::signing::handle_start_signing` at the start of every
+    /// signing ceremony. The per-ceremony timeout task it arms captures the
+    /// epoch at arm time and only fails the ceremony if it's still current
+    /// when the timer fires — so a timer left over from an aborted or
+    /// already-completed ceremony can never fail a newer one.
+    pub signing_epoch: u64,
+    /// Per-ceremony signing timeout, defaulting to
+    /// `protocal::signing::SIGNING_TIMEOUT`. Overridable (e.g. in tests) so
+    /// a stuck ceremony doesn't take the default 120s to fail.
+    pub signing_timeout: std::time::Duration,
     pub pending_signing_requests: Vec<super::state::PendingSigningRequest>,
     /// Raw `SIGN_COMMIT` payloads (from_device_id, commitment_bytes) that
     /// arrived BEFORE this node had a signing session — e.g. a cold-started
@@ -93,6 +104,9 @@ pub struct AppState<C: Ciphersuite> {
     pub dkg_part1_public_package: Option<Vec<u8>>,
     pub dkg_part1_secret_package: Option<Vec<u8>>,
     pub dkg_part2_secret_package: Option<Vec<u8>>,
+    /// DKG Round 1 packages that arrived before the session listed every
+    /// participant; replayed when our Round 1 starts.
+    pub pending_dkg_round1: Vec<(String, Vec<u8>)>,
     pub dkg_round1_packages: std::collections::BTreeMap<
         frost_core::Identifier<C>,
         frost_core::keys::dkg::round1::Package<C>,
@@ -264,6 +278,8 @@ where
             webrtc_initiation_in_progress: false,
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
+            signing_epoch: 0,
+            signing_timeout: crate::protocal::signing::default_signing_timeout(),
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
             signer_set: None,
@@ -272,6 +288,7 @@ where
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
+            pending_dkg_round1: Vec::new(),
             dkg_round1_packages: std::collections::BTreeMap::new(),
             dkg_round2_packages: std::collections::BTreeMap::new(),
             key_package: None,
@@ -353,6 +370,8 @@ where
             webrtc_initiation_in_progress: false,
             webrtc_initiation_started_at: None,
             signing_state: SigningState::Idle,
+            signing_epoch: 0,
+            signing_timeout: crate::protocal::signing::default_signing_timeout(),
             pending_signing_requests: Vec::new(),
             pending_pre_session_commitments: Vec::new(),
             signer_set: None,
@@ -361,6 +380,7 @@ where
             dkg_part1_public_package: None,
             dkg_part1_secret_package: None,
             dkg_part2_secret_package: None,
+            pending_dkg_round1: Vec::new(),
             dkg_round1_packages: std::collections::BTreeMap::new(),
             dkg_round2_packages: std::collections::BTreeMap::new(),
             key_package: None,

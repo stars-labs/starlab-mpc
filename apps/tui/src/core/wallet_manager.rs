@@ -145,8 +145,7 @@ impl WalletManager {
             .open_keystore()?
             .export_share(wallet_id, curve_type, &password)
             .map_err(|e| CoreError::Wallet(format!("export failed: {e}")))?;
-        tokio::fs::write(&export_path, json)
-            .await
+        write_private(&export_path, json.as_bytes())
             .map_err(|e| CoreError::Wallet(format!("cannot write {export_path}: {e}")))?;
         self.ui_callback
             .show_message(
@@ -318,6 +317,27 @@ fn wallet_info(metadata: &WalletMetadata) -> WalletInfo {
     }
 }
 
+/// Write `data` to `path` readable by the owner only (0600 on unix) — an
+/// exported key share must not be world-readable, even though it is
+/// encrypted. An existing file is truncated and tightened too.
+fn write_private(path: &str, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        let mut file = options.open(path)?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        file.write_all(data)
+    }
+    #[cfg(not(unix))]
+    {
+        options.open(path)?.write_all(data)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +441,26 @@ mod tests {
             .2
             .clone();
         assert_eq!(wallets[0].address, expected);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn exported_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (src, id, _) = source_keystore();
+        let (exporter, _) = manager(&src, "device-a");
+        let file = src.path().join("export.json");
+        // A pre-existing world-readable file gets tightened as well.
+        std::fs::write(&file, b"old").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        exporter
+            .export_wallet(&id, "secp256k1", file.to_string_lossy().into(), PW.into())
+            .await
+            .unwrap();
+
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[tokio::test]
