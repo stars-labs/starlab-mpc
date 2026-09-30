@@ -276,7 +276,7 @@ impl MainMenu {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Double)
                     .border_style(Style::default().fg(Color::Cyan))
-                    .title(" MPC Wallet — Threshold FROST Signer ")
+                    .title(" MPC Wallet — Threshold Signer ")
                     .title_style(
                         Style::default()
                             .fg(Color::Yellow)
@@ -445,7 +445,7 @@ impl MainMenu {
         frame.render_widget(controls_widget, footer_chunks[1]);
 
         // Footer info
-        let footer_info = "© 2025 MPC Wallet • FROST Protocol • BitGo-Compatible Interface";
+        let footer_info = "© 2025 MPC Wallet • FROST + threshold ECDSA";
         let footer_widget = Paragraph::new(footer_info)
             .style(Style::default().fg(Color::DarkGray))
             .alignment(Alignment::Center);
