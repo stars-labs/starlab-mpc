@@ -12,6 +12,8 @@
 //! `#[ignore]` by default (real UDP/ICE on loopback, ~seconds per case). Run:
 //!   cargo test -p starlab-cli --test conformance_matrix -- --ignored --nocapture
 
+mod support;
+
 use starlab_cli::simulate::{
     SIM_WALLET_LABEL, SimulateOpts, run_late_join_discovery_simulation, run_reload_list_simulation,
     run_reload_unlock_simulation, run_signing_simulation, run_signing_simulation_enc,
@@ -41,6 +43,7 @@ fn opts_curve(nodes: usize, threshold: u16, curve: &str) -> SimulateOpts {
         signal_url: None,
         // Larger sets need more ICE/DKG time; scale with node count.
         timeout_secs: 60 + (nodes as u64) * 20,
+        insecure_test_primes: support::test_primes(),
     }
 }
 

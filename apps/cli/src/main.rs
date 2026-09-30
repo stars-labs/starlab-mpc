@@ -41,6 +41,9 @@ enum Command {
         wallet_id: String,
         #[arg(long)]
         message: String,
+        /// utf8 | hex | prehash. An Ethereum account signs the EIP-191
+        /// (personal_sign) hash of the message; `prehash` signs a given
+        /// 32-byte hex keccak digest as-is (e.g. a transaction sighash).
         #[arg(long, default_value = "utf8")]
         encoding: String,
         /// HD account to sign with (BIP-44 model — account 0 is the default
@@ -296,6 +299,13 @@ struct ServeArgs {
     /// File holding the auto-approve password.
     #[arg(long)]
     approve_password_file: Option<String>,
+
+    /// INSECURE, TESTS ONLY (hidden): take the ECDSA aux-info safe primes
+    /// from this JSON file (one `starlab_core::ecdsa::Primes`) instead of
+    /// generating fresh ones, so an end-to-end test doesn't spend minutes on
+    /// prime generation. A wallet created this way protects nothing.
+    #[arg(long, hide = true, value_name = "FILE")]
+    insecure_test_primes: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -492,6 +502,23 @@ async fn run() -> anyhow::Result<()> {
                 args.approve_wallet,
                 args.approve_max,
             ));
+            let primes = match &args.insecure_test_primes {
+                None => starlab_client::protocal::ecdsa::PrimeSupply::background(),
+                Some(path) => {
+                    let json = std::fs::read(path).map_err(|e| {
+                        anyhow::anyhow!("--insecure-test-primes {}: {e}", path.display())
+                    })?;
+                    let primes: starlab_core::ecdsa::Primes = serde_json::from_slice(&json)
+                        .map_err(|e| {
+                            anyhow::anyhow!("--insecure-test-primes {}: {e}", path.display())
+                        })?;
+                    eprintln!(
+                        "WARNING: --insecure-test-primes: fixed, published ECDSA primes — \
+                         wallets created by this process are NOT secure (tests only)"
+                    );
+                    starlab_client::protocal::ecdsa::PrimeSupply::insecure_test_fixed(primes)
+                }
+            };
             serve::serve(ServeOpts {
                 device_id: args.device_id,
                 keystore_path,
@@ -499,6 +526,7 @@ async fn run() -> anyhow::Result<()> {
                 curve: args.curve,
                 auto_approve,
                 approve_password,
+                primes,
             })
             .await
         }

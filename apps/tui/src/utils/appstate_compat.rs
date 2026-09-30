@@ -209,6 +209,10 @@ pub struct AppState<C: Ciphersuite> {
     /// the unified ceremony is triggered, so the round-2 completion can persist
     /// without re-threading these through every message.
     pub unified_finalize: Option<(String, String, Option<String>)>,
+
+    /// Threshold-ECDSA engine state (Ethereum key): primes, the running
+    /// ceremony worker, the unlocked ECDSA share, the running signing.
+    pub ecdsa: crate::protocal::ecdsa::EcdsaState,
 }
 
 impl<C: Ciphersuite + Send + Sync + 'static> Default for AppState<C>
@@ -331,6 +335,7 @@ where
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
+            ecdsa: Default::default(),
         }
     }
 
@@ -423,6 +428,7 @@ where
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
+            ecdsa: Default::default(),
         }
     }
 

@@ -14,6 +14,8 @@
 //! Regenerate the golden after a reviewed protocol change:
 //!   BLESS=1 cargo test -p starlab-cli --test wire_trace -- --ignored
 
+mod support;
+
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -99,6 +101,7 @@ async fn capture_dkg_frames(nodes: usize, threshold: u16) -> Vec<String> {
         curve: "secp256k1".into(),
         signal_url: Some(proxy_url),
         timeout_secs: 90,
+        insecure_test_primes: support::test_primes(),
     })
     .await
     .expect("dkg through proxy");
@@ -216,6 +219,7 @@ async fn capture_signing_frames(nodes: usize, threshold: u16) -> Vec<String> {
             curve: "secp256k1".into(),
             signal_url: Some(proxy_url),
             timeout_secs: 120,
+            insecure_test_primes: support::test_primes(),
         },
         "wire-trace signing payload",
     )

@@ -7,6 +7,8 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use starlab_core::ecdsa::{ECDSA_CURVE, EcdsaKeyShare};
+
 use super::{
     KeystoreError, Result,
     encryption::decrypt_data,
@@ -43,6 +45,7 @@ impl Keystore {
         fs::create_dir_all(&device_wallet_dir)?;
         fs::create_dir_all(device_wallet_dir.join("ed25519"))?;
         fs::create_dir_all(device_wallet_dir.join("secp256k1"))?;
+        fs::create_dir_all(device_wallet_dir.join(ECDSA_CURVE))?;
 
         let mut keystore = Self {
             base_path,
@@ -66,8 +69,9 @@ impl Keystore {
 
         let device_dir = self.base_path.join(&self.device_id);
 
-        // Scan both curve directories
-        for curve_type in &["ed25519", "secp256k1"] {
+        // Scan every curve directory. The ECDSA share (Ethereum) comes last
+        // so `get_wallet(id)` keeps returning a wallet's FROST entry first.
+        for curve_type in &["ed25519", "secp256k1", ECDSA_CURVE] {
             let curve_dir = device_dir.join(curve_type);
             if !curve_dir.exists() {
                 continue;
@@ -232,6 +236,47 @@ impl Keystore {
         }
 
         Ok(wallet_id)
+    }
+
+    /// Persist a wallet's threshold-ECDSA share (its Ethereum key) as the
+    /// curve file `secp256k1-ecdsa/<wallet_id>.json` next to the wallet's
+    /// FROST files: same encrypted v2 format, same password. Threshold,
+    /// participants and our index come from the share itself.
+    pub fn save_ecdsa_share(
+        &mut self,
+        wallet_id: &str,
+        share: &EcdsaKeyShare,
+        password: &str,
+        label: Option<String>,
+    ) -> Result<()> {
+        check_wallet_id(wallet_id)?;
+        let mut metadata = WalletMetadata::with_participants(
+            wallet_id.to_string(),
+            self.device_id.clone(),
+            ECDSA_CURVE.to_string(),
+            share.threshold(),
+            share.n(),
+            share.index() + 1,
+            hex::encode(share.group_public_key()),
+            share.participants().to_vec(),
+        );
+        metadata.label = label
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let plaintext = serde_json::to_vec(share)
+            .map_err(|e| KeystoreError::SerializationError(e.to_string()))?;
+        self.save_wallet_file_atomic(wallet_id, &plaintext, password, &metadata)?;
+        self.wallet_cache
+            .retain(|w| !(w.session_id == wallet_id && w.curve_type == ECDSA_CURVE));
+        self.wallet_cache.push(metadata);
+        Ok(())
+    }
+
+    /// Decrypt a wallet's ECDSA share (see [`Self::save_ecdsa_share`]).
+    pub fn load_ecdsa_share(&self, wallet_id: &str, password: &str) -> Result<EcdsaKeyShare> {
+        let blob = self.load_wallet_file_for_curve(wallet_id, ECDSA_CURVE, password)?;
+        serde_json::from_slice(&blob)
+            .map_err(|e| KeystoreError::General(format!("Not a valid ECDSA key share: {e}")))
     }
 
     /// Overwrite an existing wallet's key share + the refresh-affected metadata
@@ -855,9 +900,14 @@ fn validate_share(metadata: &WalletMetadata, blob: &[u8]) -> Result<()> {
             share_group_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(blob)?
         }
         "ed25519" => share_group_key::<frost_ed25519::Ed25519Sha512>(blob)?,
+        ECDSA_CURVE => {
+            let share: EcdsaKeyShare = serde_json::from_slice(blob)
+                .map_err(|e| KeystoreError::General(format!("Not a valid ECDSA key share: {e}")))?;
+            hex::encode(share.group_public_key())
+        }
         other => {
             return Err(KeystoreError::General(format!(
-                "Unsupported curve {other:?} (expected secp256k1 or ed25519)"
+                "Unsupported curve {other:?} (expected secp256k1, ed25519 or {ECDSA_CURVE})"
             )));
         }
     };

@@ -11,7 +11,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1};
+use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1_with_primes};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -35,6 +35,9 @@ pub struct ServeOpts {
     /// Password used to unlock the wallet when auto-approving. Ignored unless
     /// `auto_approve` is enabled.
     pub approve_password: String,
+    /// Source of the ECDSA aux-info safe primes (background generation; a
+    /// fixed set only via the hidden `--insecure-test-primes` test flag).
+    pub primes: starlab_client::protocal::ecdsa::PrimeSupply,
 }
 
 pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
@@ -165,11 +168,12 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
             cb,
         )
     } else {
-        spawn_secp256k1(
+        spawn_secp256k1_with_primes(
             opts.device_id.clone(),
             opts.keystore_path.clone(),
             opts.signal_url.clone(),
             cb,
+            opts.primes.clone(),
         )
     };
     let _ = approve_sender.set(runner_tx.clone());

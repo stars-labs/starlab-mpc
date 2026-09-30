@@ -441,6 +441,11 @@ pub fn ensure_account_wallet(
         .clone();
 
     let child_id = format!("{parent_id}-{chain}-{account}");
+    // An Ethereum account signs with the root's ECDSA share at the account
+    // path (cggmp24 derives inside the signing) — nothing to persist.
+    if curve == starlab_core::ecdsa::ECDSA_CURVE {
+        return Ok((child_id, false));
+    }
     if ks.get_wallet(&child_id).is_some() {
         return Ok((child_id, false));
     }
@@ -495,6 +500,9 @@ pub fn materialize_child_wallet_if_needed(
     else {
         return Ok(());
     };
+    if crate::protocal::ecdsa::signing::is_ecdsa_wallet(wallet_id) {
+        return Ok(()); // signs with the root ECDSA share, never materialized
+    }
     if ks.get_wallet(wallet_id).is_some() || ks.get_wallet(parent).is_none() {
         return Ok(());
     }
@@ -652,9 +660,9 @@ async fn try_finalize_unified<C>(
     if let Some(outcome) = crate::protocal::unified_dkg::finalize(
         app_state.clone(),
         wallet_id,
-        password,
-        keystore_path,
-        label,
+        password.clone(),
+        keystore_path.clone(),
+        label.clone(),
     )
     .await
     {
@@ -667,16 +675,42 @@ async fn try_finalize_unified<C>(
             "ed25519",
             &outcome.ed25519_group_public_key,
         ));
-        let _ = tx.send(Message::DKGFinalized {
-            wallet_id: outcome.wallet_id,
-            // The bridge derives the primary address from this + curve_type;
-            // here we pass the secp256k1 group key (Ethereum). The unified
-            // wallet's Solana address rides in `addresses`.
-            group_pubkey_hex: outcome.secp256k1_group_public_key,
-            curve_type: "secp256k1".to_string(),
-            addresses,
-        });
+        // The ECDSA key (Ethereum) completes the wallet; that ceremony
+        // emits `DKGFinalized` once its share is persisted too.
+        crate::protocal::ecdsa::dkg::run_after_frost(
+            app_state.clone(),
+            tx.clone(),
+            crate::protocal::ecdsa::dkg::Finalize {
+                wallet_id: outcome.wallet_id,
+                password,
+                keystore_path,
+                label,
+                group_pubkey_hex: outcome.secp256k1_group_public_key,
+                curve_type: "secp256k1".to_string(),
+                addresses,
+            },
+        )
+        .await;
     }
+}
+
+/// The keystore entry that describes `wallet_id`'s signer group: for an
+/// Ethereum account child the root's ECDSA share (Ethereum accounts are
+/// never materialized — the root share signs at the account path), else the
+/// wallet itself.
+fn signing_metadata(
+    ks: &crate::keystore::Keystore,
+    wallet_id: &str,
+) -> Option<crate::keystore::WalletMetadata> {
+    if crate::protocal::ecdsa::signing::is_ecdsa_wallet(wallet_id) {
+        let (root, _, _) = starlab_core::accounts::parse_child_wallet_id(wallet_id)?;
+        return ks
+            .list_wallets()
+            .into_iter()
+            .find(|w| w.session_id == root && w.curve_type == starlab_core::ecdsa::ECDSA_CURVE)
+            .cloned();
+    }
+    ks.get_wallet(wallet_id).cloned()
 }
 
 /// A new signing session proposed by this node, under a fresh id. The signer
@@ -851,6 +885,7 @@ fn begin_new_dkg<C: frost_core::Ciphersuite>(
     state.own_mesh_ready_sent = false;
     state.pending_mesh_ready_signals.clear();
     state.ceremony_outbox.clear();
+    state.ecdsa.reset_for_new_dkg();
 }
 
 /// Load an existing wallet's OLD share + metadata from the keystore and seed the
@@ -2915,7 +2950,7 @@ impl Command {
                     None,       // description (deprecated)
                     participant_index,
                     participants_sorted,
-                    wallet_label, // optional user-chosen display label
+                    wallet_label.clone(), // optional user-chosen display label
                 ) {
                     Ok(id) => id,
                     Err(e) => {
@@ -2929,9 +2964,16 @@ impl Command {
                     }
                 };
 
-                // ---- 3. Drop cleartext password by shadowing; the plaintext
-                // is no longer reachable after this block.
-                drop(password);
+                // ---- 3. A secp256k1 wallet also gets its threshold-ECDSA key
+                // (Ethereum); that ceremony persists with the same password
+                // and reports `DKGFinalized` itself. Otherwise drop the
+                // cleartext password now.
+                let ecdsa_password = if curve_type_str == "secp256k1" {
+                    Some(password)
+                } else {
+                    drop(password);
+                    None
+                };
 
                 // ---- 4. Re-hydrate the shared read-only keystore so the UI's
                 // next `LoadWallets` picks up the new wallet. We could
@@ -2958,12 +3000,32 @@ impl Command {
                     addresses.len()
                 );
 
-                let _ = tx.send(Message::DKGFinalized {
-                    wallet_id,
-                    group_pubkey_hex,
-                    curve_type: curve_type_str,
-                    addresses,
-                });
+                match ecdsa_password {
+                    Some(password) => {
+                        crate::protocal::ecdsa::dkg::run_after_frost(
+                            app_state.clone(),
+                            tx.clone(),
+                            crate::protocal::ecdsa::dkg::Finalize {
+                                wallet_id,
+                                password,
+                                keystore_path,
+                                label: wallet_label,
+                                group_pubkey_hex,
+                                curve_type: curve_type_str,
+                                addresses,
+                            },
+                        )
+                        .await;
+                    }
+                    None => {
+                        let _ = tx.send(Message::DKGFinalized {
+                            wallet_id,
+                            group_pubkey_hex,
+                            curve_type: curve_type_str,
+                            addresses,
+                        });
+                    }
+                }
             }
 
             Command::UnlockWallet {
@@ -3004,6 +3066,34 @@ impl Command {
                         return Ok(());
                     }
                 };
+
+                // An Ethereum account signs with the root's threshold-ECDSA
+                // share at the account's path — nothing to materialize.
+                if crate::protocal::ecdsa::signing::is_ecdsa_wallet(&wallet_id) {
+                    let (root, _, _) = starlab_core::accounts::parse_child_wallet_id(&wallet_id)
+                        .expect("is_ecdsa_wallet parsed it");
+                    let share = match ks.load_ecdsa_share(root, &password) {
+                        Ok(share) => share,
+                        Err(e) => {
+                            let err = format!(
+                                "UnlockWallet: loading the Ethereum (ECDSA) share of '{root}' failed: {e}"
+                            );
+                            error!("{}", err);
+                            let _ = tx.send(Message::WalletUnlockFailed { error: err });
+                            return Ok(());
+                        }
+                    };
+                    drop(password);
+                    {
+                        let mut state = app_state.lock().await;
+                        state.ecdsa.key_share = Some((root.to_string(), share));
+                        state.current_wallet_id = Some(wallet_id.clone());
+                        state.keystore = Some(std::sync::Arc::new(ks));
+                    }
+                    info!("✅ Wallet '{}' (ECDSA) unlocked — ready to sign", wallet_id);
+                    let _ = tx.send(Message::WalletUnlocked { wallet_id });
+                    return Ok(());
+                }
 
                 // BIP-44 all the way: a signing announce may reference an HD
                 // account child (`{parent}-{chain}-{account}`) this device
@@ -3095,14 +3185,24 @@ impl Command {
                 // treat as a no-op announce in that case), and the
                 // `PublicKeyPackage` we need to announce the group key so
                 // joiners can cross-check.
+                let is_ecdsa = crate::protocal::ecdsa::signing::is_ecdsa_wallet(&request.wallet_id);
                 let (self_device_id, ws_tx_opt, group_pubkey_hex) = {
                     let state = app_state.lock().await;
-                    let group_pubkey_hex = state
-                        .public_key_package
-                        .as_ref()
-                        .and_then(|pkp| pkp.verifying_key().serialize().ok())
-                        .map(hex::encode)
-                        .unwrap_or_default();
+                    let group_pubkey_hex = if is_ecdsa {
+                        state
+                            .ecdsa
+                            .key_share
+                            .as_ref()
+                            .map(|(_, share)| hex::encode(share.group_public_key()))
+                            .unwrap_or_default()
+                    } else {
+                        state
+                            .public_key_package
+                            .as_ref()
+                            .and_then(|pkp| pkp.verifying_key().serialize().ok())
+                            .map(hex::encode)
+                            .unwrap_or_default()
+                    };
                     (
                         state.device_id.clone(),
                         state.websocket_msg_tx.clone(),
@@ -3127,7 +3227,8 @@ impl Command {
                         state
                             .keystore
                             .as_ref()
-                            .and_then(|ks| ks.get_wallet(&request.wallet_id)),
+                            .and_then(|ks| signing_metadata(ks, &request.wallet_id))
+                            .as_ref(),
                         state.session.as_ref(),
                     );
                     info!(
@@ -3152,8 +3253,11 @@ impl Command {
                 // if the websocket isn't up we press on anyway; the
                 // in-mesh broadcast still works for same-run ceremonies.
                 if let Some(ws_tx) = ws_tx_opt {
-                    let announced_curve =
-                        <C as crate::utils::curve_traits::CurveIdentifier>::curve_type();
+                    let announced_curve = if is_ecdsa {
+                        starlab_core::ecdsa::ECDSA_CURVE
+                    } else {
+                        <C as crate::utils::curve_traits::CurveIdentifier>::curve_type()
+                    };
                     let n_participants = {
                         let state = app_state.lock().await;
                         state.session.as_ref().map(|s| s.total).unwrap_or(0)
@@ -3255,13 +3359,23 @@ impl Command {
 
                 // Kick off the local half of the ceremony. Peers race us —
                 // whoever gathers threshold commitments first advances.
-                crate::protocal::signing::handle_start_signing::<C>(
-                    app_state.clone(),
-                    self_device_id,
-                    request.transaction_data,
-                    tx.clone(),
-                )
-                .await;
+                if is_ecdsa {
+                    crate::protocal::ecdsa::signing::start(
+                        app_state,
+                        &tx,
+                        &request.wallet_id,
+                        request.transaction_data,
+                    )
+                    .await;
+                } else {
+                    crate::protocal::signing::handle_start_signing::<C>(
+                        app_state.clone(),
+                        self_device_id,
+                        request.transaction_data,
+                        tx.clone(),
+                    )
+                    .await;
+                }
             }
 
             Command::JoinSigning {
@@ -3297,7 +3411,7 @@ impl Command {
                         state
                             .current_wallet_id
                             .as_ref()
-                            .and_then(|id| ks.get_wallet(id).cloned())
+                            .and_then(|id| signing_metadata(ks, id))
                     });
                     match (meta, state.session.as_mut()) {
                         (Some(m), _) if !m.participants.is_empty() => {
@@ -3358,13 +3472,30 @@ impl Command {
                     }
                 }
 
-                crate::protocal::signing::handle_start_signing::<C>(
-                    app_state.clone(),
-                    self_device_id,
-                    message_bytes,
-                    tx.clone(),
-                )
-                .await;
+                let ecdsa_wallet = {
+                    let state = app_state.lock().await;
+                    state
+                        .current_wallet_id
+                        .clone()
+                        .filter(|id| crate::protocal::ecdsa::signing::is_ecdsa_wallet(id))
+                };
+                if let Some(wallet_id) = ecdsa_wallet {
+                    crate::protocal::ecdsa::signing::start(
+                        app_state,
+                        &tx,
+                        &wallet_id,
+                        message_bytes,
+                    )
+                    .await;
+                } else {
+                    crate::protocal::signing::handle_start_signing::<C>(
+                        app_state.clone(),
+                        self_device_id,
+                        message_bytes,
+                        tx.clone(),
+                    )
+                    .await;
+                }
             }
 
             Command::ProcessSigningRound1 {
@@ -3690,14 +3821,14 @@ mod account_wallet_tests {
     #[test]
     fn materializes_missing_child_when_parent_exists() {
         let (_dir, mut ks, parent_group) = keystore_with_parent();
-        let child_id = format!("{PARENT}-ethereum-7");
+        let child_id = format!("{PARENT}-bitcoin-7");
 
         materialize_child_wallet_if_needed(&mut ks, &child_id, PW).expect("materialize");
 
         let meta = ks.get_wallet(&child_id).expect("child must exist").clone();
         assert_eq!(
             meta.label.as_deref(),
-            Some("m/44'/60'/0'/0/7"),
+            Some("m/86'/0'/0'/0/7"),
             "label IS the path"
         );
         assert_eq!(meta.curve_type, "secp256k1");
@@ -3707,7 +3838,7 @@ mod account_wallet_tests {
 
         // The persisted child group key must equal the PUBLIC-only
         // derivation every client's accounts table uses.
-        let path = starlab_core::DerivationPath::parse("m/44'/60'/0'/0/7").unwrap();
+        let path = starlab_core::DerivationPath::parse("m/86'/0'/0'/0/7").unwrap();
         let expected = starlab_core::derive_child_verifying_key_path::<Secp>(
             &hex::decode(&parent_group).unwrap(),
             &path,
@@ -3731,10 +3862,10 @@ mod account_wallet_tests {
     fn unknown_and_non_child_ids_are_no_ops() {
         let (_dir, mut ks, _) = keystore_with_parent();
         for id in [
-            PARENT,                      // root id
-            "no-such-parent-ethereum-0", // well-formed child, parent absent
-            "wallet-dogecoin-1",         // unknown chain
-            "wallet-ethereum-x",         // non-numeric account
+            PARENT,                     // root id
+            "no-such-parent-bitcoin-0", // well-formed child, parent absent
+            "wallet-dogecoin-1",        // unknown chain
+            "wallet-bitcoin-x",         // non-numeric account
         ] {
             materialize_child_wallet_if_needed(&mut ks, id, PW)
                 .unwrap_or_else(|e| panic!("{id} must be a no-op, got Err({e})"));
@@ -3748,14 +3879,14 @@ mod account_wallet_tests {
     #[test]
     fn already_present_child_skips_materialization() {
         let (_dir, mut ks, _) = keystore_with_parent();
-        let child_id = format!("{PARENT}-ethereum-0");
+        let child_id = format!("{PARENT}-bitcoin-0");
         let (id, materialized) =
-            ensure_account_wallet(&mut ks, PARENT, 0, Some("ethereum"), PW).expect("first");
+            ensure_account_wallet(&mut ks, PARENT, 0, Some("bitcoin"), PW).expect("first");
         assert_eq!(id, child_id);
         assert!(materialized, "first call must materialize");
 
         let (id, materialized) =
-            ensure_account_wallet(&mut ks, PARENT, 0, Some("ethereum"), PW).expect("second");
+            ensure_account_wallet(&mut ks, PARENT, 0, Some("bitcoin"), PW).expect("second");
         assert_eq!(id, child_id);
         assert!(!materialized, "second call must find it");
 
@@ -3765,12 +3896,21 @@ mod account_wallet_tests {
     }
 
     /// The default chain (no explicit `--chain`) is the primary chain of
-    /// the wallet's curve — ethereum for a secp256k1 share.
+    /// the wallet — ethereum for a secp256k1 wallet, signed by its ECDSA key.
     #[test]
     fn default_chain_is_primary_for_curve() {
         let (_dir, mut ks, _) = keystore_with_parent();
-        let (id, _) = ensure_account_wallet(&mut ks, PARENT, 3, None, PW).expect("ensure");
-        assert_eq!(id, format!("{PARENT}-ethereum-3"));
+        // Ethereum signs with the ECDSA share, which this FROST-only
+        // fixture wallet doesn't have.
+        let err = ensure_account_wallet(&mut ks, PARENT, 3, None, PW).expect_err("no ECDSA share");
+        assert!(
+            err.contains("secp256k1-ecdsa") && err.contains("ethereum"),
+            "{err}"
+        );
+        // Ethereum accounts are never materialized as FROST children.
+        materialize_child_wallet_if_needed(&mut ks, &format!("{PARENT}-ethereum-3"), PW)
+            .expect("no-op");
+        assert_eq!(ks.list_wallets().len(), 1);
     }
 
     /// A wrong password surfaces the parent-unlock error instead of
@@ -3780,12 +3920,12 @@ mod account_wallet_tests {
         let (_dir, mut ks, _) = keystore_with_parent();
         let err = materialize_child_wallet_if_needed(
             &mut ks,
-            &format!("{PARENT}-ethereum-1"),
+            &format!("{PARENT}-bitcoin-1"),
             "WRONG-password",
         )
         .expect_err("must fail");
         assert!(err.contains(PARENT), "error must name the parent: {err}");
-        assert!(ks.get_wallet(&format!("{PARENT}-ethereum-1")).is_none());
+        assert!(ks.get_wallet(&format!("{PARENT}-bitcoin-1")).is_none());
     }
 
     /// Run one command against a node whose device id is `device-1`.

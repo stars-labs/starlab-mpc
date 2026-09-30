@@ -8,9 +8,11 @@
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1};
+use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1, spawn_secp256k1_with_primes};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
+use starlab_client::protocal::ecdsa::PrimeSupply;
+use starlab_core::ecdsa::Primes;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -28,6 +30,10 @@ pub struct SimulateOpts {
     /// External signal server; `None` embeds one on an ephemeral port.
     pub signal_url: Option<String>,
     pub timeout_secs: u64,
+    /// **INSECURE, tests only**: precomputed ECDSA safe primes, node `i`
+    /// gets `insecure_test_primes[i % len]`. Empty → every node generates
+    /// real primes in the background (~1.5 min before its first DKG).
+    pub insecure_test_primes: Vec<Primes>,
 }
 
 #[derive(Debug, Serialize)]
@@ -35,6 +41,8 @@ pub struct NodeOutcome {
     pub device_id: String,
     pub wallet_id: String,
     pub group_public_key: String,
+    /// Account 0's Ethereum address (the ECDSA key's; empty for ed25519).
+    pub ethereum_address: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -86,6 +94,7 @@ enum Evt {
     DkgDone {
         wallet_id: String,
         group_key: String,
+        ethereum_address: String,
     },
     SignDone {
         signature: String,
@@ -121,11 +130,17 @@ fn watcher() -> (
                 Message::DKGFinalized {
                     wallet_id,
                     group_pubkey_hex,
+                    addresses,
                     ..
                 } => {
                     let _ = tx.send(Evt::DkgDone {
                         wallet_id: wallet_id.clone(),
                         group_key: group_pubkey_hex.clone(),
+                        ethereum_address: addresses
+                            .iter()
+                            .find(|(chain, _)| chain == "Ethereum")
+                            .map(|(_, a)| a.clone())
+                            .unwrap_or_default(),
                     });
                 }
                 Message::ReshareComplete {
@@ -182,8 +197,35 @@ struct Cluster {
     keystores: Vec<tempfile::TempDir>,
     outcomes: Vec<NodeOutcome>,
     group_key: String,
+    /// Account 0's Ethereum address every node agreed on (secp256k1).
+    ethereum_address: String,
     agreed: bool,
     elapsed_ms: u128,
+}
+
+/// A runner's per-message sync hook (see `HeadlessRunner`).
+type SyncCallback = Box<dyn Fn(&Model, Option<&Message>) + Send>;
+
+/// Spawn node `i`'s runner (the curve's runner; secp256k1 nodes get the
+/// injected test primes when the options carry some).
+fn spawn_node(
+    opts: &SimulateOpts,
+    i: usize,
+    device_id: String,
+    keystore_path: String,
+    ws_url: String,
+    cb: SyncCallback,
+) -> UnboundedSender<Message> {
+    if opts.curve == "ed25519" {
+        return spawn_ed25519(device_id, keystore_path, ws_url, cb);
+    }
+    let primes = if opts.insecure_test_primes.is_empty() {
+        PrimeSupply::background()
+    } else {
+        let set = &opts.insecure_test_primes[i % opts.insecure_test_primes.len()];
+        PrimeSupply::insecure_test_fixed(set.clone())
+    };
+    spawn_secp256k1_with_primes(device_id, keystore_path, ws_url, cb, primes)
 }
 
 /// Quit every runner and give the runtime a beat to reclaim their WebRTC/ICE
@@ -236,15 +278,11 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     let mut senders = Vec::new();
     let mut receivers = Vec::new();
     let device_ids: Vec<String> = (0..opts.nodes).map(|i| format!("sim-node-{i}")).collect();
-    for device_id in &device_ids {
+    for (i, device_id) in device_ids.iter().enumerate() {
         let ks = tempfile::TempDir::new()?;
         let (cb, rx) = watcher();
         let ks_path = ks.path().to_string_lossy().into_owned();
-        let tx = if opts.curve == "ed25519" {
-            spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
-        } else {
-            spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
-        };
+        let tx = spawn_node(opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
         keystores.push(ks);
         senders.push(tx);
         receivers.push(rx);
@@ -290,12 +328,14 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         if let Evt::DkgDone {
             wallet_id,
             group_key,
+            ethereum_address,
         } = done
         {
             outcomes.push(NodeOutcome {
                 device_id: device_ids[i].clone(),
                 wallet_id,
                 group_public_key: group_key,
+                ethereum_address,
             });
         }
     }
@@ -304,7 +344,15 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         .first()
         .map(|o| o.group_public_key.clone())
         .unwrap_or_default();
-    let agreed = !group_key.is_empty() && outcomes.iter().all(|o| o.group_public_key == group_key);
+    let ethereum_address = outcomes
+        .first()
+        .map(|o| o.ethereum_address.clone())
+        .unwrap_or_default();
+    let agreed = !group_key.is_empty()
+        && outcomes
+            .iter()
+            .all(|o| o.group_public_key == group_key && o.ethereum_address == ethereum_address)
+        && (opts.curve == "ed25519" || ethereum_address.starts_with("0x"));
 
     Ok(Cluster {
         device_ids,
@@ -313,6 +361,7 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         keystores,
         outcomes,
         group_key,
+        ethereum_address,
         agreed,
         elapsed_ms: started.elapsed().as_millis(),
     })
@@ -338,16 +387,49 @@ async fn drive_signing(
     join_count: usize,
     timeout_secs: u64,
 ) -> anyhow::Result<Vec<(String, String)>> {
-    // Initiator (node 0) announces the signing request.
-    senders[0].send(Message::HeadlessSign {
+    let joiners: Vec<usize> = (1..=join_count).collect();
+    drive_signing_by(
+        senders,
+        receivers,
+        0,
+        &joiners,
+        wallet_id,
+        message,
+        encoding,
+        timeout_secs,
+    )
+    .await
+}
+
+/// [`drive_signing`] with an explicit initiator node and joiner nodes.
+/// Returns `(signature, signed_message)` per node, initiator first, then
+/// the joiners in the given order.
+#[allow(clippy::too_many_arguments)]
+async fn drive_signing_by(
+    senders: &[UnboundedSender<Message>],
+    receivers: &mut [UnboundedReceiver<Evt>],
+    initiator: usize,
+    joiners: &[usize],
+    wallet_id: String,
+    message: &str,
+    encoding: &str,
+    timeout_secs: u64,
+) -> anyhow::Result<Vec<(String, String)>> {
+    // Forget events of earlier signings on this cluster (e.g. the discovery
+    // of a previous session a node didn't join) so each joiner joins THIS
+    // session.
+    for &i in std::iter::once(&initiator).chain(joiners) {
+        while receivers[i].try_recv().is_ok() {}
+    }
+    senders[initiator].send(Message::HeadlessSign {
         wallet_id,
         message: message.to_string(),
         encoding: encoding.to_string(),
-        password: "sim-password-0".into(),
+        password: format!("sim-password-{initiator}"),
     })?;
 
-    // Co-signers 1..=join_count approve by joining the signing session.
-    for i in 1..=join_count {
+    // Co-signers approve by joining the signing session.
+    for &i in joiners {
         let session_id = match wait_for(&mut receivers[i], 20, |e| {
             matches!(e, Evt::SessionDiscovered { signing: true, .. })
         })
@@ -363,11 +445,16 @@ async fn drive_signing(
         })?;
     }
 
-    // Wait for the aggregated signature on every node that joined.
-    let mut results = Vec::with_capacity(join_count + 1);
-    for rx in receivers.iter_mut().take(join_count + 1) {
-        match wait_for(rx, timeout_secs, |e| matches!(e, Evt::SignDone { .. })).await? {
+    // Wait for the signature on every node that joined.
+    let mut results = Vec::with_capacity(joiners.len() + 1);
+    for &i in std::iter::once(&initiator).chain(joiners) {
+        match wait_for(&mut receivers[i], timeout_secs, |e| {
+            matches!(e, Evt::SignDone { .. } | Evt::SignFailed { .. })
+        })
+        .await?
+        {
             Evt::SignDone { signature, message } => results.push((signature, message)),
+            Evt::SignFailed { error } => anyhow::bail!("node {i}: signing failed: {error}"),
             _ => unreachable!(),
         }
     }
@@ -427,8 +514,14 @@ pub async fn run_signing_simulation_enc(
     .remove(0);
     shut_down(c.senders, c.receivers).await;
 
-    let verified =
-        verify_signature(&opts.curve, &c.group_key, &signed_message, &signature).unwrap_or(false);
+    let verified = verify_signature(
+        &opts.curve,
+        &c.group_key,
+        &c.ethereum_address,
+        &signed_message,
+        &signature,
+    )
+    .unwrap_or(false);
 
     Ok(SigningResult {
         nodes,
@@ -471,9 +564,15 @@ impl AllSignersOnlineResult {
 
 /// DKG, then sign `message` with EVERY node online and joined (not just a
 /// threshold-many quorum) — see [`AllSignersOnlineResult`].
+///
+/// `bitcoin = true` signs with the Bitcoin account (FROST BIP-340, the #121
+/// `SIGN_SET` path; `message` must then be a 32-byte hex sighash), otherwise
+/// with the root's primary account (Ethereum → threshold ECDSA with the
+/// `ECDSA_SIGN_SET` / `ECDSA_SIGN_DONE` path, for a secp256k1 wallet).
 pub async fn run_signing_simulation_all_signers_online(
     opts: SimulateOpts,
     message: &str,
+    bitcoin: bool,
 ) -> anyhow::Result<AllSignersOnlineResult> {
     let nodes = opts.nodes;
     let threshold = opts.threshold;
@@ -482,7 +581,12 @@ pub async fn run_signing_simulation_all_signers_online(
     if !c.agreed {
         anyhow::bail!("DKG did not agree; aborting signing");
     }
-    let wallet_id = c.outcomes[0].wallet_id.clone();
+    let root = c.outcomes[0].wallet_id.clone();
+    let (wallet_id, encoding) = if bitcoin {
+        (format!("{root}-bitcoin-0"), "hex")
+    } else {
+        (root, "utf8")
+    };
 
     // Every node besides the initiator joins — this is the "more than
     // threshold signers online" scenario the old per-node first-come rule
@@ -492,7 +596,7 @@ pub async fn run_signing_simulation_all_signers_online(
         &mut c.receivers,
         wallet_id,
         message,
-        "utf8",
+        encoding,
         nodes - 1,
         opts.timeout_secs,
     )
@@ -502,7 +606,13 @@ pub async fn run_signing_simulation_all_signers_online(
     let signatures: Vec<String> = results.iter().map(|(sig, _)| sig.clone()).collect();
     let all_agreed = signatures.len() == nodes && signatures.windows(2).all(|w| w[0] == w[1]);
     let verified = match results.first() {
-        Some((sig, msg)) => verify_signature(&opts.curve, &c.group_key, msg, sig).unwrap_or(false),
+        Some((sig, msg)) if bitcoin => verify_bitcoin_signature(&c.group_key, msg, sig)
+            .map(|(_, ok)| ok)
+            .unwrap_or(false),
+        Some((sig, msg)) => {
+            verify_signature(&opts.curve, &c.group_key, &c.ethereum_address, msg, sig)
+                .unwrap_or(false)
+        }
         None => false,
     };
 
@@ -515,6 +625,137 @@ pub async fn run_signing_simulation_all_signers_online(
         verified,
         elapsed_ms: started.elapsed().as_millis(),
     })
+}
+
+/// One signing of an [`EcdsaE2eResult`].
+#[derive(Debug, Serialize)]
+pub struct EcdsaSigning {
+    pub initiator: usize,
+    pub joiners: Vec<usize>,
+    /// `utf8` (EIP-191 personal_sign hash) or `prehash` (32-byte digest).
+    pub encoding: String,
+    /// Hex of the 32-byte hash that was signed.
+    pub signed_hash: String,
+    /// Hex of the 65-byte `r ‖ s ‖ v` signature.
+    pub signature: String,
+    /// `ecrecover(signed_hash, signature)`.
+    pub recovered_address: String,
+    /// Every joined node reported the same signature.
+    pub nodes_agree: bool,
+    pub elapsed_ms: u128,
+}
+
+/// Outcome of [`run_ecdsa_e2e`].
+#[derive(Debug, Serialize)]
+pub struct EcdsaE2eResult {
+    pub nodes: usize,
+    pub threshold: u16,
+    /// Account 0's Ethereum address (accounts.rs, from the ECDSA group key).
+    pub ethereum_address: String,
+    pub dkg_ms: u128,
+    pub signings: Vec<EcdsaSigning>,
+    /// Node 0's ECDSA share survived keystore export → import.
+    pub ecdsa_export_import: bool,
+}
+
+impl EcdsaE2eResult {
+    /// Every signing recovered to the account address, on every node.
+    pub fn ok(&self) -> bool {
+        self.ethereum_address.starts_with("0x")
+            && self.ecdsa_export_import
+            && !self.signings.is_empty()
+            && self
+                .signings
+                .iter()
+                .all(|s| s.nodes_agree && s.recovered_address == self.ethereum_address)
+    }
+}
+
+/// One signing request for [`run_ecdsa_e2e`]: `(initiator, joiners,
+/// message, encoding)` — encoding `utf8` (EIP-191) or `prehash` (hex of a
+/// 32-byte digest, e.g. a transaction sighash).
+pub type EcdsaSignRequest<'a> = (usize, Vec<usize>, &'a str, &'a str);
+
+/// Threshold ECDSA end to end: one DKG (FROST + ECDSA aux info + keygen),
+/// then each request in order on the same cluster, each checked with
+/// `ecrecover` against account 0's Ethereum address.
+pub async fn run_ecdsa_e2e(
+    opts: SimulateOpts,
+    requests: &[EcdsaSignRequest<'_>],
+) -> anyhow::Result<EcdsaE2eResult> {
+    if opts.curve != "secp256k1" {
+        anyhow::bail!("the ECDSA key comes with a secp256k1 wallet");
+    }
+    let mut c = dkg_cluster(&opts).await?;
+    if !c.agreed {
+        anyhow::bail!("DKG did not agree: {:?}", c.outcomes);
+    }
+    let dkg_ms = c.elapsed_ms;
+    let wallet_id = format!("{}-ethereum-0", c.outcomes[0].wallet_id);
+    let mut signings = Vec::new();
+    for (initiator, joiners, message, encoding) in requests {
+        let started = Instant::now();
+        let results = drive_signing_by(
+            &c.senders,
+            &mut c.receivers,
+            *initiator,
+            joiners,
+            wallet_id.clone(),
+            message,
+            encoding,
+            opts.timeout_secs,
+        )
+        .await?;
+        let (signature, signed_hash) = results[0].clone();
+        let nodes_agree = results.iter().all(|r| *r == results[0]);
+        let recovered_address = starlab_core::accounts::recover_ethereum_address(
+            &hex::decode(&signed_hash)?,
+            &hex::decode(&signature)?,
+        )?;
+        signings.push(EcdsaSigning {
+            initiator: *initiator,
+            joiners: joiners.clone(),
+            encoding: encoding.to_string(),
+            signed_hash,
+            signature,
+            recovered_address,
+            nodes_agree,
+            elapsed_ms: started.elapsed().as_millis(),
+        });
+    }
+    shut_down(c.senders, c.receivers).await;
+    let ecdsa_export_import =
+        ecdsa_share_round_trips(&c.keystores[0], &c.device_ids[0], &c.outcomes[0].wallet_id)?;
+    Ok(EcdsaE2eResult {
+        nodes: opts.nodes,
+        threshold: opts.threshold,
+        ethereum_address: c.ethereum_address,
+        dkg_ms,
+        signings,
+        ecdsa_export_import,
+    })
+}
+
+/// Node 0's persisted ECDSA share exports (`secp256k1-ecdsa` curve file,
+/// still encrypted) and imports into an empty keystore, where it decrypts
+/// to the same group key.
+fn ecdsa_share_round_trips(
+    keystore: &tempfile::TempDir,
+    device_id: &str,
+    wallet_id: &str,
+) -> anyhow::Result<bool> {
+    use starlab_client::keystore::Keystore;
+    use starlab_core::ecdsa::ECDSA_CURVE;
+    let ks = Keystore::new(keystore.path(), device_id)?;
+    let original = ks.load_ecdsa_share(wallet_id, "sim-password-0")?;
+    let file = ks.export_share(wallet_id, ECDSA_CURVE, "sim-password-0")?;
+    let other = tempfile::TempDir::new()?;
+    let mut restored = Keystore::new(other.path(), device_id)?;
+    let meta = restored.import_share(file.as_bytes(), "sim-password-0")?;
+    let back = restored.load_ecdsa_share(wallet_id, "sim-password-0")?;
+    Ok(meta.curve_type == ECDSA_CURVE
+        && back.group_public_key() == original.group_public_key()
+        && back.index() == original.index())
 }
 
 /// Outcome of a signing-timeout-then-retry run — see
@@ -598,8 +839,14 @@ pub async fn run_signing_timeout_then_retry_simulation(
     .remove(0);
     shut_down(c.senders, c.receivers).await;
 
-    let verified =
-        verify_signature(&opts.curve, &c.group_key, &signed_message, &signature).unwrap_or(false);
+    let verified = verify_signature(
+        &opts.curve,
+        &c.group_key,
+        &c.ethereum_address,
+        &signed_message,
+        &signature,
+    )
+    .unwrap_or(false);
 
     Ok(SigningTimeoutRetryResult {
         timeout_reason,
@@ -647,17 +894,7 @@ pub async fn run_bitcoin_signing_simulation(
     .remove(0);
     shut_down(c.senders, c.receivers).await;
 
-    let group_key = hex::decode(&c.group_key)?;
-    let address = starlab_core::accounts::account_addresses("secp256k1", &group_key, 0)?
-        .into_iter()
-        .find(|(chain, _, _)| chain == "Bitcoin")
-        .map(|(_, _, address)| address)
-        .ok_or_else(|| anyhow::anyhow!("no Bitcoin account address"))?;
-    let verified = starlab_core::accounts::verify_taproot_signature(
-        &address,
-        &hex::decode(signed_message.trim_start_matches("0x"))?,
-        &hex::decode(signature.trim_start_matches("0x"))?,
-    )?;
+    let (address, verified) = verify_bitcoin_signature(&c.group_key, &signed_message, &signature)?;
     Ok(BitcoinSigningResult {
         address,
         sighash: signed_message,
@@ -750,11 +987,7 @@ pub async fn run_reshare_e2e(
             for (i, device_id) in device_ids.iter().enumerate() {
                 let (cb, rx) = watcher();
                 let ks_path = keystores[i].path().to_string_lossy().into_owned();
-                let tx = if opts.curve == "ed25519" {
-                    spawn_ed25519(device_id.clone(), ks_path, ws_url.clone(), cb)
-                } else {
-                    spawn_secp256k1(device_id.clone(), ks_path, ws_url.clone(), cb)
-                };
+                let tx = spawn_node(&opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
                 senders.push(tx);
                 receivers.push(rx);
             }
@@ -820,21 +1053,39 @@ pub async fn run_reshare_e2e(
     let share_persisted = persisted_group_key == dkg_group_key;
 
     // Sign with the REFRESHED shares and verify against the (unchanged) group
-    // key's account-0 child.
+    // key's account-0 child. Reshare refreshes the FROST keys, so a secp256k1
+    // wallet signs with its Bitcoin (FROST BIP-340) account, not Ethereum
+    // (ECDSA, untouched by a reshare).
+    let (sign_wallet, sign_message, encoding) = if opts.curve == "ed25519" {
+        (wallet_id, message.to_string(), "utf8")
+    } else {
+        let sighash: Vec<u8> = message.bytes().cycle().take(32).collect();
+        (
+            format!("{wallet_id}-bitcoin-0"),
+            hex::encode(sighash),
+            "hex",
+        )
+    };
     let (signature, signed_message) = drive_signing(
         &senders,
         &mut receivers,
-        wallet_id,
-        message,
-        "utf8",
+        sign_wallet,
+        &sign_message,
+        encoding,
         (threshold as usize).saturating_sub(1),
         opts.timeout_secs,
     )
     .await?
     .remove(0);
     shut_down(senders, receivers).await;
-    let signed_after_reshare =
-        verify_signature(&opts.curve, &dkg_group_key, &signed_message, &signature).unwrap_or(false);
+    let signed_after_reshare = if opts.curve == "ed25519" {
+        verify_signature(&opts.curve, &dkg_group_key, "", &signed_message, &signature)
+            .unwrap_or(false)
+    } else {
+        verify_bitcoin_signature(&dkg_group_key, &signed_message, &signature)
+            .map(|(_, ok)| ok)
+            .unwrap_or(false)
+    };
 
     Ok(ReshareE2eResult {
         nodes,
@@ -1165,47 +1416,54 @@ pub async fn run_unknown_wallet_sign_simulation() -> anyhow::Result<UnlockAttemp
     })
 }
 
-/// Verify a produced FROST signature for a root wallet. `HeadlessSign` never
-/// signs with the root: a root id is mapped to account 0 of the curve's
-/// primary chain, so verify against that child key, derived publicly from
-/// the root group key.
+/// Verify a signature `HeadlessSign` produced for a ROOT wallet id: it signs
+/// with account 0 of the runner curve's primary chain — Ethereum (threshold
+/// ECDSA: the signature must `ecrecover` to the account's address) for a
+/// secp256k1 wallet, Solana (FROST ed25519 under the account child key) for
+/// an ed25519 one.
 fn verify_signature(
     curve: &str,
     group_key_hex: &str,
+    ethereum_address: &str,
     message_hex: &str,
     sig_hex: &str,
 ) -> anyhow::Result<bool> {
-    let chain = if curve == "ed25519" {
-        "solana"
-    } else {
-        "ethereum"
-    };
-    let path = starlab_core::accounts::standard_path(chain, 0)
-        .ok_or_else(|| anyhow::anyhow!("no standard path for {chain}"))?;
+    if curve != "ed25519" {
+        let recovered = starlab_core::accounts::recover_ethereum_address(
+            &hex::decode(message_hex)?,
+            &hex::decode(sig_hex)?,
+        )?;
+        return Ok(!ethereum_address.is_empty() && recovered == ethereum_address);
+    }
+    let path = starlab_core::accounts::standard_path("solana", 0)
+        .ok_or_else(|| anyhow::anyhow!("no standard path for solana"))?;
     let path = starlab_core::DerivationPath::parse(&path)?;
     let group_key = hex::decode(group_key_hex)?;
-    if curve == "ed25519" {
-        let child = starlab_core::derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
-            &group_key, &path,
-        )?;
-        verify_ed25519(&hex::encode(child), message_hex, sig_hex)
-    } else {
-        let child = starlab_core::derive_child_verifying_key_path::<
-            frost_secp256k1_tr::Secp256K1Sha256TR,
-        >(&group_key, &path)?;
-        verify_secp256k1(&hex::encode(child), message_hex, sig_hex)
-    }
+    let child = starlab_core::derive_child_verifying_key_path::<frost_ed25519::Ed25519Sha512>(
+        &group_key, &path,
+    )?;
+    verify_ed25519(&hex::encode(child), message_hex, sig_hex)
 }
 
-/// Verify a FROST(secp256k1) signature against the group verifying key.
-fn verify_secp256k1(group_key_hex: &str, message_hex: &str, sig_hex: &str) -> anyhow::Result<bool> {
-    use frost_secp256k1_tr::{Signature, VerifyingKey};
-    let vk_bytes = hex::decode(group_key_hex)?;
-    let msg = hex::decode(message_hex)?;
-    let sig_bytes = hex::decode(sig_hex)?;
-    let vk = VerifyingKey::deserialize(&vk_bytes)?;
-    let sig = Signature::deserialize(&sig_bytes)?;
-    Ok(vk.verify(&msg, &sig).is_ok())
+/// Verify a BIP-340 signature by the wallet's Bitcoin account 0 the way a
+/// Bitcoin node does: against the output key its P2TR address commits to.
+fn verify_bitcoin_signature(
+    group_key_hex: &str,
+    message_hex: &str,
+    sig_hex: &str,
+) -> anyhow::Result<(String, bool)> {
+    let group_key = hex::decode(group_key_hex)?;
+    let address = starlab_core::accounts::account_addresses("secp256k1", &group_key, 0)?
+        .into_iter()
+        .find(|(chain, _, _)| chain == "Bitcoin")
+        .map(|(_, _, address)| address)
+        .ok_or_else(|| anyhow::anyhow!("no Bitcoin account address"))?;
+    let verified = starlab_core::accounts::verify_taproot_signature(
+        &address,
+        &hex::decode(message_hex.trim_start_matches("0x"))?,
+        &hex::decode(sig_hex.trim_start_matches("0x"))?,
+    )?;
+    Ok((address, verified))
 }
 
 /// Verify a FROST(ed25519) signature against the group verifying key.
@@ -1232,6 +1490,7 @@ mod tests {
             curve: "secp256k1".into(),
             signal_url: None,
             timeout_secs: 90,
+            insecure_test_primes: Vec::new(),
         })
         .await
         .expect("simulation ran");
