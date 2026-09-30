@@ -5,6 +5,7 @@
 
 use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::{DKGRound, Message};
+use crate::protocal::ecdsa::{DkgPhase, PrimeStatus};
 
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -89,6 +90,10 @@ pub struct DKGProgressComponent {
     /// signing). Reuses the same layout + participant mesh rendering
     /// without a separate component file.
     ceremony: Ceremony,
+    /// The ECDSA part (Ethereum key) of a wallet DKG once the FROST
+    /// ceremonies are done, with the prime generator's state (shown while
+    /// the DKG waits for this device's safe primes).
+    ecdsa: Option<(DkgPhase, PrimeStatus)>,
 }
 
 impl Default for DKGProgressComponent {
@@ -114,7 +119,29 @@ impl DKGProgressComponent {
             mesh_ready_count: 0,
             all_data_channels_open: false,
             ceremony: Ceremony::default(),
+            ecdsa: None,
         }
+    }
+
+    /// Show the ECDSA part of the DKG (from `wallet_state.ecdsa_dkg_phase`
+    /// and `wallet_state.ecdsa_setup`); `None` = not running.
+    pub fn set_ecdsa(&mut self, phase: Option<DkgPhase>, setup: PrimeStatus) {
+        self.ecdsa = phase.map(|p| (p, setup));
+        self.update_progress();
+    }
+
+    /// The ECDSA status line, e.g. "⏳ Ethereum key (ECDSA): waiting for this
+    /// device's safe primes — preparing safe primes (1m 12s, usually 1-3 min)".
+    fn ecdsa_status(&self) -> Option<String> {
+        let (phase, setup) = self.ecdsa?;
+        Some(match phase {
+            DkgPhase::WaitingForPrimes => {
+                let setup = setup.describe();
+                let detail = setup.strip_prefix("ECDSA setup: ").unwrap_or(&setup);
+                format!("⏳ {} — {}", phase.describe(), detail)
+            }
+            _ => format!("🔄 {}", phase.describe()),
+        })
     }
 
     /// Override the default `Ceremony::Dkg` for this mount — used by
@@ -321,9 +348,20 @@ impl DKGProgressComponent {
                 self.progress_percentage = 100.0;
             }
         }
+        // The FROST keys are done; the Ethereum key is still being made.
+        if let Some((phase, _)) = self.ecdsa {
+            self.progress_percentage = match phase {
+                DkgPhase::WaitingForPrimes => 90.0,
+                DkgPhase::AuxInfo => 93.0,
+                DkgPhase::Keygen => 97.0,
+            };
+        }
     }
 
     fn get_round_color(&self) -> Color {
+        if self.ecdsa.is_some() {
+            return Color::Cyan;
+        }
         match self.current_round {
             DKGRound::Initialization => Color::Yellow,
             DKGRound::WaitingForParticipants => Color::Yellow,
@@ -606,17 +644,22 @@ impl DKGProgressComponent {
     }
 
     fn render_progress_bar(&self, frame: &mut Frame, area: Rect) {
+        let ecdsa_label = self.ecdsa.map(|(phase, _)| match phase {
+            DkgPhase::WaitingForPrimes => "Ethereum key: waiting for safe primes...",
+            DkgPhase::AuxInfo => "Ethereum key: ECDSA aux info...",
+            DkgPhase::Keygen => "Ethereum key: ECDSA key generation...",
+        });
         let progress_label = format!(
             "Progress: {:.0}% - {}",
             self.progress_percentage,
-            match self.current_round {
+            ecdsa_label.unwrap_or(match self.current_round {
                 DKGRound::Initialization => "Initializing protocol...",
                 DKGRound::WaitingForParticipants => "Waiting for participants...",
                 DKGRound::Round1 => "Generating commitments...",
                 DKGRound::Round2 => "Exchanging shares...",
                 DKGRound::Finalization => "Finalizing DKG...",
                 DKGRound::Complete => "DKG complete!",
-            }
+            })
         );
 
         // Ensure percentage is valid (0-100) before passing to Gauge
@@ -728,7 +771,11 @@ impl DKGProgressComponent {
             frame.render_widget(error_para, chunks[0]);
         } else {
             // Check WebSocket connection first
-            let status_text = if !self.websocket_connected {
+            let status_text = if let Some(ecdsa) = self.ecdsa_status() {
+                // Peer traffic runs over the WebRTC mesh; the ECDSA part
+                // no longer needs the signal server.
+                ecdsa
+            } else if !self.websocket_connected {
                 "❌ WebSocket disconnected - Cannot proceed without signal server".to_string()
             } else {
                 match self.current_round {
@@ -772,10 +819,11 @@ impl DKGProgressComponent {
                 }
             };
 
-            let status_color = if !self.websocket_connected {
-                Color::Red
-            } else {
-                self.get_round_color()
+            let status_color = match self.ecdsa {
+                Some((DkgPhase::WaitingForPrimes, _)) => Color::Yellow,
+                Some(_) => Color::Cyan,
+                None if !self.websocket_connected => Color::Red,
+                None => self.get_round_color(),
             };
 
             let status_para = Paragraph::new(status_text.as_str())
@@ -893,6 +941,58 @@ impl MpcWalletComponent for DKGProgressComponent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn render(c: &mut DKGProgressComponent) -> String {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).expect("TestBackend");
+        terminal.draw(|f| c.view(f, f.area())).expect("draw");
+        let buf = terminal.backend().buffer();
+        let mut out = String::new();
+        for y in 0..buf.area().height {
+            for x in 0..buf.area().width {
+                out.push_str(buf.cell((x, y)).map(|c| c.symbol()).unwrap_or(" "));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    /// FROST done, ECDSA waiting for this device's primes: the screen says
+    /// so (with the generator's elapsed time) instead of "DKG complete".
+    #[test]
+    fn waiting_for_primes_is_shown_on_the_dkg_screen() {
+        let mut c = DKGProgressComponent::new("s".into(), 3, 2);
+        c.set_websocket_connected(true);
+        c.set_round(DKGRound::Complete);
+        c.set_ecdsa(
+            Some(DkgPhase::WaitingForPrimes),
+            PrimeStatus::Generating { elapsed_secs: 72 },
+        );
+        let screen = render(&mut c);
+        assert!(
+            screen.contains("Ethereum key (ECDSA): waiting for this device's safe primes"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("preparing safe primes (1m 12s, usually 1-3 min)"),
+            "{screen}"
+        );
+        assert!(!screen.contains("DKG complete"), "{screen}");
+        assert!(screen.contains("Progress: 90%"), "{screen}");
+    }
+
+    #[test]
+    fn ecdsa_aux_info_phase_is_shown() {
+        let mut c = DKGProgressComponent::new("s".into(), 3, 2);
+        c.set_round(DKGRound::Complete);
+        c.set_ecdsa(Some(DkgPhase::AuxInfo), PrimeStatus::Idle);
+        let screen = render(&mut c);
+        assert!(
+            screen.contains("Ethereum key (ECDSA): aux info"),
+            "{screen}"
+        );
+    }
 
     #[test]
     fn dkg_expects_total_minus_one_others() {

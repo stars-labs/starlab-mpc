@@ -44,6 +44,9 @@ pub struct ElmApp<C: frost_core::Ciphersuite> {
 
     /// Whether the app should quit
     should_quit: bool,
+
+    /// Last time the idle loop polled the safe-prime generator.
+    last_primes_poll: std::time::Instant,
 }
 
 impl<C: frost_core::Ciphersuite + Send + Sync + 'static> ElmApp<C>
@@ -90,6 +93,7 @@ where
             message_rx,
             app_state,
             should_quit: false,
+            last_primes_poll: std::time::Instant::now(),
         };
 
         // Mount initial components
@@ -123,6 +127,7 @@ where
                 // Create main menu with actual wallet count
                 let wallet_count = self.model.wallet_state.wallet_groups().len();
                 let mut main_menu = MainMenu::with_wallet_count(wallet_count);
+                main_menu.set_ecdsa_setup(self.model.wallet_state.ecdsa_setup);
 
                 // Set the selected index from the model
                 let selected = self.model.ui_state.selected_indices
@@ -366,6 +371,10 @@ where
 
                 // Update WebSocket connection status
                 dkg_progress.set_websocket_connected(self.model.network_state.connected);
+                dkg_progress.set_ecdsa(
+                    self.model.wallet_state.ecdsa_dkg_phase,
+                    self.model.wallet_state.ecdsa_setup,
+                );
 
                 // Add participants from active session if available (excluding self)
                 if let Some(ref session) = self.model.active_session {
@@ -549,6 +558,12 @@ where
                         _ => None,
                     })
                     .or_else(|| {
+                        // Initiator: the chain of the account it signs for.
+                        let id = self.model.wallet_state.signing_wallet_id.as_deref()?;
+                        starlab_core::accounts::parse_child_wallet_id(id)
+                            .map(|(_, chain, _)| chain.to_string())
+                    })
+                    .or_else(|| {
                         let c = self.model.wallet_state.curve_type;
                         if c.is_empty() { None } else { Some(c.to_string()) }
                     });
@@ -693,6 +708,10 @@ where
                 // The main menu's items and Manage Wallets' rows come from
                 // the wallet list (e.g. a wallet just imported).
                 | Message::WalletsLoaded { .. }
+                // ECDSA setup line (main menu) and the DKG screen's
+                // Ethereum-key status.
+                | Message::EcdsaSetupStatus { .. }
+                | Message::EcdsaDkgProgress { .. }
                 // WalletDetail's accounts table derives from
                 // `ui_state.accounts_shown`, read at mount time.
                 | Message::AccountsShowMore
@@ -848,6 +867,7 @@ where
                     if self.model.ui_state.prune_expired(std::time::Instant::now()) {
                         self.render()?;
                     }
+                    self.poll_prime_status().await;
                     // Check for crossterm events with a proper timeout
                     if crossterm::event::poll(Duration::from_millis(10))? {
                         match crossterm::event::read() {
@@ -874,6 +894,42 @@ where
         }
 
         Ok(())
+    }
+
+    /// Once a second, pick up the safe-prime generator's state ("ECDSA
+    /// setup"). The elapsed time only matters on the screens that show it
+    /// (main menu, DKG progress); elsewhere only a change of state (e.g.
+    /// preparing → ready) is sent, so the loop doesn't remount every second.
+    async fn poll_prime_status(&mut self) {
+        use crate::protocal::ecdsa::PrimeStatus;
+        if self.last_primes_poll.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_primes_poll = std::time::Instant::now();
+        let Ok(state) = self.app_state.try_lock() else {
+            return; // busy — next second
+        };
+        let status = state.ecdsa.primes.status();
+        drop(state);
+        let current = self.model.wallet_state.ecdsa_setup;
+        if status == current {
+            return;
+        }
+        let shown = matches!(
+            self.model.current_screen,
+            Screen::MainMenu | Screen::Welcome | Screen::DKGProgress { .. }
+        );
+        let same_kind = matches!(
+            (status, current),
+            (PrimeStatus::Generating { .. }, PrimeStatus::Generating { .. })
+        );
+        if shown || !same_kind {
+            self.process_message(Message::EcdsaSetupStatus { status })
+                .await;
+            if let Err(e) = self.render() {
+                error!("Failed to render after ECDSA status update: {}", e);
+            }
+        }
     }
 
     /// Handle terminal events

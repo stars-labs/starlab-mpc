@@ -21,6 +21,8 @@ pub struct MainMenu {
     selected: usize,
     focused: bool,
     wallet_count: usize,
+    /// The safe-prime generator's state ("ECDSA setup" of the next wallet).
+    ecdsa_setup: crate::protocal::ecdsa::PrimeStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -125,6 +127,32 @@ impl MainMenu {
             selected: 0,
             focused: false,
             wallet_count,
+            ecdsa_setup: crate::protocal::ecdsa::PrimeStatus::default(),
+        }
+    }
+
+    /// Mirror `wallet_state.ecdsa_setup` at mount time.
+    pub fn set_ecdsa_setup(&mut self, status: crate::protocal::ecdsa::PrimeStatus) {
+        self.ecdsa_setup = status;
+    }
+
+    /// The header line about the Ethereum key setup, e.g. "⏳ ECDSA setup:
+    /// preparing safe primes (42s, usually 1-3 min) — needed before the
+    /// next wallet's Ethereum key".
+    fn ecdsa_setup_line(&self) -> (String, Color) {
+        use crate::protocal::ecdsa::PrimeStatus;
+        match self.ecdsa_setup {
+            PrimeStatus::Ready => (format!("✅ {}", self.ecdsa_setup.describe()), Color::Green),
+            PrimeStatus::InsecureTestFixed => {
+                (format!("⚠️ {}", self.ecdsa_setup.describe()), Color::Red)
+            }
+            PrimeStatus::Generating { .. } | PrimeStatus::Idle => (
+                format!(
+                    "⏳ {} — needed for the next wallet's Ethereum key",
+                    self.ecdsa_setup.describe()
+                ),
+                Color::Yellow,
+            ),
         }
     }
 
@@ -271,24 +299,18 @@ impl MainMenu {
         frame.render_widget(subtitle, header_chunks[1]);
 
         // Security notice
-        let security = Paragraph::new("🔐 FROST Protocol • Online & Offline (SD-card) Modes")
+        let security = Paragraph::new("🔐 FROST (Bitcoin, Solana) + threshold ECDSA (Ethereum)")
             .style(Style::default().fg(Color::Green))
             .alignment(Alignment::Center);
         frame.render_widget(security, header_chunks[2]);
 
-        // Connection status line. Placeholder: the real live
-        // connection state lives on AppState and would need to
-        // thread through MainMenu props to surface here. For now,
-        // deliberately render a neutral hint instead of the earlier
-        // hardcoded "Network: Ready • WebRTC: Available • Signal
-        // Server: Connected" text, which was wrong whenever the
-        // signal server was not yet reached.
-        let connection = Paragraph::new(
-            "🌐 Signal-server + WebRTC state shown per-screen during active ceremonies",
-        )
-        .style(Style::default().fg(Color::DarkGray))
-        .alignment(Alignment::Center);
-        frame.render_widget(connection, header_chunks[3]);
+        // Ethereum key setup: the background safe-prime generation a
+        // wallet DKG needs (a DKG started before it's ready waits for it).
+        let (setup, color) = self.ecdsa_setup_line();
+        let setup = Paragraph::new(setup)
+            .style(Style::default().fg(color))
+            .alignment(Alignment::Center);
+        frame.render_widget(setup, header_chunks[3]);
     }
 
     fn render_menu(&self, frame: &mut Frame, area: Rect) {
@@ -461,5 +483,31 @@ impl MpcWalletComponent for MainMenu {
 
     fn on_focus(&mut self, focused: bool) {
         self.focused = focused;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocal::ecdsa::PrimeStatus;
+
+    #[test]
+    fn ecdsa_setup_line_says_preparing_with_elapsed_time() {
+        let mut menu = MainMenu::with_wallet_count(0);
+        menu.set_ecdsa_setup(PrimeStatus::Generating { elapsed_secs: 42 });
+        let (line, color) = menu.ecdsa_setup_line();
+        assert_eq!(
+            line,
+            "⏳ ECDSA setup: preparing safe primes (42s, usually 1-3 min) — needed for the \
+             next wallet's Ethereum key"
+        );
+        assert_eq!(color, Color::Yellow);
+    }
+
+    #[test]
+    fn ecdsa_setup_line_says_ready() {
+        let mut menu = MainMenu::with_wallet_count(1);
+        menu.set_ecdsa_setup(PrimeStatus::Ready);
+        assert_eq!(menu.ecdsa_setup_line().0, "✅ ECDSA setup: ready");
     }
 }
