@@ -10,6 +10,10 @@ use starlab_core::{
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
+// Threshold ECDSA (Ethereum key): aux-info / keygen / signing ceremonies.
+mod ecdsa;
+pub use ecdsa::*;
+
 // Re-export specific FROST types needed by WASM
 use frost_ed25519::{
     Identifier as Ed25519Identifier,
