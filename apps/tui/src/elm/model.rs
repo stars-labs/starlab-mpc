@@ -275,6 +275,16 @@ pub struct WalletState {
     /// has landed. Tracks the second ceremony phase; shown on the
     /// progress screen as "✓✓" to differentiate from commit-only.
     pub signing_shares_received: std::collections::HashSet<String>,
+    /// The ECDSA part (Ethereum key) of the running wallet DKG, once the
+    /// FROST ceremonies are done; `None` otherwise. Shown on the DKG screen.
+    pub ecdsa_dkg_phase: Option<crate::protocal::ecdsa::DkgPhase>,
+    /// The background safe-prime generator ("ECDSA setup"), polled by the
+    /// app loop. Shown on the main menu and while a DKG waits for primes.
+    pub ecdsa_setup: crate::protocal::ecdsa::PrimeStatus,
+    /// The account-child wallet id (`{root}-{chain}-{n}`) of the running
+    /// signing ceremony: set when it starts (initiator or joiner) so the
+    /// result screen labels and verifies the right account.
+    pub signing_wallet_id: Option<String>,
 }
 
 /// Discriminator for the three flows that share `Screen::PasswordPrompt`.
@@ -395,6 +405,9 @@ impl std::fmt::Debug for WalletState {
             .field("password_focus_confirm", &self.password_focus_confirm)
             .field("password_error", &self.password_error)
             .field("password_prompt_purpose", &self.password_prompt_purpose)
+            .field("ecdsa_dkg_phase", &self.ecdsa_dkg_phase)
+            .field("ecdsa_setup", &self.ecdsa_setup)
+            .field("signing_wallet_id", &self.signing_wallet_id)
             .finish()
     }
 }

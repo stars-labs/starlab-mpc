@@ -21,7 +21,8 @@ pub mod signing;
 pub mod wire;
 pub mod worker;
 
-pub use primes::PrimeSupply;
+pub use primes::{PrimeStatus, PrimeSupply};
+pub use worker::DkgPhase;
 
 use crate::elm::message::Message;
 use crate::protocal::signal::WebRTCMessage;
@@ -163,15 +164,15 @@ pub(crate) fn spawn_transport<C>(
     });
 }
 
-/// Forward worker status notes to the UI as info toasts.
-pub(crate) fn spawn_status(mut rx: UnboundedReceiver<String>, ui_tx: UnboundedSender<Message>) {
+/// Forward the ECDSA DKG phases to the UI (the DKG screen shows them).
+pub(crate) fn spawn_status(
+    mut rx: UnboundedReceiver<worker::DkgPhase>,
+    ui_tx: UnboundedSender<Message>,
+) {
     tokio::spawn(async move {
-        while let Some(text) = rx.recv().await {
-            info!("ECDSA: {text}");
-            let _ = ui_tx.send(Message::ShowNotification {
-                text,
-                kind: crate::elm::model::NotificationKind::Info,
-            });
+        while let Some(phase) = rx.recv().await {
+            info!("ECDSA: {}", phase.describe());
+            let _ = ui_tx.send(Message::EcdsaDkgProgress { phase });
         }
     });
 }

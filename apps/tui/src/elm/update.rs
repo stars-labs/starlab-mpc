@@ -46,6 +46,7 @@ fn forget_finished_ceremony(model: &mut Model) {
 /// loaded is dropped for the new ceremony, so no wallet counts as unlocked.
 fn begin_dkg(model: &mut Model) {
     model.wallet_state.dkg_round = DKGRound::Initialization;
+    model.wallet_state.ecdsa_dkg_phase = None;
     model.wallet_state.wallet_unlocked_id = None;
 }
 
@@ -1800,6 +1801,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::DKGFailed { error } => {
             error!("DKG failed: {}", error);
+            model.wallet_state.ecdsa_dkg_phase = None;
             desktop_notify::send(
                 model.ui_state.desktop_notify,
                 "Wallet creation failed",
@@ -2095,6 +2097,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 &group_pubkey_hex[..16.min(group_pubkey_hex.len())],
                 addresses.len()
             );
+            model.wallet_state.ecdsa_dkg_phase = None;
 
             // Belt-and-suspenders: the Command consumed `password` already,
             // but there's no harm in clearing `pending_password` here too —
@@ -3190,6 +3193,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         // ============= Notifications =============
+        Message::EcdsaDkgProgress { phase } => {
+            model.wallet_state.ecdsa_dkg_phase = Some(phase);
+            None
+        }
+        Message::EcdsaSetupStatus { status } => {
+            model.wallet_state.ecdsa_setup = status;
+            None
+        }
         Message::ShowNotification { text, kind } => {
             model.ui_state.notify(kind, text);
             None
