@@ -16,9 +16,7 @@
 //! accepts ECDSA, so a wallet's Ethereum account is the ECDSA key's child at
 //! `m/44'/60'/0'/0/n` (plain additive child, no BIP-86 tweak) and its address
 //! is what [`account_addresses`] lists for that key. The FROST secp256k1
-//! (BIP-340) key keeps Bitcoin. Until the clients hold an ECDSA share (plan
-//! stages 2-3) the FROST secp256k1 key still lists an Ethereum row; that row
-//! is removed when they switch.
+//! (BIP-340) key is Bitcoin-only.
 
 pub use crate::ecdsa::ECDSA_CURVE;
 use crate::errors::{FrostError, Result};
@@ -34,7 +32,7 @@ pub fn chains_for_curve(curve: &str) -> &'static [(&'static str, &'static str)] 
     } else if curve == ECDSA_CURVE {
         &[("ethereum", "Ethereum")]
     } else {
-        &[("ethereum", "Ethereum"), ("bitcoin", "Bitcoin")]
+        &[("bitcoin", "Bitcoin")]
     }
 }
 
@@ -42,7 +40,8 @@ pub fn chains_for_curve(curve: &str) -> &'static [(&'static str, &'static str)] 
 /// [`chains_for_curve`]; accepts the same aliases as [`standard_path`].
 pub fn curve_for_chain(chain: &str) -> Option<&'static str> {
     match chain.to_ascii_lowercase().as_str() {
-        "ethereum" | "eth" | "bitcoin" | "btc" => Some("secp256k1"),
+        "ethereum" | "eth" => Some(ECDSA_CURVE),
+        "bitcoin" | "btc" => Some("secp256k1"),
         "solana" | "sol" | "sui" => Some("ed25519"),
         _ => None,
     }
@@ -88,17 +87,10 @@ pub fn standard_path(chain: &str, account: u32) -> Option<String> {
 /// canonical chains; unknown combinations error.
 pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Result<String> {
     match (chain.to_ascii_lowercase().as_str(), curve) {
-        ("ethereum" | "eth", "secp256k1" | ECDSA_CURVE) => {
-            // keccak256(uncompressed X‖Y)[12..]. FROST serializes compressed,
-            // so decompress first (hashing compressed bytes gives a WRONG
-            // address that doesn't correspond to the signing key).
-            use k256::elliptic_curve::sec1::ToSec1Point;
-            use sha3::{Digest, Keccak256};
+        ("ethereum" | "eth", ECDSA_CURVE) => {
             let pk = k256::PublicKey::from_sec1_bytes(pubkey_bytes)
                 .map_err(|e| FrostError::SerializationError(format!("secp pubkey: {e}")))?;
-            let point = pk.to_sec1_point(false);
-            let hash = Keccak256::digest(&point.as_bytes()[1..]);
-            Ok(format!("0x{}", hex::encode(&hash[12..32])))
+            Ok(ethereum_address(&pk))
         }
         ("bitcoin" | "btc", "secp256k1") => {
             // P2TR key-path (BIP-86): bech32m segwit-v1 of the x-only output
@@ -132,6 +124,48 @@ pub fn address_for_chain(chain: &str, curve: &str, pubkey_bytes: &[u8]) -> Resul
             "no address encoding for chain {chain:?} on curve {curve:?}"
         ))),
     }
+}
+
+/// `0x` + hex of `keccak256(uncompressed X‖Y)[12..]` (lowercase; decompress
+/// first — hashing the compressed encoding gives a wrong address).
+fn ethereum_address(pk: &k256::PublicKey) -> String {
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    use sha3::{Digest, Keccak256};
+    let point = pk.to_sec1_point(false);
+    let hash = Keccak256::digest(&point.as_bytes()[1..]);
+    format!("0x{}", hex::encode(&hash[12..32]))
+}
+
+/// `ecrecover`: the Ethereum address that produced `signature` over the
+/// 32-byte `prehash` (keccak256 digest — EIP-191 hash or a tx sighash).
+/// `signature` is `r ‖ s ‖ v` (65 bytes) with `v` ∈ {0, 1, 27, 28}.
+/// Exactly what an EVM node checks for an EOA signature.
+pub fn recover_ethereum_address(prehash: &[u8], signature: &[u8]) -> Result<String> {
+    use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+    let (rs, v) = match signature {
+        [rs @ .., v] if rs.len() == 64 => (rs, *v),
+        _ => {
+            return Err(FrostError::SerializationError(format!(
+                "an Ethereum signature is 65 bytes (r ‖ s ‖ v), got {}",
+                signature.len()
+            )));
+        }
+    };
+    let recovery_id = match v {
+        0 | 1 => v,
+        27 | 28 => v - 27,
+        other => {
+            return Err(FrostError::SerializationError(format!(
+                "bad recovery byte v = {other}"
+            )));
+        }
+    };
+    let sig = Signature::from_slice(rs)
+        .map_err(|e| FrostError::SerializationError(format!("signature: {e}")))?;
+    let recid = RecoveryId::from_byte(recovery_id).expect("0 or 1");
+    let key = VerifyingKey::recover_from_prehash(prehash, &sig, recid)
+        .map_err(|e| FrostError::SerializationError(format!("ecrecover: {e}")))?;
+    Ok(ethereum_address(&k256::PublicKey::from(key)))
 }
 
 /// Verify a BIP-340 signature against the output key a P2TR (`bc1p…`)
@@ -218,9 +252,30 @@ mod tests {
     fn ethereum_address_matches_canonical_vector() {
         let g = hex::decode(G_HEX).unwrap();
         assert_eq!(
-            address_for_chain("ethereum", "secp256k1", &g).unwrap(),
+            address_for_chain("ethereum", ECDSA_CURVE, &g).unwrap(),
             "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
         );
+        // The Taproot (FROST BIP-340) key has no Ethereum address.
+        assert!(address_for_chain("ethereum", "secp256k1", &g).is_err());
+    }
+
+    #[test]
+    fn ecrecover_returns_the_signers_address() {
+        use k256::ecdsa::SigningKey;
+        use sha3::{Digest, Keccak256};
+        // Private key 1 → the canonical G address above.
+        let sk = SigningKey::from_slice(&[[0u8; 31].as_slice(), &[1]].concat()).unwrap();
+        let prehash: [u8; 32] = Keccak256::digest(b"ecrecover").into();
+        let (sig, recid) = sk.sign_prehash_recoverable(&prehash);
+        let mut rsv = sig.to_bytes().to_vec();
+        rsv.push(27 + recid.to_byte());
+        let expected = "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf";
+        assert_eq!(recover_ethereum_address(&prehash, &rsv).unwrap(), expected);
+        rsv[64] -= 27; // y-parity form (typed transactions)
+        assert_eq!(recover_ethereum_address(&prehash, &rsv).unwrap(), expected);
+        assert!(recover_ethereum_address(&prehash, &rsv[..64]).is_err());
+        rsv[64] = 5;
+        assert!(recover_ethereum_address(&prehash, &rsv).is_err());
     }
 
     /// BIP-86 test vector m/86'/0'/0'/0/0 (cross-checked against the
@@ -367,7 +422,7 @@ mod tests {
 
     #[test]
     fn curve_for_chain_matches_chains_for_curve() {
-        for curve in ["secp256k1", "ed25519"] {
+        for curve in ["secp256k1", "ed25519", ECDSA_CURVE] {
             for (key, _) in chains_for_curve(curve) {
                 assert_eq!(curve_for_chain(key), Some(curve), "{key}");
             }
@@ -386,7 +441,10 @@ mod tests {
         let a1 = account_addresses("secp256k1", &group, 1).unwrap();
         assert_eq!(a0, a0b);
         assert_ne!(a0[0].2, a1[0].2);
-        assert_eq!(a0.len(), 2); // Ethereum + Bitcoin
-        assert!(a0[0].2.starts_with("0x") && a0[1].2.starts_with("bc1p"));
+        assert_eq!(a0.len(), 1); // Bitcoin only — Ethereum is the ECDSA key's
+        assert!(a0[0].2.starts_with("bc1p"));
+        let e0 = account_addresses(ECDSA_CURVE, &group, 0).unwrap();
+        assert_eq!(e0.len(), 1);
+        assert!(e0[0].2.starts_with("0x"));
     }
 }

@@ -256,10 +256,16 @@ mod tests {
     #[test]
     fn account_rows_cover_each_account_and_chain() {
         let mut c = WalletDetail::default();
-        c.set_wallet("w1".to_string(), vec![meta("secp256k1", SECP_G)]);
+        c.set_wallet(
+            "w1".to_string(),
+            vec![
+                meta(starlab_core::ecdsa::ECDSA_CURVE, SECP_G),
+                meta("secp256k1", SECP_G),
+            ],
+        );
         c.set_accounts_shown(2);
         let rows = c.account_rows();
-        // 2 accounts × 2 secp chains (Ethereum, Bitcoin)
+        // 2 accounts × (Ethereum from the ECDSA key, Bitcoin from Taproot)
         assert_eq!(rows.len(), 4);
         assert_eq!(rows[0][0], "0");
         assert_eq!(rows[0][1], "Ethereum");

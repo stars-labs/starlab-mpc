@@ -871,6 +871,28 @@ pub async fn wallet_derive(
     let mut children: Vec<(String, String, Vec<u8>)> = Vec::new();
 
     for meta in &metas {
+        // The ECDSA key (Ethereum) is never materialized per path — its
+        // shares sign at any path directly; list its address (public
+        // derivation) and leave it out of `--save`.
+        if meta.curve_type == starlab_core::ecdsa::ECDSA_CURVE {
+            let group = hex::decode(&meta.group_public_key)
+                .map_err(|e| anyhow::anyhow!("bad group key hex: {e}"))?;
+            let child = starlab_core::hd_derivation::derive_child_public_key_raw::<
+                frost_secp256k1_tr::Secp256K1Sha256TR,
+            >(&group, &parsed)
+            .map_err(|e| anyhow::anyhow!("derive {path}: {e}"))?;
+            for (key, display) in chains_for_curve(&meta.curve_type) {
+                let address = derive_address(&hex::encode(&child), &meta.curve_type, key);
+                if !address.is_empty() {
+                    addresses.push(crate::protocol::ChainAddress {
+                        chain: (*display).to_string(),
+                        address,
+                        path: Some(path.clone()),
+                    });
+                }
+            }
+            continue;
+        }
         let blob = ks
             .load_wallet_file_for_curve(&wallet_id, &meta.curve_type, &password)
             .map_err(|e| anyhow::anyhow!("unlock '{wallet_id}' ({}): {e}", meta.curve_type))?;
@@ -894,8 +916,11 @@ pub async fn wallet_derive(
         children.push((meta.curve_type.clone(), child_group_hex, child_blob));
     }
 
-    if save {
-        let m0 = &metas[0];
+    if save && !children.is_empty() {
+        let m0 = metas
+            .iter()
+            .find(|m| m.curve_type != starlab_core::ecdsa::ECDSA_CURVE)
+            .expect("a FROST share was derived");
         let ed = children.iter().find(|(c, _, _)| c == "ed25519");
         let secp = children.iter().find(|(c, _, _)| c == "secp256k1");
         match (ed, secp) {

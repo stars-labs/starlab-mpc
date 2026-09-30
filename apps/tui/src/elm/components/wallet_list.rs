@@ -377,23 +377,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn details_show_every_account0_address_of_a_secp256k1_wallet() {
-        let wallet = WalletMetadata::new(
-            "w1".to_string(),
-            "dev".to_string(),
-            "secp256k1".to_string(),
-            2,
-            3,
-            1,
-            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
-        );
-        let lines = details_lines(&wallet);
+    fn details_show_the_account0_address_of_each_curve_entry() {
+        let key = "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143";
+        let entry = |curve: &str| {
+            WalletMetadata::new(
+                "w1".to_string(),
+                "dev".to_string(),
+                curve.to_string(),
+                2,
+                3,
+                1,
+                key.to_string(),
+            )
+        };
+        // The ECDSA key's entry is the wallet's Ethereum account …
+        let lines = details_lines(&entry(starlab_core::ecdsa::ECDSA_CURVE));
         assert!(
             lines
                 .iter()
                 .any(|l| l.starts_with("Account 0 (Ethereum): 0x")),
             "{lines:?}"
         );
+        // … the FROST secp256k1 (Taproot) entry is Bitcoin only.
+        let lines = details_lines(&entry("secp256k1"));
+        assert!(!lines.iter().any(|l| l.contains("Ethereum")), "{lines:?}");
         assert!(
             lines
                 .iter()

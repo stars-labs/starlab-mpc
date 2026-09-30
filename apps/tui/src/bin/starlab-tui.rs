@@ -215,6 +215,9 @@ async fn run_elm_tui(
     // Initialize keystore in app state
     {
         let mut state = app_state.lock().await;
+        // Paillier safe primes for the Ethereum (threshold-ECDSA) key of the
+        // next wallet: generated in the background, ready by DKG time.
+        state.ecdsa.primes.start();
         match starlab_client::keystore::Keystore::new(&keystore_path, &device_id) {
             Ok(keystore) => {
                 state.keystore = Some(Arc::new(keystore));

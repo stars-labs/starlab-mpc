@@ -516,7 +516,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             encoding,
             password,
         } => {
-            let raw = if encoding.eq_ignore_ascii_case("hex") {
+            let prehash = encoding.eq_ignore_ascii_case("prehash");
+            let raw = if encoding.eq_ignore_ascii_case("hex") || prehash {
                 match hex::decode(message.trim().trim_start_matches("0x")) {
                     Ok(b) => b,
                     Err(e) => {
@@ -535,7 +536,24 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 &wallet_id,
                 sign_chain(model.wallet_state.curve_type, false),
             );
-            let (bytes_to_sign, raw_for_display) = signing_payload(&wallet_id, raw);
+            // `prehash`: an Ethereum account signs the given 32-byte keccak
+            // digest as-is (e.g. an EIP-1559 transaction sighash) instead of
+            // its EIP-191 personal_sign hash.
+            let (bytes_to_sign, raw_for_display) = if prehash {
+                if raw.len() != 32 || !crate::protocal::ecdsa::signing::is_ecdsa_wallet(&wallet_id)
+                {
+                    warn!(
+                        "HeadlessSign: encoding=prehash takes a 32-byte hash for an Ethereum \
+                         account (got {} bytes for {})",
+                        raw.len(),
+                        wallet_id
+                    );
+                    return None;
+                }
+                (raw, None)
+            } else {
+                signing_payload(&wallet_id, raw)
+            };
             model.wallet_state.pending_sign_message = Some(bytes_to_sign);
             model.wallet_state.pending_sign_wallet_id = Some(wallet_id);
             model.wallet_state.pending_sign_session_id = None;
@@ -3825,6 +3843,38 @@ mod tests {
             }
             other => panic!("expected SendMessage(SubmitPassword), got {:?}", other),
         }
+    }
+
+    /// `encoding = "prehash"`: an Ethereum account signs the given 32-byte
+    /// digest as-is (no EIP-191 wrapping); anything else is refused.
+    #[test]
+    fn headless_sign_prehash_signs_the_digest_as_is() {
+        let sign = |wallet_id: &str, message: String| {
+            let mut model = Model::new("dev".to_string());
+            model.wallet_state.curve_type = "secp256k1";
+            let cmd = update(
+                &mut model,
+                Message::HeadlessSign {
+                    wallet_id: wallet_id.to_string(),
+                    message,
+                    encoding: "prehash".to_string(),
+                    password: "pw".to_string(),
+                },
+            );
+            (cmd.is_some(), model.wallet_state.pending_sign_message)
+        };
+        let digest = "ab".repeat(32);
+        assert_eq!(
+            sign("w1", format!("0x{digest}")),
+            (true, Some(hex::decode(&digest).unwrap())),
+            "a root id signs as its Ethereum account 0"
+        );
+        assert_eq!(sign("w1", "abcd".into()), (false, None), "not 32 bytes");
+        assert_eq!(
+            sign("w1-bitcoin-0", digest),
+            (false, None),
+            "prehash is for Ethereum accounts"
+        );
     }
 
     #[test]

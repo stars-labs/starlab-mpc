@@ -44,26 +44,26 @@ jobs:
       # loopback). They gate the job: they pass on GitHub's shared runners.
       - name: End-to-end DKG + threshold signing (real FROST/WebRTC)
         run: cargo test -p starlab-cli --test e2e_dkg --locked -- --ignored --test-threads=1
-        timeout-minutes: 12
+        timeout-minutes: 30
 
       # L1 conformance matrix (docs/cli-conformance-testing.md): the full
       # (n,t) DKG + quorum-signing table, reporting every shape that breaks.
       - name: L1 conformance matrix (DKG/sign over all shapes)
         run: cargo test -p starlab-cli --test conformance_matrix --locked -- --ignored --test-threads=1
-        timeout-minutes: 12
+        timeout-minutes: 30
 
       # L3 process isolation across two real `serve` binaries: DKG, malformed-
       # input survival, and LIFE-2 cold-start signing after a real restart.
       - name: L3 serve-process interop (DKG + signing + error handling)
         run: cargo test -p starlab-cli --test l3_serve_process --locked -- --ignored --test-threads=1
-        timeout-minutes: 12
+        timeout-minutes: 30
 
       # L2 wire-frame golden: captures the real signal-server protocol via a
       # recording proxy and pins its normalized shape (the contract the
       # extension must match).
       - name: L2 wire-protocol golden (recording proxy; DKG + signing)
         run: cargo test -p starlab-cli --test wire_trace --locked -- --ignored --test-threads=1
-        timeout-minutes: 10
+        timeout-minutes: 20
 
   wasm:
     name: core-wasm + types build

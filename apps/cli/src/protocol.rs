@@ -274,7 +274,7 @@ pub fn schema_json() -> String {
             {"cmd": "list_sessions"},
             {"cmd": "create_wallet", "fields": {"name?": "string", "threshold": "u16", "total": "u16", "curve?": "secp256k1|ed25519", "password": "string"}},
             {"cmd": "join_session", "fields": {"session_id": "string", "password": "string", "label?": "string"}},
-            {"cmd": "sign", "fields": {"wallet_id": "string", "message": "string", "encoding?": "utf8|hex", "password": "string"}},
+            {"cmd": "sign", "fields": {"wallet_id": "string", "message": "string", "encoding?": "utf8|hex|prehash", "password": "string"}},
             {"cmd": "approve_signing", "fields": {"session_id": "string", "password": "string"}},
             {"cmd": "reshare", "fields": {"wallet_id": "string", "password": "string"}},
             {"cmd": "quit"},

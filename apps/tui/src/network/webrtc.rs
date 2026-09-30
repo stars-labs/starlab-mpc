@@ -162,6 +162,18 @@ pub async fn dispatch_data_channel_msg<C>(
             );
             return;
         }
+        // Threshold-ECDSA engine frames (protocol chunks + signing control):
+        // handled by the engine directly, never through the Elm loop.
+        if crate::protocal::ecdsa::is_ecdsa_frame(msg_text) {
+            crate::protocal::ecdsa::on_frame(
+                &app_state,
+                &device_id_recv,
+                msg_text,
+                ui_msg_tx.as_ref(),
+            )
+            .await;
+            return;
+        }
         // Unified-DKG frames (ed25519 + secp256k1 in one ceremony). Same
         // SimpleMessage transport as the single-curve DKG rounds, but the
         // payload is JSON (not base64) and routes to the unified driver.

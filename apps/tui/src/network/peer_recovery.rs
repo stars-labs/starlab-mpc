@@ -60,6 +60,7 @@ pub const CEREMONY_FRAME_PREFIXES: &[&str] = &[
 
 pub fn is_ceremony_frame(text: &str) -> bool {
     CEREMONY_FRAME_PREFIXES.iter().any(|p| text.starts_with(p))
+        || crate::protocal::ecdsa::is_ecdsa_frame(text)
 }
 
 /// The side with the smaller device id offers (same rule as the initial mesh

@@ -87,53 +87,21 @@ impl Bridge {
                     curve_type,
                     addresses,
                 } => {
-                    // Use the curve's canonical primary address (ed25519 →
-                    // Solana base58, secp256k1 → Ethereum) instead of
-                    // `addresses.first()`: the source `addresses` vec is built
-                    // by iterating a HashMap of compatible chains, so its order
-                    // is non-deterministic and could surface e.g. a Sui/Aptos
-                    // 0x-hex address for an ed25519 wallet (#43). Fall back to
-                    // the first entry only if canonical derivation fails.
-                    let address = {
-                        // Account 0's primary-chain address (BIP-44 model).
-                        let primary_chain = if curve_type == "ed25519" {
-                            "solana"
-                        } else {
-                            "ethereum"
-                        };
-                        let primary = hex::decode(group_pubkey_hex)
-                            .ok()
-                            .and_then(|g| {
-                                let path = starlab_core::accounts::standard_path(primary_chain, 0)?;
-                                let parsed = starlab_core::DerivationPath::parse(&path).ok()?;
-                                let child = if curve_type == "ed25519" {
-                                    starlab_core::derive_child_verifying_key_path::<
-                                        frost_ed25519::Ed25519Sha512,
-                                    >(&g, &parsed)
-                                    .ok()?
-                                } else {
-                                    starlab_core::derive_child_verifying_key_path::<
-                                        frost_secp256k1_tr::Secp256K1Sha256TR,
-                                    >(&g, &parsed)
-                                    .ok()?
-                                };
-                                starlab_core::accounts::address_for_chain(
-                                    primary_chain,
-                                    curve_type,
-                                    &child,
-                                )
-                                .ok()
-                            })
-                            .unwrap_or_default();
-                        if primary.is_empty() {
-                            addresses
-                                .first()
-                                .map(|(_chain, addr)| addr.clone())
-                                .unwrap_or_default()
-                        } else {
-                            primary
-                        }
+                    // Account 0's primary-chain address (BIP-44 model):
+                    // Solana for an ed25519 wallet, else Ethereum (the ECDSA
+                    // key's) — picked by chain name, never by position (#43:
+                    // a Sui 0x address must not stand in for Solana).
+                    let primary = if curve_type == "ed25519" {
+                        "Solana"
+                    } else {
+                        "Ethereum"
                     };
+                    let address = addresses
+                        .iter()
+                        .find(|(chain, _)| chain.eq_ignore_ascii_case(primary))
+                        .or_else(|| addresses.first())
+                        .map(|(_, addr)| addr.clone())
+                        .unwrap_or_default();
                     events.push(CliEvent::DkgComplete {
                         correlates: None, // the serve layer stamps the create-cmd id
                         wallet_id: wallet_id.clone(),
@@ -518,10 +486,12 @@ mod tests {
     }
 
     #[test]
-    fn derives_ethereum_address_from_secp256k1_group_key() {
+    fn derives_ethereum_address_from_the_ecdsa_group_key_only() {
         // A real compressed secp256k1 group key from a DKG run.
         let key = "0207eb4473c42b74a8a3c72762af295c26fdd40dcaf14e2c65df89aeb6f89073cf";
-        let addr = derive_address(key, "secp256k1", "ethereum");
+        // The Taproot (FROST) key is Bitcoin-only.
+        assert_eq!(derive_address(key, "secp256k1", "ethereum"), "");
+        let addr = derive_address(key, starlab_core::ecdsa::ECDSA_CURVE, "ethereum");
         assert!(
             addr.starts_with("0x"),
             "expected 0x-prefixed eth address, got {addr}"
@@ -562,8 +532,8 @@ mod tests {
 
     #[test]
     fn unified_wallet_groups_into_one_entry_with_all_chains() {
-        // The unified DKG writes the SAME wallet id under ed25519/ and
-        // secp256k1/ — storage detail that must never leak as "two wallets".
+        // The unified DKG writes the SAME wallet id under ed25519/,
+        // secp256k1/ and secp256k1-ecdsa/ — storage detail that must never leak as "two wallets".
         // Generator points are valid keys for both curves.
         let secp_g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
         let ed_g = "5866666666666666666666666666666666666666666666666666666666666666";
@@ -587,10 +557,14 @@ mod tests {
             tags: None,
             description: None,
         };
-        let entries = wallet_entries(&[mk("ed25519", ed_g), mk("secp256k1", secp_g)]);
+        let entries = wallet_entries(&[
+            mk("ed25519", ed_g),
+            mk("secp256k1", secp_g),
+            mk(starlab_core::ecdsa::ECDSA_CURVE, secp_g),
+        ]);
         assert_eq!(entries.len(), 1, "one wallet, not one row per curve file");
         let e = &entries[0];
-        assert_eq!(e.curves, vec!["ed25519", "secp256k1"]);
+        assert_eq!(e.curves, vec!["ed25519", "secp256k1", "secp256k1-ecdsa"]);
         let chains: Vec<&str> = e.addresses.iter().map(|a| a.chain.as_str()).collect();
         assert!(chains.contains(&"Ethereum") && chains.contains(&"Bitcoin"));
         assert!(chains.contains(&"Solana") && chains.contains(&"Sui"));
@@ -615,7 +589,7 @@ mod tests {
         // Compressed secp256k1 G → the well-known address for privkey=1.
         let g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798";
         assert_eq!(
-            derive_address(g, "secp256k1", "ethereum").to_lowercase(),
+            derive_address(g, starlab_core::ecdsa::ECDSA_CURVE, "ethereum").to_lowercase(),
             "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf"
         );
     }
