@@ -35,16 +35,27 @@ pub enum PrimeStatus {
 
 impl PrimeStatus {
     /// One English status line, e.g. "ECDSA setup: preparing safe primes
-    /// (1m 12s, usually 1-3 min)".
+    /// (1m 12s so far, usually 1-5 min)".
     pub fn describe(&self) -> String {
         match self {
             Self::Idle => "ECDSA setup: not started".to_string(),
-            Self::Generating { elapsed_secs } => format!(
-                "ECDSA setup: preparing safe primes ({}, usually 1-3 min)",
-                format_elapsed(*elapsed_secs)
+            Self::Generating { .. } => format!(
+                "ECDSA setup: preparing safe primes ({})",
+                self.progress().unwrap_or_default()
             ),
             Self::Ready => "ECDSA setup: ready".to_string(),
             Self::InsecureTestFixed => "ECDSA setup: ready (INSECURE test primes)".to_string(),
+        }
+    }
+
+    /// While generating: "1m 12s so far, usually 1-5 min".
+    pub fn progress(&self) -> Option<String> {
+        match self {
+            Self::Generating { elapsed_secs } => Some(format!(
+                "{} so far, usually 1-5 min",
+                format_elapsed(*elapsed_secs)
+            )),
+            _ => None,
         }
     }
 
@@ -260,7 +271,7 @@ mod tests {
         assert_eq!(PrimeStatus::Ready.describe(), "ECDSA setup: ready");
         assert_eq!(
             PrimeStatus::Generating { elapsed_secs: 72 }.describe(),
-            "ECDSA setup: preparing safe primes (1m 12s, usually 1-3 min)"
+            "ECDSA setup: preparing safe primes (1m 12s so far, usually 1-5 min)"
         );
         assert_eq!(format_elapsed(9), "9s");
     }

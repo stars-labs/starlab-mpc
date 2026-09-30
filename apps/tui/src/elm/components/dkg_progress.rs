@@ -131,17 +131,22 @@ impl DKGProgressComponent {
     }
 
     /// The ECDSA status line, e.g. "⏳ Ethereum key (ECDSA): waiting for this
-    /// device's safe primes — preparing safe primes (1m 12s, usually 1-3 min)".
+    /// device's safe primes (1m 12s so far, usually 1-5 min)".
     fn ecdsa_status(&self) -> Option<String> {
         let (phase, setup) = self.ecdsa?;
-        Some(match phase {
-            DkgPhase::WaitingForPrimes => {
-                let setup = setup.describe();
-                let detail = setup.strip_prefix("ECDSA setup: ").unwrap_or(&setup);
-                format!("⏳ {} — {}", phase.describe(), detail)
+        Some(match (phase, setup.progress()) {
+            (DkgPhase::WaitingForPrimes, Some(progress)) => {
+                format!("⏳ {} ({progress})", phase.describe())
             }
+            (DkgPhase::WaitingForPrimes, None) => format!("⏳ {}", phase.describe()),
             _ => format!("🔄 {}", phase.describe()),
         })
+    }
+
+    /// Whether this is an Ethereum signing (threshold ECDSA: no FROST
+    /// commitment/share rounds to show).
+    fn is_ecdsa_signing(&self) -> bool {
+        matches!(&self.ceremony, Ceremony::Signing { chain: Some(c) } if c == "ethereum")
     }
 
     /// Override the default `Ceremony::Dkg` for this mount — used by
@@ -586,10 +591,17 @@ impl DKGProgressComponent {
         frame.render_widget(config_para, chunks[1]);
 
         // Current Round
+        let round_label = if self.ecdsa.is_some() {
+            "Ethereum key (ECDSA)".to_string()
+        } else if self.is_ecdsa_signing() {
+            "Threshold ECDSA signing".to_string()
+        } else {
+            format!("{:?}", self.current_round)
+        };
         let round_text = vec![Line::from(vec![
             Span::styled("Current Round: ", Style::default().fg(Color::Gray)),
             Span::styled(
-                format!("{:?}", self.current_round),
+                round_label,
                 Style::default()
                     .fg(self.get_round_color())
                     .add_modifier(Modifier::BOLD),
@@ -644,11 +656,18 @@ impl DKGProgressComponent {
     }
 
     fn render_progress_bar(&self, frame: &mut Frame, area: Rect) {
-        let ecdsa_label = self.ecdsa.map(|(phase, _)| match phase {
-            DkgPhase::WaitingForPrimes => "Ethereum key: waiting for safe primes...",
-            DkgPhase::AuxInfo => "Ethereum key: ECDSA aux info...",
-            DkgPhase::Keygen => "Ethereum key: ECDSA key generation...",
-        });
+        let ecdsa_label = self
+            .ecdsa
+            .map(|(phase, _)| match phase {
+                DkgPhase::WaitingForPrimes => "Ethereum key: waiting for safe primes...",
+                DkgPhase::AuxInfo => "Ethereum key: ECDSA aux info...",
+                DkgPhase::Keygen => "Ethereum key: ECDSA key generation...",
+            })
+            .or_else(|| {
+                (self.is_ecdsa_signing()
+                    && matches!(self.current_round, DKGRound::Round1 | DKGRound::Round2))
+                .then_some("Threshold ECDSA signing (Ethereum)...")
+            });
         let progress_label = format!(
             "Progress: {:.0}% - {}",
             self.progress_percentage,
@@ -805,6 +824,10 @@ impl DKGProgressComponent {
                                 self.mesh_ready_count, expected_other_participants
                             )
                         }
+                    }
+                    DKGRound::Round1 | DKGRound::Round2 if self.is_ecdsa_signing() => {
+                        "🔄 Threshold ECDSA signing with the co-signers (a few seconds)..."
+                            .to_string()
                     }
                     DKGRound::Round1 => {
                         "🔄 Round 1: Generating and broadcasting commitments...".to_string()
@@ -975,11 +998,28 @@ mod tests {
             "{screen}"
         );
         assert!(
-            screen.contains("preparing safe primes (1m 12s, usually 1-3 min)"),
+            screen.contains("safe primes (1m 12s so far, usually 1-5 min)"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Current Round: Ethereum key (ECDSA)"),
             "{screen}"
         );
         assert!(!screen.contains("DKG complete"), "{screen}");
         assert!(screen.contains("Progress: 90%"), "{screen}");
+    }
+
+    #[test]
+    fn ethereum_signing_names_threshold_ecdsa_not_frost_rounds() {
+        let mut c = DKGProgressComponent::new("s".into(), 3, 2);
+        c.set_websocket_connected(true);
+        c.set_ceremony(Ceremony::Signing {
+            chain: Some("ethereum".into()),
+        });
+        c.set_round(DKGRound::Round1);
+        let screen = render(&mut c);
+        assert!(screen.contains("Threshold ECDSA signing"), "{screen}");
+        assert!(!screen.contains("commitments"), "{screen}");
     }
 
     #[test]

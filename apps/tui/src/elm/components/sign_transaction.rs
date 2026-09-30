@@ -53,6 +53,8 @@ pub struct SignTransactionComponent {
     /// The account-0 address of the chosen chain, e.g.
     /// "Ethereum account 0: 0x…" (empty when the wallet isn't listed).
     account_line: String,
+    /// The wallet's display name (label, else id) for the title.
+    wallet_name: String,
     focused: bool,
 }
 
@@ -74,6 +76,10 @@ impl SignTransactionComponent {
         let chain = ws.chosen_sign_chain(&self.wallet_id);
         self.bitcoin = chain == Some("bitcoin");
         self.account_line = account_line(ws, &self.wallet_id, chain);
+        self.wallet_name = ws
+            .wallet_group(&self.wallet_id)
+            .map(|g| g.display_name().to_string())
+            .unwrap_or_else(|| self.wallet_id.clone());
 
         // Pull the signing key's group pubkey from the loaded wallet list
         // so the user has a visual cross-check that they're signing with
@@ -133,7 +139,7 @@ impl Component for SignTransactionComponent {
         use ratatui::style::{Color, Modifier, Style};
         use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 
-        let outer_title = format!(" 🖊️  Sign with {} ", self.wallet_id);
+        let outer_title = format!(" 🖊️  Sign with {} ", self.wallet_name);
         let outer = Block::default()
             .title(outer_title)
             .borders(Borders::ALL)

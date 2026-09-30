@@ -137,7 +137,7 @@ impl MainMenu {
     }
 
     /// The header line about the Ethereum key setup, e.g. "⏳ ECDSA setup:
-    /// preparing safe primes (42s, usually 1-3 min) — needed before the
+    /// preparing safe primes (42s so far, usually 1-5 min) — needed for the
     /// next wallet's Ethereum key".
     fn ecdsa_setup_line(&self) -> (String, Color) {
         use crate::protocal::ecdsa::PrimeStatus;
@@ -498,8 +498,8 @@ mod tests {
         let (line, color) = menu.ecdsa_setup_line();
         assert_eq!(
             line,
-            "⏳ ECDSA setup: preparing safe primes (42s, usually 1-3 min) — needed for the \
-             next wallet's Ethereum key"
+            "⏳ ECDSA setup: preparing safe primes (42s so far, usually 1-5 min) — needed for \
+             the next wallet's Ethereum key"
         );
         assert_eq!(color, Color::Yellow);
     }

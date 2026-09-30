@@ -546,22 +546,24 @@ where
                 // running curve type. Either way we surface
                 // *something* — "no chain shown" was the visible
                 // half of this bug report.
+                // The account being signed for names the chain exactly
+                // (`{root}-{chain}-{n}`); the announce's `blockchain` is the
+                // joiner's fallback until it has unlocked.
                 let chain = self
                     .model
-                    .active_session
-                    .as_ref()
-                    .and_then(|s| match &s.session_type {
-                        crate::protocal::signal::SessionType::Signing {
-                            blockchain,
-                            ..
-                        } => Some(blockchain.clone()),
-                        _ => None,
-                    })
+                    .wallet_state
+                    .signing_wallet_id
+                    .as_deref()
+                    .and_then(starlab_core::accounts::parse_child_wallet_id)
+                    .map(|(_, chain, _)| chain.to_string())
                     .or_else(|| {
-                        // Initiator: the chain of the account it signs for.
-                        let id = self.model.wallet_state.signing_wallet_id.as_deref()?;
-                        starlab_core::accounts::parse_child_wallet_id(id)
-                            .map(|(_, chain, _)| chain.to_string())
+                        self.model.active_session.as_ref().and_then(|s| match &s.session_type {
+                            crate::protocal::signal::SessionType::Signing {
+                                blockchain,
+                                ..
+                            } => Some(blockchain.clone()),
+                            _ => None,
+                        })
                     })
                     .or_else(|| {
                         let c = self.model.wallet_state.curve_type;
