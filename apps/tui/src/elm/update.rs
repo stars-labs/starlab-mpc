@@ -986,6 +986,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .as_ref()
                 .map(|s| s.session_id.clone())
                 .unwrap_or_else(|| "inline".to_string());
+            model.wallet_state.signing_wallet_id = Some(request.wallet_id.clone());
             // Stage 4: wipe any stale roster from a previous ceremony
             // before the new one starts recording commitments.
             model.wallet_state.signing_commitments_received.clear();
@@ -1013,11 +1014,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 signature.len()
             );
 
+            // The account the ceremony signed for (`{root}-{chain}-{n}`),
+            // recorded when it started; older fallbacks for safety.
             let wallet_id = model
                 .wallet_state
-                .last_finalized_wallet
-                .as_ref()
-                .map(|w| w.wallet_id.clone())
+                .signing_wallet_id
+                .take()
+                .or_else(|| {
+                    model
+                        .wallet_state
+                        .last_finalized_wallet
+                        .as_ref()
+                        .map(|w| w.wallet_id.clone())
+                })
                 .or_else(|| model.selected_wallet.clone())
                 .or_else(|| {
                     model
@@ -1048,6 +1057,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 None
             };
             let display_message = raw_message.unwrap_or_else(|| message.clone());
+            let (verified, verification) =
+                verify_account_signature(&model.wallet_state, &wallet_id, &message, &signature);
+            if !verified {
+                warn!("Signature for {wallet_id} did not verify: {verification}");
+            }
 
             model.wallet_state.last_completed_signature =
                 Some(crate::elm::model::CompletedSignatureInfo {
@@ -1056,11 +1070,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     message: display_message,
                     signed_hash,
                     signature,
-                    // `protocal::signing::try_aggregate` gates the emit
-                    // on a successful verify — see the guard there.
-                    // If that ever changes we'll need to re-verify
-                    // here.
-                    verified: true,
+                    verified,
+                    verification,
                 });
 
             model.ui_state.notify(
@@ -1094,6 +1105,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::SigningFailed { request_id, error } => {
             error!("Signing ceremony {} failed: {}", request_id, error);
+            model.wallet_state.signing_wallet_id = None;
             desktop_notify::send(model.ui_state.desktop_notify, "Signing failed", &error);
             model.ui_state.modal = Some(Modal::Error {
                 title: "Signing Failed".to_string(),
@@ -1178,7 +1190,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             None
         }
         Message::SignToggleChain => {
-            if model.wallet_state.curve_type == "secp256k1" {
+            let offers_choice = match &model.current_screen {
+                Screen::SignTransaction { wallet_id } => {
+                    model.wallet_state.sign_chains_for(wallet_id).len() > 1
+                }
+                _ => false,
+            };
+            if offers_choice {
                 model.wallet_state.sign_on_bitcoin = !model.wallet_state.sign_on_bitcoin;
                 model.wallet_state.sign_error = None;
             }
@@ -1216,14 +1234,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // "BIP-44 all the way": the UI navigates with the ROOT wallet id,
             // but signing must use an ACCOUNT key — map to the account-0
-            // child of the chosen chain (Tab picks Ethereum or Bitcoin for a
-            // secp256k1 wallet). (No per-account selection exists on the
-            // accounts table yet; when it does, the selected index slots in
-            // here.) The child share is materialized on demand at unlock time.
-            let chain = sign_chain(
-                model.wallet_state.curve_type,
-                model.wallet_state.sign_on_bitcoin,
-            );
+            // child of the chosen chain (Tab picks Ethereum [ECDSA key] or
+            // Bitcoin [Taproot key] for a wallet with both). (No per-account
+            // selection exists on the accounts table yet; when it does, the
+            // selected index slots in here.) A FROST child share is
+            // materialized on demand at unlock time; Ethereum signs with the
+            // root's ECDSA share at the account path.
+            let Some(chain) = model.wallet_state.chosen_sign_chain(&wallet_id) else {
+                model.wallet_state.sign_error = Some(format!(
+                    "This wallet has no {} key to sign with on this device",
+                    model.wallet_state.curve_type
+                ));
+                return None;
+            };
             let wallet_id = account_signing_wallet_id(&wallet_id, chain);
 
             // Bitcoin signs a BIP-341 sighash the user supplies as hex;
@@ -1388,6 +1411,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     model.push_screen(Screen::SigningProgress {
                         request_id: sid.clone(),
                     });
+                    model.wallet_state.signing_wallet_id = Some(wallet_id.clone());
                     let proposer_id = pending_proposer.unwrap_or_else(|| {
                         warn!(
                             "WalletUnlocked joiner path with no pending_sign_proposer_id — \
@@ -1455,7 +1479,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::WalletsLoaded { wallets } => {
             info!("Loaded {} wallets", wallets.len());
-            let old_count = model.wallet_state.wallets.len();
+            let old_count = model.wallet_state.wallet_groups().len();
             // Materialized HD account children carry their derivation path
             // as the label ("m/44'/…"). They're an implementation detail of
             // signing — listing them would double-derive (account 0 OF an
@@ -1468,12 +1492,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // If on main menu and wallet count changed, force remount to update menu
             if matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
-                && old_count != model.wallet_state.wallets.len()
+                && old_count != model.wallet_state.wallet_groups().len()
             {
                 info!(
                     "Wallet count changed from {} to {}, forcing menu update",
                     old_count,
-                    model.wallet_state.wallets.len()
+                    model.wallet_state.wallet_groups().len()
                 );
                 Some(Command::SendMessage(Message::Refresh))
             } else {
@@ -2625,7 +2649,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     info!("JoinSession selection moved down to: {}", current_idx);
                 }
                 Screen::ManageWallets => {
-                    let wallet_count = model.wallet_state.wallets.len();
+                    let wallet_count = model.wallet_state.wallet_groups().len();
                     if wallet_count == 0 {
                         return None;
                     }
@@ -3136,8 +3160,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         .get(&crate::elm::model::ComponentId::WalletList)
                         .copied()
                         .unwrap_or(0);
-                    if let Some(wallet) = model.wallet_state.wallets.get(selected) {
-                        let wallet_id = wallet.session_id.clone();
+                    if let Some(wallet) = model.wallet_state.wallet_group_at(selected) {
+                        let wallet_id = wallet.id().to_string();
                         info!(
                             "ManageWallets SelectItem[{}] → SignTransaction({})",
                             selected, wallet_id
@@ -3150,7 +3174,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         warn!(
                             "ManageWallets SelectItem[{}] but list only has {} wallets",
                             selected,
-                            model.wallet_state.wallets.len()
+                            model.wallet_state.wallet_groups().len()
                         );
                     }
                     None
@@ -3535,6 +3559,69 @@ fn expand_home(path: &str) -> std::path::PathBuf {
     }
 }
 
+/// Check a finished signature over `signed` (the bytes the ceremony signed:
+/// the EIP-191 hash / tx prehash for Ethereum, the sighash for Bitcoin)
+/// against the account `wallet_id` names, from public data only:
+/// Ethereum → `ecrecover` must give the account address (exactly what an
+/// EVM node checks); Bitcoin → BIP-340 under the account's P2TR output key.
+/// Other chains rely on the group-key check FROST aggregation ran before
+/// emitting `SigningComplete`.
+fn verify_account_signature(
+    ws: &crate::elm::model::WalletState,
+    wallet_id: &str,
+    signed: &[u8],
+    signature: &[u8],
+) -> (bool, String) {
+    let Some((root, chain, account)) = starlab_core::accounts::parse_child_wallet_id(wallet_id)
+    else {
+        return (
+            true,
+            "checked under the group key by the ceremony".to_string(),
+        );
+    };
+    if !matches!(chain, "ethereum" | "bitcoin") {
+        return (
+            true,
+            "checked under the group key by the ceremony".to_string(),
+        );
+    }
+    let expected = ws.wallet_group(root).and_then(|group| {
+        group
+            .accounts(account)
+            .into_iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case(chain))
+            .map(|(_, _, address)| address)
+    });
+    let Some(expected) = expected else {
+        return (
+            false,
+            format!("cannot verify: no {chain} account {account} for wallet {root} on this device"),
+        );
+    };
+    if chain == "ethereum" {
+        match starlab_core::accounts::recover_ethereum_address(signed, signature) {
+            Ok(recovered) if recovered.eq_ignore_ascii_case(&expected) => (
+                true,
+                format!("ecrecover gives {recovered} = Ethereum account {account}"),
+            ),
+            Ok(recovered) => (
+                false,
+                format!("ecrecover gives {recovered}, expected {expected}"),
+            ),
+            Err(e) => (false, format!("ecrecover failed: {e}")),
+        }
+    } else {
+        match starlab_core::accounts::verify_taproot_signature(&expected, signed, signature) {
+            Ok(true) => (
+                true,
+                format!("BIP-340 valid for {expected} (Bitcoin account {account})"),
+            ),
+            Ok(false) => (false, format!("BIP-340 check failed for {expected}")),
+            Err(e) => (false, format!("BIP-340 check failed: {e}")),
+        }
+    }
+}
+
 /// The chain a signature is made for: a secp256k1 wallet signs as its
 /// Ethereum account, or its Bitcoin account when chosen; ed25519 is Solana.
 fn sign_chain(curve_type: &str, bitcoin: bool) -> &'static str {
@@ -3685,6 +3772,99 @@ fn preview_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A secp256k1 wallet as Stage 2 persists it: Taproot + ECDSA entries.
+    fn ecdsa_wallet(model: &mut Model, id: &str) {
+        let key = "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143";
+        model.wallet_state.wallets = ["secp256k1", starlab_core::ecdsa::ECDSA_CURVE]
+            .into_iter()
+            .map(|curve| {
+                crate::keystore::WalletMetadata::new(
+                    id.to_string(),
+                    "dev".to_string(),
+                    curve.to_string(),
+                    2,
+                    3,
+                    1,
+                    key.to_string(),
+                )
+            })
+            .collect();
+    }
+
+    /// `r ‖ s ‖ v` by a single (non-threshold) key over `hash`.
+    fn foreign_signature(hash: &[u8; 32]) -> Vec<u8> {
+        let key = k256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let (sig, recid) = key.sign_prehash_recoverable(hash);
+        let mut out = sig.to_bytes().to_vec();
+        out.push(27 + recid.to_byte());
+        out
+    }
+
+    #[test]
+    fn ethereum_signature_from_another_key_fails_ecrecover_check() {
+        let mut model = Model::new("dev".to_string());
+        ecdsa_wallet(&mut model, "w");
+        let hash = [0x42u8; 32];
+        let (ok, detail) = verify_account_signature(
+            &model.wallet_state,
+            "w-ethereum-0",
+            &hash,
+            &foreign_signature(&hash),
+        );
+        assert!(!ok);
+        assert!(detail.starts_with("ecrecover gives 0x"), "{detail}");
+        assert!(detail.contains("expected 0x"), "{detail}");
+    }
+
+    #[test]
+    fn ethereum_signature_for_an_unknown_wallet_is_not_claimed_verified() {
+        let model = Model::new("dev".to_string());
+        let hash = [0x42u8; 32];
+        let (ok, detail) = verify_account_signature(
+            &model.wallet_state,
+            "w-ethereum-0",
+            &hash,
+            &foreign_signature(&hash),
+        );
+        assert!(!ok);
+        assert!(detail.starts_with("cannot verify"), "{detail}");
+    }
+
+    /// The result screen of an ECDSA signing names the Ethereum account
+    /// (recorded when the signing started), not the DKG'd root wallet.
+    #[test]
+    fn signing_complete_labels_the_account_the_ceremony_signed_for() {
+        let mut model = Model::new("dev".to_string());
+        ecdsa_wallet(&mut model, "w");
+        update(
+            &mut model,
+            Message::InitiateSigning {
+                request: crate::elm::message::SigningRequest {
+                    wallet_id: "w-ethereum-0".to_string(),
+                    transaction_data: vec![0x42; 32],
+                    chain: "secp256k1".to_string(),
+                    metadata: None,
+                    raw_message: None,
+                },
+            },
+        );
+        let hash = [0x42u8; 32];
+        update(
+            &mut model,
+            Message::SigningComplete {
+                request_id: "inline".to_string(),
+                message: hash.to_vec(),
+                signature: foreign_signature(&hash),
+            },
+        );
+        let info = model
+            .wallet_state
+            .last_completed_signature
+            .expect("snapshot");
+        assert_eq!(info.wallet_id, "w-ethereum-0");
+        assert!(!info.verified, "a foreign key's signature must not verify");
+    }
 
     use crossterm::event::KeyEvent;
 

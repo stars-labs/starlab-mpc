@@ -121,7 +121,7 @@ where
         match self.model.current_screen {
             Screen::Welcome | Screen::MainMenu => {
                 // Create main menu with actual wallet count
-                let wallet_count = self.model.wallet_state.wallets.len();
+                let wallet_count = self.model.wallet_state.wallet_groups().len();
                 let mut main_menu = MainMenu::with_wallet_count(wallet_count);
 
                 // Set the selected index from the model
@@ -142,7 +142,7 @@ where
             }
             Screen::ManageWallets => {
                 let mut wallet_list = WalletList::new();
-                wallet_list.set_wallets(self.model.wallet_state.wallets.clone());
+                wallet_list.set_wallets(self.model.wallet_state.wallet_groups());
                 // Re-apply the row selection from model state so
                 // ScrollUp/ScrollDown mutations (which update
                 // `selected_indices[WalletList]`) are reflected after
@@ -168,14 +168,12 @@ where
                 // Hand over every curve entry for this wallet id — the
                 // unified DKG stores the same id once per curve and the
                 // accounts table must cover both curves' chains.
-                let entries: Vec<_> = self
+                let entries = self
                     .model
                     .wallet_state
-                    .wallets
-                    .iter()
-                    .filter(|w| &w.session_id == wallet_id)
-                    .cloned()
-                    .collect();
+                    .wallet_group(wallet_id)
+                    .map(|g| g.entries().to_vec())
+                    .unwrap_or_default();
                 detail.set_wallet(wallet_id.clone(), entries);
                 detail.set_accounts_shown(self.model.ui_state.accounts_shown);
                 // remount, not mount: '+'/'-' trigger a component update
@@ -625,7 +623,7 @@ where
             }
             _ => {
                 // Default to main menu for unimplemented screens
-                let wallet_count = self.model.wallet_state.wallets.len();
+                let wallet_count = self.model.wallet_state.wallet_groups().len();
                 self.app.mount(
                     Id::MainMenu,
                     Box::new(MainMenu::with_wallet_count(wallet_count)),
@@ -1134,10 +1132,9 @@ where
                     return self
                         .model
                         .wallet_state
-                        .wallets
-                        .get(selected)
+                        .wallet_group_at(selected)
                         .map(|w| Message::ExportWallet {
-                            wallet_id: w.session_id.clone(),
+                            wallet_id: w.id().to_string(),
                         });
                 }
                 KeyCode::Char('i') => return Some(Message::ImportWallet),

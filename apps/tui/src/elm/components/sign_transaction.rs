@@ -46,9 +46,13 @@ pub struct SignTransactionComponent {
     group_pubkey_short: String,
     message_preview: String,
     error: Option<String>,
-    /// A secp256k1 wallet can sign as its Ethereum or Bitcoin account.
+    /// A wallet with an ECDSA and a Taproot key can sign as its Ethereum
+    /// or Bitcoin account (Tab switches).
     chain_choice: bool,
     bitcoin: bool,
+    /// The account-0 address of the chosen chain, e.g.
+    /// "Ethereum account 0: 0x…" (empty when the wallet isn't listed).
+    account_line: String,
     focused: bool,
 }
 
@@ -66,16 +70,24 @@ impl SignTransactionComponent {
     pub fn set_from_model(&mut self, ws: &WalletState) {
         self.message_preview = ws.sign_message_draft.clone();
         self.error = ws.sign_error.clone();
-        self.chain_choice = ws.curve_type == "secp256k1";
-        self.bitcoin = self.chain_choice && ws.sign_on_bitcoin;
+        self.chain_choice = ws.sign_chains_for(&self.wallet_id).len() > 1;
+        let chain = ws.chosen_sign_chain(&self.wallet_id);
+        self.bitcoin = chain == Some("bitcoin");
+        self.account_line = account_line(ws, &self.wallet_id, chain);
 
-        // Pull the wallet's group pubkey from the loaded wallet list so
-        // the user has a visual cross-check that they're signing with
-        // the right wallet (paranoid but cheap).
-        self.group_pubkey_short = ws
-            .wallets
-            .iter()
-            .find(|w| w.session_id == self.wallet_id)
+        // Pull the signing key's group pubkey from the loaded wallet list
+        // so the user has a visual cross-check that they're signing with
+        // the right wallet (paranoid but cheap). Ethereum signs with the
+        // wallet's ECDSA key, Bitcoin with its Taproot key.
+        let curve = match chain {
+            Some("ethereum") => starlab_core::ecdsa::ECDSA_CURVE,
+            Some("bitcoin") => "secp256k1",
+            _ => "ed25519",
+        };
+        let group = ws.wallet_group(&self.wallet_id);
+        self.group_pubkey_short = group
+            .as_ref()
+            .and_then(|g| g.entry(curve).or_else(|| g.entries().first()))
             .map(|w| {
                 let k = &w.group_public_key;
                 if k.len() > 24 {
@@ -87,7 +99,8 @@ impl SignTransactionComponent {
             .unwrap_or_else(|| "(not in cached list)".to_string());
     }
 
-    /// "Chain: Ethereum · Tab: Bitcoin" for a wallet with a chain choice.
+    /// "Chain: Ethereum (ECDSA)    Tab: switch to Bitcoin" for a wallet with
+    /// a chain choice.
     fn chain_line(&self) -> Option<String> {
         if !self.chain_choice {
             return None;
@@ -95,10 +108,24 @@ impl SignTransactionComponent {
         let (current, other) = if self.bitcoin {
             ("Bitcoin (Taproot)", "Ethereum")
         } else {
-            ("Ethereum", "Bitcoin")
+            ("Ethereum (ECDSA)", "Bitcoin")
         };
         Some(format!("Chain: {current}    Tab: switch to {other}"))
     }
+}
+
+/// "Ethereum account 0: 0x…" for the chosen chain (public-only derivation
+/// from the wallet's key on that chain); empty if not derivable.
+fn account_line(ws: &WalletState, wallet_id: &str, chain: Option<&str>) -> String {
+    let (Some(group), Some(chain)) = (ws.wallet_group(wallet_id), chain) else {
+        return String::new();
+    };
+    group
+        .accounts(0)
+        .into_iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(chain))
+        .map(|(name, _, address)| format!("{name} account 0: {address}"))
+        .unwrap_or_default()
 }
 
 impl Component for SignTransactionComponent {
@@ -119,7 +146,7 @@ impl Component for SignTransactionComponent {
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(2), // group key line
+                Constraint::Length(3), // group key, account, chain lines
                 Constraint::Length(1), // spacer
                 Constraint::Length(5), // message input
                 Constraint::Length(2), // error (if any)
@@ -129,6 +156,10 @@ impl Component for SignTransactionComponent {
 
         // Group-key cross-check.
         let mut header = format!("Group key: {}", self.group_pubkey_short);
+        if !self.account_line.is_empty() {
+            header.push('\n');
+            header.push_str(&self.account_line);
+        }
         if let Some(chain) = self.chain_line() {
             header.push('\n');
             header.push_str(&chain);
@@ -259,6 +290,56 @@ mod tests {
             Some("Chain: Bitcoin (Taproot)    Tab: switch to Ethereum")
         );
         assert_eq!(c.error.as_deref(), Some("bad sighash"));
+    }
+
+    fn entry(curve: &str) -> crate::keystore::WalletMetadata {
+        crate::keystore::WalletMetadata::new(
+            "w".to_string(),
+            "dev".to_string(),
+            curve.to_string(),
+            2,
+            3,
+            1,
+            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        )
+    }
+
+    /// Ethereum signs with the wallet's ECDSA key: the screen names the
+    /// scheme and shows that key's account address.
+    #[test]
+    fn ethereum_signs_with_the_ecdsa_key_and_shows_its_address() {
+        let ws = WalletState {
+            curve_type: "secp256k1",
+            wallets: vec![entry("secp256k1"), entry(starlab_core::ecdsa::ECDSA_CURVE)],
+            ..Default::default()
+        };
+        let mut c = SignTransactionComponent::new("w");
+        c.set_from_model(&ws);
+        assert_eq!(
+            c.chain_line().as_deref(),
+            Some("Chain: Ethereum (ECDSA)    Tab: switch to Bitcoin")
+        );
+        assert!(
+            c.account_line.starts_with("Ethereum account 0: 0x"),
+            "{}",
+            c.account_line
+        );
+    }
+
+    /// A wallet without an ECDSA key (e.g. only its Taproot file imported)
+    /// can only sign as Bitcoin: no Tab choice.
+    #[test]
+    fn taproot_only_wallet_signs_bitcoin_without_a_choice() {
+        let ws = WalletState {
+            curve_type: "secp256k1",
+            wallets: vec![entry("secp256k1")],
+            ..Default::default()
+        };
+        let mut c = SignTransactionComponent::new("w");
+        c.set_from_model(&ws);
+        assert!(c.chain_line().is_none());
+        assert!(c.bitcoin);
+        assert!(c.account_line.starts_with("Bitcoin account 0: bc1p"));
     }
 
     #[test]
