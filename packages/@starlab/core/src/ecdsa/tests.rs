@@ -430,3 +430,19 @@ fn replayed_message_with_rewritten_header_aborts_the_protocol() {
         .expect("party 0 must reject the replayed messages");
     assert!(err.contains("protocol aborted"), "{err}");
 }
+
+#[test]
+fn primes_join_from_their_parts() {
+    let set = fixture_primes().remove(0);
+    let parts: Vec<SafePrime> = set.primes_ref().to_vec();
+    let joined = primes_from_parts(parts.clone()).expect("four fixture primes");
+    assert_eq!(joined.primes_ref(), set.primes_ref());
+    // The serde form of a part is what a wasm worker hands back.
+    let json = serde_json::to_string(&parts[0]).unwrap();
+    assert!(json.starts_with(r#"{"radix":16,"value":""#), "{json}");
+
+    assert!(primes_from_parts(parts[..3].to_vec()).is_err(), "3 parts");
+    let mut small = parts;
+    small[3] = SafePrime::from(23u32);
+    assert!(primes_from_parts(small).is_err(), "undersized prime");
+}

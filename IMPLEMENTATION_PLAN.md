@@ -174,7 +174,42 @@ works.
 **Success Criteria**: extension ↔ CLI interop (2-of-3, 3-of-3) green in CI.
 **Tests**: bun unit tests (real WASM); interop spec: CLI + extension ECDSA
 DKG, co-sign, and extension-initiated sign.
-**Status**: Not Started
+**Status**: In Progress — engine PR #134 (`feat/ecdsa-wasm` → this branch),
+extension draft PR stars-labs/starlab-wallet#83 (merge together with
+`feat/ecdsa-cggmp24` → main).
+
+What it does:
+- **core-wasm**: `EcdsaAuxInfo` / `EcdsaKeygen` / `EcdsaSigning` over
+  `EcdsaCeremony` (`receive(senderIndex, payload)`, `proceed()` → output |
+  undefined, `take_outgoing()` → `[{recipient: "broadcast" | index,
+  payload}]`); signing output hex `r ‖ s ‖ v` (v = 27/28, engine parity);
+  `ecdsa_generate_safe_prime` + `ecdsa_primes_from_parts` (one prime per
+  worker), `ecdsa_key_share_from_parts`, `ecdsa_share_info`,
+  `ecdsa_ethereum_address`, `ecdsa_recover_ethereum_address`,
+  `ecdsa_execution_id`, `ecdsa_payload_execution_id`. The FROST
+  `get_eth_address` getters are gone (a BIP-340 key has no EOA address);
+  `derive_account_addresses("secp256k1-ecdsa", …)` lists Ethereum.
+- **Extension**: ceremonies run in Web Workers spawned by the offscreen
+  document (one per job); the Stage 2 wire format byte for byte (pinned to
+  the engine's test vectors). Primes: four safe primes in parallel workers
+  with per-prime progress ("Preparing secure signing (x%)"), started after
+  onboarding / unlock, cached AES-GCM-encrypted with the keystore password
+  in `chrome.storage.local` (`ecdsa_primes_v1`), consumed by one DKG. A
+  secp256k1 DKG finishes only with its ECDSA share, stored as the wallet's
+  `secp256k1-ecdsa` curve entry (same password); backups are one engine v2
+  file per curve. Ethereum signing / personal_sign / EIP-712 / Send
+  (EIP-1559, y_parity = v − 27) go through READY/SET/DONE, proposer or
+  co-signer. Test-only fixed primes exist only in a
+  `WXT_INSECURE_TEST_PRIMES=1` build (CI asserts the production bundle has
+  no hook).
+
+Findings:
+- WASM timings (release pkg): aux info ~122 s per party on one thread
+  (365 s for 3 parties sequentially, ~128 s with the parties in parallel
+  workers), keygen 0.1 s, signing ~11 s per signer.
+- One-shot CLI commands (`wallet create`, `sign`) have no test-primes flag,
+  so a CLI-created secp256k1 wallet waits for the creator's own primes
+  (~1.5 min native); the interop job timeout is 120 min.
 
 ## Stage 5: Live 3-client Sepolia transaction
 **Goal**: TUI + desktop + extension 2-of-3 wallet sends a real Sepolia tx.
