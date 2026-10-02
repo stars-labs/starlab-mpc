@@ -165,7 +165,44 @@ Ethereum flows on the new engine.
 **Success Criteria**: TUI + desktop (`starlab-desktop`, lock bump) create a
 wallet and sign an Ethereum message/tx together.
 **Tests**: unit + L3 serve-process tests; live TUI+desktop run.
-**Status**: Not Started
+**Status**: In Progress — engine PR #133 (into `feat/ecdsa-cggmp24`), desktop
+draft PR on `stars-labs/starlab-desktop` `feat/ecdsa-engine` (engine deps on
+branch `feat/ecdsa-cggmp24`; switch back to `main` when that merges).
+
+What it does:
+- **Wallet = one row per id.** `keystore::group_wallets` / `WalletGroup` fold
+  a wallet's key files (`secp256k1-ecdsa/`, `secp256k1/`, `ed25519/`) into one
+  entry; TUI lists, counts, exports and signs per group. Ethereum ← ECDSA key,
+  Bitcoin ← Taproot key, Solana/Sui ← ed25519. The desktop groups the same way
+  and exports every key file of a wallet (one file per key; losing the ECDSA
+  file loses the Ethereum account), importing several files or a folder.
+- **Signature screens.** Ethereum: "ECDSA signature (65 bytes, r ‖ s ‖ v) —
+  ecrecover-compatible", r / s / v shown, and *verified by ecrecover against
+  the account address* (Bitcoin: BIP-340 against the P2TR address) — the TUI
+  used to hard-code "verified". The account a ceremony signs for is recorded
+  when it starts.
+- **ECDSA setup status.** `PrimeSupply::status()` (idle / preparing N s /
+  ready / insecure test primes): TUI main menu and desktop sidebar show
+  "ECDSA setup: preparing safe primes (… so far, usually 1-5 min)" / "ready".
+  After the FROST rounds the DKG screen / setup banner show the Ethereum-key
+  phase (waiting for this device's primes with elapsed time → aux info →
+  keygen). The ECDSA DKG worker reports typed phases (`DkgPhase`). The desktop
+  starts prime generation at launch (it used to start at the first DKG).
+- **CI**: the serial "Rust tests + real-DKG e2e" job (31.5 min, run
+  36671492127) is now 7 parallel shards (wall 7.6 min, run 37016702676), all
+  tests kept: split suites run name filters in one shard and the same filters
+  `--skip`ped in the other. Measured per test: each secp256k1 DKG spends
+  20-40 s in ECDSA aux info (FROST alone ~4 s); optimizing every dependency in
+  dev builds only cut a 2-of-3 DKG test from ~46 s to ~38 s locally, not worth
+  the compile time.
+
+Findings for Stage 4+:
+- Safe primes took ~4 min in the TUI on a busy 16-core host (Stage 1 measured
+  ~1.5 min idle) — "usually 1-5 min" is what the UIs say.
+- TUI gaps seen in the live run, not part of this stage: the WebSocket box
+  always prints the default `wss://panda.qzz.io` even when connected
+  elsewhere; wallet delete is still a stub; the confirm-signing modal clips
+  the message preview.
 
 ## Stage 4: core-wasm + extension (`starlab-wallet`)
 **Goal**: WASM bindings for the ECDSA state machines; extension pre-generates

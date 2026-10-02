@@ -4,7 +4,7 @@
 
 use crate::elm::components::{Id, MpcWalletComponent, UserEvent};
 use crate::elm::message::Message;
-use crate::keystore::WalletMetadata;
+use crate::keystore::WalletGroup;
 
 use tuirealm::command::{Cmd, CmdResult};
 use tuirealm::event::{Event, Key, KeyEvent, KeyModifiers};
@@ -24,7 +24,7 @@ use tuirealm::state::{State, StateValue};
 #[derive(Debug, Clone)]
 pub struct WalletList {
     props: Props,
-    wallets: Vec<WalletMetadata>,
+    wallets: Vec<WalletGroup>,
     selected: usize,
     focused: bool,
     scroll_offset: usize,
@@ -54,7 +54,7 @@ impl WalletList {
         }
     }
 
-    pub fn set_wallets(&mut self, wallets: Vec<WalletMetadata>) {
+    pub fn set_wallets(&mut self, wallets: Vec<WalletGroup>) {
         self.wallets = wallets;
         if self.selected >= self.wallets.len() && !self.wallets.is_empty() {
             self.selected = self.wallets.len() - 1;
@@ -104,7 +104,7 @@ impl WalletList {
         self.wallets
             .get(self.selected)
             .map(|wallet| Message::SelectWallet {
-                wallet_id: wallet.session_id.clone(),
+                wallet_id: wallet.id().to_string(),
             })
     }
 }
@@ -113,20 +113,16 @@ impl WalletList {
 const KEY_HINTS: &str = "Enter = Sign    e = Export    i = Import    Esc = Back";
 
 /// Details rows for a wallet: its share info, then EVERY account-0 address
-/// of its curve (a secp256k1 wallet has an Ethereum and a Bitcoin account).
-/// BIP-44 all the way: never the raw group-key address — the root key is a
-/// derivation parent only.
-fn details_lines(wallet: &WalletMetadata) -> Vec<String> {
+/// across its curve keys — Ethereum from the ECDSA key, Bitcoin from the
+/// Taproot key, Solana from ed25519. BIP-44 all the way: never the raw
+/// group-key address — the root key is a derivation parent only.
+fn details_lines(wallet: &WalletGroup) -> Vec<String> {
+    let w = wallet.primary();
     let mut lines = vec![format!(
         "Created: {} | Device: {} | Index: {}/{}",
-        wallet.created_at, wallet.device_id, wallet.participant_index, wallet.total_participants
+        w.created_at, w.device_id, w.participant_index, w.total_participants
     )];
-    let accounts = hex::decode(&wallet.group_public_key)
-        .ok()
-        .and_then(|group| {
-            starlab_core::accounts::account_addresses(&wallet.curve_type, &group, 0).ok()
-        })
-        .unwrap_or_default();
+    let accounts = wallet.accounts(0);
     if accounts.is_empty() {
         lines.push("Account 0: (underivable)".to_string());
     }
@@ -136,6 +132,28 @@ fn details_lines(wallet: &WalletMetadata) -> Vec<String> {
             .map(|(chain, _path, address)| format!("Account 0 ({chain}): {address}")),
     );
     lines
+}
+
+/// One list row: name, threshold, chains, key prefix, creation date.
+fn row_text(wallet: &WalletGroup) -> String {
+    let display = wallet.display_name();
+    let name = if display.chars().count() > 24 {
+        format!("{}…", display.chars().take(23).collect::<String>())
+    } else {
+        display.to_string()
+    };
+    let w = wallet.primary();
+    let key_prefix = w.group_public_key.chars().take(10).collect::<String>();
+    let created = w.created_at.split('T').next().unwrap_or(&w.created_at);
+    format!(
+        "{}  {}/{}  {}  key:{}  {}",
+        name,
+        wallet.threshold(),
+        wallet.total_participants(),
+        wallet.chains_label(),
+        key_prefix,
+        created,
+    )
 }
 
 impl Component for WalletList {
@@ -204,36 +222,10 @@ impl Component for WalletList {
                     };
 
                     let prefix = if is_selected { "► " } else { "  " };
-                    // Disambiguate wallets visually: show a longer
-                    // session_id slice (was 12 → truncated at
-                    // `wallet-dkg_X`, 13 chars), add a group-key
-                    // prefix (first 10 hex chars), and the creation
-                    // date. Two wallets from the same minute on the
-                    // same device will still differ by group key.
-                    // Prefer the user's display label (falls back to the
-                    // session id when unset), truncated for the list row.
-                    let display = wallet.display_name();
-                    let sid = if display.chars().count() > 24 {
-                        format!("{}…", display.chars().take(23).collect::<String>())
-                    } else {
-                        display.to_string()
-                    };
-                    let key_prefix = wallet.group_public_key.chars().take(10).collect::<String>();
-                    let created = wallet
-                        .created_at
-                        .split('T')
-                        .next()
-                        .unwrap_or(&wallet.created_at);
-                    let text = format!(
-                        "{}{}  {}/{} {}  key:{}  {}",
-                        prefix,
-                        sid,
-                        wallet.threshold,
-                        wallet.total_participants,
-                        wallet.curve_type,
-                        key_prefix,
-                        created,
-                    );
+                    // Name (label, else id), t/n, the wallet's chains, a
+                    // group-key prefix and the creation date: two wallets
+                    // from the same minute still differ by key.
+                    let text = format!("{}{}", prefix, row_text(wallet));
 
                     ListItem::new(text).style(style)
                 })
@@ -342,7 +334,7 @@ impl AppComponent<Message, UserEvent> for WalletList {
                 self.wallets
                     .get(self.selected)
                     .map(|wallet| Message::DeleteWallet {
-                        wallet_id: wallet.session_id.clone(),
+                        wallet_id: wallet.id().to_string(),
                     })
             }
             Event::User(UserEvent::FocusGained) => {
@@ -375,37 +367,45 @@ impl MpcWalletComponent for WalletList {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::keystore::WalletMetadata;
+
+    fn entry(curve: &str) -> WalletMetadata {
+        WalletMetadata::new(
+            "w1".to_string(),
+            "dev".to_string(),
+            curve.to_string(),
+            2,
+            3,
+            1,
+            "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143".to_string(),
+        )
+    }
+
+    /// The ECDSA and Taproot files of one wallet id are ONE row whose
+    /// details list the Ethereum (ECDSA) and Bitcoin (Taproot) accounts.
+    #[test]
+    fn one_row_per_wallet_with_ethereum_from_ecdsa_and_bitcoin_from_taproot() {
+        let groups = crate::keystore::group_wallets(&[
+            entry("secp256k1"),
+            entry(starlab_core::ecdsa::ECDSA_CURVE),
+        ]);
+        assert_eq!(groups.len(), 1);
+        let lines = details_lines(&groups[0]);
+        assert!(
+            lines[1].starts_with("Account 0 (Ethereum): 0x"),
+            "{lines:?}"
+        );
+        assert!(
+            lines[2].starts_with("Account 0 (Bitcoin): bc1p"),
+            "{lines:?}"
+        );
+        assert!(row_text(&groups[0]).contains("2/3  ETH BTC"));
+    }
 
     #[test]
-    fn details_show_the_account0_address_of_each_curve_entry() {
-        let key = "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143";
-        let entry = |curve: &str| {
-            WalletMetadata::new(
-                "w1".to_string(),
-                "dev".to_string(),
-                curve.to_string(),
-                2,
-                3,
-                1,
-                key.to_string(),
-            )
-        };
-        // The ECDSA key's entry is the wallet's Ethereum account …
-        let lines = details_lines(&entry(starlab_core::ecdsa::ECDSA_CURVE));
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.starts_with("Account 0 (Ethereum): 0x")),
-            "{lines:?}"
-        );
-        // … the FROST secp256k1 (Taproot) entry is Bitcoin only.
-        let lines = details_lines(&entry("secp256k1"));
+    fn a_taproot_only_wallet_has_no_ethereum_account() {
+        let groups = crate::keystore::group_wallets(&[entry("secp256k1")]);
+        let lines = details_lines(&groups[0]);
         assert!(!lines.iter().any(|l| l.contains("Ethereum")), "{lines:?}");
-        assert!(
-            lines
-                .iter()
-                .any(|l| l.starts_with("Account 0 (Bitcoin): bc1p")),
-            "{lines:?}"
-        );
     }
 }

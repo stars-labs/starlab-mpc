@@ -78,6 +78,49 @@ impl Model {
 }
 
 impl WalletState {
+    /// The wallets as the UI lists them: one [`WalletGroup`] per wallet id
+    /// (the keystore holds one entry per curve file).
+    ///
+    /// [`WalletGroup`]: crate::keystore::WalletGroup
+    pub fn wallet_groups(&self) -> Vec<crate::keystore::WalletGroup> {
+        crate::keystore::group_wallets(&self.wallets)
+    }
+
+    /// The wallet row at list position `index`.
+    pub fn wallet_group_at(&self, index: usize) -> Option<crate::keystore::WalletGroup> {
+        self.wallet_groups().into_iter().nth(index)
+    }
+
+    /// Chains the SignTransaction screen offers for `wallet_id` on this
+    /// node: Ethereum needs the wallet's ECDSA key, Bitcoin its Taproot key,
+    /// Solana its ed25519 key (on an ed25519 runner). A wallet not in the
+    /// list (yet) gets the runner curve's chains.
+    pub fn sign_chains_for(&self, wallet_id: &str) -> Vec<&'static str> {
+        match self.wallet_group(wallet_id) {
+            Some(group) => group.sign_chains(self.curve_type),
+            None if self.curve_type == "secp256k1" => vec!["ethereum", "bitcoin"],
+            None => vec!["solana"],
+        }
+    }
+
+    /// The chain a SignTransaction submit signs for: Bitcoin when chosen
+    /// with Tab (`sign_on_bitcoin`) and available, else the first offered.
+    pub fn chosen_sign_chain(&self, wallet_id: &str) -> Option<&'static str> {
+        let chains = self.sign_chains_for(wallet_id);
+        if self.sign_on_bitcoin && chains.contains(&"bitcoin") {
+            Some("bitcoin")
+        } else {
+            chains.first().copied()
+        }
+    }
+
+    /// The wallet (all curve entries) with id `wallet_id`.
+    pub fn wallet_group(&self, wallet_id: &str) -> Option<crate::keystore::WalletGroup> {
+        self.wallet_groups()
+            .into_iter()
+            .find(|g| g.id() == wallet_id)
+    }
+
     /// Zero-out the PasswordPrompt draft buffers + associated UI state.
     /// Called on every exit from `Screen::PasswordPrompt` (Esc, go_home,
     /// successful submit) so cleartext never outlives the screen. Also
@@ -275,6 +318,16 @@ pub struct WalletState {
     /// has landed. Tracks the second ceremony phase; shown on the
     /// progress screen as "✓✓" to differentiate from commit-only.
     pub signing_shares_received: std::collections::HashSet<String>,
+    /// The ECDSA part (Ethereum key) of the running wallet DKG, once the
+    /// FROST ceremonies are done; `None` otherwise. Shown on the DKG screen.
+    pub ecdsa_dkg_phase: Option<crate::protocal::ecdsa::DkgPhase>,
+    /// The background safe-prime generator ("ECDSA setup"), polled by the
+    /// app loop. Shown on the main menu and while a DKG waits for primes.
+    pub ecdsa_setup: crate::protocal::ecdsa::PrimeStatus,
+    /// The account-child wallet id (`{root}-{chain}-{n}`) of the running
+    /// signing ceremony: set when it starts (initiator or joiner) so the
+    /// result screen labels and verifies the right account.
+    pub signing_wallet_id: Option<String>,
 }
 
 /// Discriminator for the three flows that share `Screen::PasswordPrompt`.
@@ -358,16 +411,17 @@ pub struct CompletedSignatureInfo {
     /// `None` means "same as `message`" and preserves the pre-EIP-191
     /// semantics for raw-bytes signing.
     pub signed_hash: Option<Vec<u8>>,
-    /// Aggregated FROST signature as the FROST library returned it.
-    /// For secp256k1 that's 65 bytes (compressed group-key prefix +
-    /// 32-byte z); ed25519 is 64 bytes.
+    /// The signature: Ethereum (threshold ECDSA) = 65 bytes `r ‖ s ‖ v`
+    /// (v = 27/28, ecrecover-compatible); Bitcoin = 64-byte BIP-340;
+    /// ed25519 = 64 bytes.
     pub signature: Vec<u8>,
-    /// Result of `verifying_key.verify(&message, &signature)` the
-    /// protocol layer ran before emitting SigningComplete. Always
-    /// `true` on the happy path; a `false` here means something went
-    /// wrong before the emit and this screen shouldn't actually be
-    /// reachable — but we surface the flag defensively.
+    /// Whether the signature checks out for the account it was made for:
+    /// Ethereum → `ecrecover` == the account address; Bitcoin → BIP-340
+    /// under the P2TR output key; other chains → the group-key check the
+    /// FROST aggregation ran before emitting SigningComplete.
     pub verified: bool,
+    /// How it was verified (or why it wasn't), for the result screen.
+    pub verification: String,
 }
 
 // Manual Debug implementation for WalletState
@@ -395,6 +449,9 @@ impl std::fmt::Debug for WalletState {
             .field("password_focus_confirm", &self.password_focus_confirm)
             .field("password_error", &self.password_error)
             .field("password_prompt_purpose", &self.password_prompt_purpose)
+            .field("ecdsa_dkg_phase", &self.ecdsa_dkg_phase)
+            .field("ecdsa_setup", &self.ecdsa_setup)
+            .field("signing_wallet_id", &self.signing_wallet_id)
             .finish()
     }
 }

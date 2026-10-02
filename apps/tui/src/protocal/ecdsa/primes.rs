@@ -14,8 +14,64 @@ use tracing::{info, warn};
 
 enum Slot {
     Idle,
-    Generating,
+    /// Generating since the instant.
+    Generating(Instant),
     Ready(Box<Primes>),
+}
+
+/// What a UI shows about the primes (the "ECDSA setup" of the next wallet).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrimeStatus {
+    /// Not started yet (it starts with the runner, or with the first DKG).
+    #[default]
+    Idle,
+    /// Being generated for `elapsed_secs` so far.
+    Generating { elapsed_secs: u64 },
+    /// A set is ready: the next DKG won't wait.
+    Ready,
+    /// Test-only fixed primes ([`PrimeSupply::insecure_test_fixed`]).
+    InsecureTestFixed,
+}
+
+impl PrimeStatus {
+    /// One English status line, e.g. "ECDSA setup: preparing safe primes
+    /// (1m 12s so far, usually 1-5 min)".
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Idle => "ECDSA setup: not started".to_string(),
+            Self::Generating { .. } => format!(
+                "ECDSA setup: preparing safe primes ({})",
+                self.progress().unwrap_or_default()
+            ),
+            Self::Ready => "ECDSA setup: ready".to_string(),
+            Self::InsecureTestFixed => "ECDSA setup: ready (INSECURE test primes)".to_string(),
+        }
+    }
+
+    /// While generating: "1m 12s so far, usually 1-5 min".
+    pub fn progress(&self) -> Option<String> {
+        match self {
+            Self::Generating { elapsed_secs } => Some(format!(
+                "{} so far, usually 1-5 min",
+                format_elapsed(*elapsed_secs)
+            )),
+            _ => None,
+        }
+    }
+
+    /// Whether a DKG would start its ECDSA part without waiting.
+    pub fn is_ready(&self) -> bool {
+        matches!(self, Self::Ready | Self::InsecureTestFixed)
+    }
+}
+
+/// "42s" / "1m 12s".
+pub fn format_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    }
 }
 
 struct Inner {
@@ -87,7 +143,7 @@ impl PrimeSupply {
         if !matches!(*slot, Slot::Idle) {
             return;
         }
-        *slot = Slot::Generating;
+        *slot = Slot::Generating(Instant::now());
         drop(slot);
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new()
@@ -112,11 +168,21 @@ impl PrimeSupply {
 
     /// Whether a DKG could take primes right now without waiting.
     pub fn is_ready(&self) -> bool {
-        self.inner.fixed.is_some()
-            || matches!(
-                *self.inner.slot.lock().expect("prime slot lock"),
-                Slot::Ready(_)
-            )
+        self.status().is_ready()
+    }
+
+    /// The generator's state, for the UI.
+    pub fn status(&self) -> PrimeStatus {
+        if self.inner.fixed.is_some() {
+            return PrimeStatus::InsecureTestFixed;
+        }
+        match &*self.inner.slot.lock().expect("prime slot lock") {
+            Slot::Idle => PrimeStatus::Idle,
+            Slot::Generating(since) => PrimeStatus::Generating {
+                elapsed_secs: since.elapsed().as_secs(),
+            },
+            Slot::Ready(_) => PrimeStatus::Ready,
+        }
     }
 
     /// Take one set, blocking up to `timeout` for the generator. Starts the
@@ -176,5 +242,37 @@ mod tests {
         assert!(!supply.is_ready(), "nothing is generated before start()");
         // take() starts the generator; it can't finish within 1 ms.
         assert!(supply.take(Duration::from_millis(1)).is_none());
+    }
+
+    #[test]
+    fn status_reports_idle_then_generating() {
+        let supply = PrimeSupply::background();
+        assert_eq!(supply.status(), PrimeStatus::Idle);
+        supply.start();
+        assert!(matches!(
+            supply.status(),
+            PrimeStatus::Generating { elapsed_secs: 0 }
+        ));
+        assert!(!supply.status().is_ready());
+    }
+
+    #[test]
+    fn fixed_supply_status_names_the_insecure_primes() {
+        let status = PrimeSupply::insecure_test_fixed(fixture()).status();
+        assert!(status.is_ready());
+        assert_eq!(
+            status.describe(),
+            "ECDSA setup: ready (INSECURE test primes)"
+        );
+    }
+
+    #[test]
+    fn status_lines_are_plain_english() {
+        assert_eq!(PrimeStatus::Ready.describe(), "ECDSA setup: ready");
+        assert_eq!(
+            PrimeStatus::Generating { elapsed_secs: 72 }.describe(),
+            "ECDSA setup: preparing safe primes (1m 12s so far, usually 1-5 min)"
+        );
+        assert_eq!(format_elapsed(9), "9s");
     }
 }

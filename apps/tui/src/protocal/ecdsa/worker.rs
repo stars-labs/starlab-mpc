@@ -57,8 +57,30 @@ pub struct Outgoing {
     pub payload: Vec<u8>,
 }
 
-/// Progress notes for the UI.
-pub type StatusSender = UnboundedSender<String>;
+/// Where a wallet DKG's ECDSA part (the Ethereum key) stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DkgPhase {
+    /// Blocked on the background safe-prime generator.
+    WaitingForPrimes,
+    /// Aux info: Paillier keys + ZK proofs (~20 s per party natively).
+    AuxInfo,
+    /// Threshold key generation.
+    Keygen,
+}
+
+impl DkgPhase {
+    /// One English status line for the DKG screen.
+    pub fn describe(&self) -> &'static str {
+        match self {
+            Self::WaitingForPrimes => "Ethereum key (ECDSA): waiting for this device's safe primes",
+            Self::AuxInfo => "Ethereum key (ECDSA): aux info (Paillier setup, ~20 s)",
+            Self::Keygen => "Ethereum key (ECDSA): generating the threshold key",
+        }
+    }
+}
+
+/// Progress of a running ceremony, for the UI.
+pub type StatusSender = UnboundedSender<DkgPhase>;
 
 /// Inbound side of a running worker: `(sender device id, payload)`.
 pub type Inbox = Sender<(String, Vec<u8>)>;
@@ -100,15 +122,12 @@ fn run(
             primes,
         } => {
             if !primes.is_ready() {
-                let _ = status.send(
-                    "Generating ECDSA safe primes for the Ethereum key (first run can take a \
-                     few minutes)…"
-                        .to_string(),
-                );
+                let _ = status.send(DkgPhase::WaitingForPrimes);
             }
             let primes: Primes = primes
                 .take(PRIMES_WAIT)
                 .ok_or("timed out waiting for ECDSA safe primes")?;
+            let _ = status.send(DkgPhase::AuxInfo);
             let deadline = Instant::now() + timeout;
             let rng = starlab_core::rng::os_rng();
             let keygen_eid = execution_id(&session_id, Protocol::Keygen, &participants);
@@ -128,6 +147,7 @@ fn run(
                 "ECDSA aux info done in {:.1}s",
                 started.elapsed().as_secs_f64()
             );
+            let _ = status.send(DkgPhase::Keygen);
             let incomplete = drive(
                 EcdsaCeremony::keygen(
                     &session_id,

@@ -8,6 +8,7 @@ mod encryption;
 mod extension_compat;
 mod models;
 mod storage;
+mod wallet_group;
 
 pub use extension_compat::{
     ExtensionBackupWallet, ExtensionKeyShareData, ExtensionKeystoreBackup, ExtensionWalletMetadata,
@@ -15,6 +16,7 @@ pub use extension_compat::{
 };
 pub use models::{BlockchainInfo, DeviceInfo, WalletMetadata};
 pub use storage::Keystore;
+pub use wallet_group::{WalletGroup, group_wallets};
 
 /// Error types that can occur during keystore operations
 #[derive(Debug, thiserror::Error)]

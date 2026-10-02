@@ -515,6 +515,15 @@ pub enum Message {
         error: String,
     },
 
+    /// The ECDSA part of the running wallet DKG reached `phase`.
+    EcdsaDkgProgress {
+        phase: crate::protocal::ecdsa::DkgPhase,
+    },
+    /// The background safe-prime generator's state (polled by the app loop).
+    EcdsaSetupStatus {
+        status: crate::protocal::ecdsa::PrimeStatus,
+    },
+
     // Time-based events
     Tick,
     Heartbeat,
