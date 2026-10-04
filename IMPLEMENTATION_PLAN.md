@@ -165,9 +165,21 @@ Ethereum flows on the new engine.
 **Success Criteria**: TUI + desktop (`starlab-desktop`, lock bump) create a
 wallet and sign an Ethereum message/tx together.
 **Tests**: unit + L3 serve-process tests; live TUI+desktop run.
-**Status**: In Progress — engine PR #133 (into `feat/ecdsa-cggmp24`), desktop
-draft PR on `stars-labs/starlab-desktop` `feat/ecdsa-engine` (engine deps on
-branch `feat/ecdsa-cggmp24`; switch back to `main` when that merges).
+**Status**: Complete (not merged) — engine PR #133 (into
+`feat/ecdsa-cggmp24`), desktop draft PR stars-labs/starlab-desktop#23
+(`feat/ecdsa-engine`; engine deps on branch `feat/ecdsa-cggmp24`, back to
+`main` when that merges; merge only together with it, after Stage 4).
+
+Live run (2026-10-04, local signal server, desktop on Xvfb): TUI (real
+primes) creates a 2-of-3 wallet, the desktop (real primes) and a CLI `serve`
+node (fixture primes) join; all show one wallet row, Ethereum
+`0x0b2ea905…989ff6` (ECDSA) + Bitcoin `bc1ph90k…h8vrdv` (Taproot). The DKG
+screens showed the Ethereum-key phase (desktop waiting for its primes, TUI in
+aux info). Two EIP-191 signings initiated from the TUI, co-signed from the
+desktop's approval card: TUI "Verified: YES (ecrecover gives 0x0b2e… =
+Ethereum account 0)", desktop "Verified: ecrecover gives 0x0b2e… (this
+account)", and Foundry `cast wallet verify` accepts both (65 bytes, low-s,
+v 28 / 27).
 
 What it does:
 - **Wallet = one row per id.** `keystore::group_wallets` / `WalletGroup` fold
@@ -189,7 +201,8 @@ What it does:
   keygen). The ECDSA DKG worker reports typed phases (`DkgPhase`). The desktop
   starts prime generation at launch (it used to start at the first DKG).
 - **CI**: the serial "Rust tests + real-DKG e2e" job (31.5 min, run
-  36671492127) is now 7 parallel shards (wall 7.6 min, run 37016702676), all
+  36671492127) is now 7 parallel shards (wall 7.6 min cold cache, run
+  37016702676; 5.3 min with the shared cache, run 37176538239), all
   tests kept: split suites run name filters in one shard and the same filters
   `--skip`ped in the other. Measured per test: each secp256k1 DKG spends
   20-40 s in ECDSA aux info (FROST alone ~4 s); optimizing every dependency in
@@ -199,6 +212,13 @@ What it does:
 Findings for Stage 4+:
 - Safe primes took ~4 min in the TUI on a busy 16-core host (Stage 1 measured
   ~1.5 min idle) — "usually 1-5 min" is what the UIs say.
+- After the desktop restarted, the cold-start session replay offered the
+  already *completed* signing request again (approving it can't succeed). The
+  proposer doesn't withdraw a finished signing session — engine/signal-server
+  follow-up.
+- The engine raises `dkg_in_progress` when a signing mesh is ready (it reuses
+  the FROST round-1 trigger); the desktop now ignores it outside a wallet
+  setup, but the flag itself is misleading for other embedders.
 - TUI gaps seen in the live run, not part of this stage: the WebSocket box
   always prints the default `wss://panda.qzz.io` even when connected
   elsewhere; wallet delete is still a stub; the confirm-signing modal clips
