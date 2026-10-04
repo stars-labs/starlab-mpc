@@ -45,7 +45,8 @@ any unverified gate rather than substituting simulated-chain evidence.
   Native client follow-up: 274 passed; ignored conformance 9 passed, L3 serve
   8 passed, wire protocol 2 passed. Full ignored e2e had 10 passes and one
   FROST timeout fixture mismatch; corrected fixture passed its targeted retry
-  gate without increasing the 3-second timeout. Final workspace rerun pending.
+  gate without increasing the 3-second timeout. Final workspace rerun:
+  513 passed, 0 failed, 31 ignored (26 suites), final-workspace-tests.log.
 - ed25519 browser interoperability: 8 passed, 5 conditionally skipped,
   2.3 min; /tmp/starlab-full-ed-interop.log.
 - secp256k1 browser interoperability: full process terminated (exit 143)
@@ -65,7 +66,15 @@ any unverified gate rather than substituting simulated-chain evidence.
   `0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`.
   Screenshots: /tmp/starlab-stage5/shots and desktop live-shots.
   Sepolia balance remains zero; faucet returned INVALID_CAPTCHA.
-  Live extension also revealed saved-key/address restoration defects:
-  header address correct, hero falls back to Bitcoin, Sign reports no share.
-  Repairs and a successful real transaction receipt remain required.
+  Live extension revealed a popup public-key snapshot defect: header address
+  correct, hero falls back to Bitcoin. No-share error was caused by auto-lock;
+  after UI unlock, genuine extension + desktop EIP-191 signing completed and
+  the invitation was withdrawn. Popup lock/signature feedback repairs and a
+  successful real transaction receipt remain required.
   This gate has NOT passed.
+
+- Real-client message signature public evidence:
+  /tmp/starlab-stage5/live-signature-evidence.json; independent viem recovery
+  matches the wallet address. Desktop Foundry verification against both the
+  original EIP-191 text and raw digest passes: cast-signature-verify.log.
+  Screenshot: live-shots/14-desktop-signed.png.

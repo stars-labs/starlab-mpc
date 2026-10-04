@@ -52,10 +52,8 @@ Findings that shape later stages:
 - Aux info costs ~18 s CPU per party natively (single thread); signing
   ~3 s per signer. Run ceremonies off the UI/async thread
   (`EcdsaCeremony` is `!Send`: create and drive it on one thread/worker).
-- `accounts.rs` lists Ethereum for curve `secp256k1-ecdsa`; the FROST
-  secp256k1 key still lists an Ethereum row until stage 2/3 switch the
-  clients (then `curve_for_chain("ethereum")` → `secp256k1-ecdsa` and the
-  FROST row is removed).
+- `accounts.rs` and chain configuration map Ethereum to
+  `secp256k1-ecdsa`; the FROST secp256k1 key is Bitcoin-only.
 - cggmp24 0.7.0-alpha.3 must be built with `cggmp24-keygen` /
   `paillier-zk` pinned to `=0.7.0-alpha.3` (alpha.4 moved to generic-ec
   0.5 and breaks the build) — pinned in `starlab-core/Cargo.toml`.
@@ -272,4 +270,14 @@ Findings:
 **Goal**: TUI + desktop + extension 2-of-3 wallet sends a real Sepolia tx.
 **Success Criteria**: tx hash confirmed on Sepolia from the MPC address.
 **Tests**: live run with screenshots + tx hash.
-**Status**: Not Started
+**Status**: In Progress — the real-prime TUI + desktop + production extension
+2-of-3 wallet ceremony completed on 2026-10-04. Ethereum account 0 is
+`0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`. Extension-initiated EIP-191
+signing co-signed by the desktop passed independent viem and Foundry
+recovery verification; screenshot and public signature evidence are recorded
+in `docs/changes/2026-10-04-ecdsa-completion.md`.
+
+A Sepolia transaction receipt is still required. The address has no test ETH
+and the attempted faucet returned `INVALID_CAPTCHA`. Live testing also found
+popup account-key/lock/result display defects; repairs are in progress.
+Message-signing evidence does not satisfy the transaction receipt gate.
