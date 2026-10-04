@@ -754,7 +754,7 @@ fn signing_session(
         session_type: crate::protocal::signal::SessionType::Signing {
             wallet_name: wallet_id.to_string(),
             curve_type: chain.to_string(),
-            blockchain: chain.to_string(),
+            blockchain: announce_chain(wallet_id, metadata, chain),
             group_public_key: group_pubkey_hex.to_string(),
         },
         curve_type: chain.to_string(),
@@ -3219,9 +3219,13 @@ impl Command {
                 // is reused either way.
                 let session_id = {
                     let mut state = app_state.lock().await;
-                    let session = signing_session(
+                    let mut session = signing_session(
                         &request.wallet_id,
-                        &request.chain,
+                        if is_ecdsa {
+                            starlab_core::ecdsa::ECDSA_CURVE
+                        } else {
+                            &request.chain
+                        },
                         &group_pubkey_hex,
                         &self_device_id,
                         state
@@ -3238,6 +3242,7 @@ impl Command {
                         session.total,
                         session.participants.len()
                     );
+                    session.signing_message_hex = Some(hex::encode(&request.transaction_data));
                     let sid = session.session_id.clone();
                     state.session = Some(session);
                     sid
@@ -3596,6 +3601,9 @@ impl Command {
                 let channels = ws_runtime::install_handles(app_state).await;
 
                 ws_runtime::send_register(&mut sink, &params.device_id).await;
+                if let Some(session_id) = &params.retired_signing_session_id {
+                    ws_runtime::send_retired_session(&mut sink, session_id).await;
+                }
                 if let Some(session) = &params.existing_session {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
