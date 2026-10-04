@@ -15,6 +15,8 @@ Designer audit, 4 October 2026. Covers the existing extension and desktop featur
 
 The accepted extension captures are indexed by `/tmp/starlab-extension-design-acceptance/manifest.json`, with a per-function evidence map in `docs/design/visual-evidence.md`. Desktop normal/narrow presentation evidence is `/tmp/starlab-desktop-visual-final-shots/manifest.json`; actual release TinySkia screenshot `/tmp/starlab-desktop-validation/live-shots/16-final-desktop-skia.png` was independently inspected. Packaged native/curated asset identity, primary wallet actions, per-feature loading/error/approval states and recovery limits are implemented. Real signatures and chain receipts remain separate functional evidence.
 
+The later [primary competitor reference audit](2026-10-04-wallet-competitor-reference.md) adds actual browser inspection of Rabby's official site and official Send/Approvals assets, plus Phantom's official sending illustration. No blocking visual mismatch was found; marketing images do not establish every competitor runtime state.
+
 ## Shared visual system
 
 Keep Starlab violet as the brand. Use neutral surfaces as the dominant background; reserve gradient for a small brand accent rather than every CTA. Extension light: canvas #F5F6FA, surface white, text #171923, muted #667085, line #E4E7EE, violet #6753FF. Desktop dark: canvas #11131B, surface #191D29, elevated #22283A, text #F5F6FA, muted #A1ABC0, line #313A50, violet #8B7CFF. Success #20B97D, warning #E6AA45, error #F26878. State must also use icon and text, never color alone.
