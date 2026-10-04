@@ -2,8 +2,8 @@
 
 Decision (plan C, 2026-09-27): ed25519 chains and Bitcoin (Taproot) stay on
 FROST; EVM accounts move to threshold ECDSA via `cggmp24` (MIT/Apache-2.0,
-Kudelski-audited, 0.7.0-alpha). FROST Schnorr signatures can't be verified by
-an EOA (`ecrecover`), so today no EVM transaction can be sent.
+Kudelski-audited, 0.7.0-alpha). FROST Schnorr signatures cannot be verified by an EOA (`ecrecover`);
+Ethereum signing and transaction construction therefore use the ECDSA key.
 
 Fixed design points (from the cggmp24 0.7 docs/source):
 - A wallet holds three keys: FROST ed25519, FROST secp256k1-tr (BIP-340),
@@ -70,8 +70,9 @@ account-0 address from accounts.rs; raw 32-byte prehash sign; 3-of-3 signing
 twice; 2-of-3 with all 3 online (non-signer gets the signature); ECDSA share
 export → import round trip; existing FROST e2e (Bitcoin BIP-340, reshare,
 timeout, ed25519) unchanged.
-**Status**: Complete (PR into `feat/ecdsa-cggmp24`; not mergeable to `main`
-before Stage 4 — the extension can't do ECDSA yet).
+**Status**: Complete (integrated in draft PR #135 targeting
+`feat/ecdsa-cggmp24`). Native gates are green; coordinate the engine, desktop
+and extension release after the remaining visual and live transaction gates.
 
 What it does:
 - **DKG**: after the FROST ceremonies of a secp256k1 (or unified) DKG, the
@@ -211,9 +212,9 @@ Findings for Stage 4+:
 - Safe primes took ~4 min in the TUI on a busy 16-core host (Stage 1 measured
   ~1.5 min idle) — "usually 1-5 min" is what the UIs say.
 - After the desktop restarted, the cold-start session replay offered the
-  already *completed* signing request again (approving it can't succeed). The
-  proposer doesn't withdraw a finished signing session — engine/signal-server
-  follow-up.
+  already *completed* signing request again (approving it cannot succeed).
+  This has been fixed in PR #135 and extension #83: finished and failed
+  sessions are withdrawn, and reconnect retries withdrawal.
 - The engine raises `dkg_in_progress` when a signing mesh is ready (it reuses
   the FROST round-1 trigger); the desktop now ignores it outside a wallet
   setup, but the flag itself is misleading for other embedders.
@@ -229,9 +230,12 @@ works.
 **Success Criteria**: extension ↔ CLI interop (2-of-3, 3-of-3) green in CI.
 **Tests**: bun unit tests (real WASM); interop spec: CLI + extension ECDSA
 DKG, co-sign, and extension-initiated sign.
-**Status**: In Progress — engine PR #134 (`feat/ecdsa-wasm` → this branch),
-extension draft PR stars-labs/starlab-wallet#83 (merge together with
-`feat/ecdsa-cggmp24` → main).
+**Status**: In Progress — WASM is integrated in engine PR #135; extension
+draft PR stars-labs/starlab-wallet#83 includes the signing implementation.
+Remote extension CI run 37185987825 passed all three jobs, including 12
+secp256k1 interoperability cases and separate network-namespace recovery.
+Final visual and recovery/discovery fixes require branch-head validation.
+Merge together with the engine and desktop after the remaining gates.
 
 What it does:
 - **core-wasm**: `EcdsaAuxInfo` / `EcdsaKeygen` / `EcdsaSigning` over
