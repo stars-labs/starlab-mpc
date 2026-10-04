@@ -216,10 +216,10 @@ enum NodeState {
 }
 
 impl NodeState {
-    async fn restore_signing_timeout(&self) {
+    async fn set_signing_timeout(&self, timeout: Duration) {
         match self {
-            Self::Ed25519(state) => state.lock().await.signing_timeout = SIGNING_TIMEOUT,
-            Self::Secp256k1(state) => state.lock().await.signing_timeout = SIGNING_TIMEOUT,
+            Self::Ed25519(state) => state.lock().await.signing_timeout = timeout,
+            Self::Secp256k1(state) => state.lock().await.signing_timeout = timeout,
         }
     }
 }
@@ -836,11 +836,9 @@ impl SigningTimeoutRetryResult {
 /// nonces) — hence "fail, then a fresh retry" rather than "swap and
 /// continue".
 ///
-/// Needs `STARLAB_SIGNING_TIMEOUT_MS` set (by the caller, before any node is
-/// spawned) to something short — the real default is 120s, far too long for
-/// a test to sit through. Only the deliberately abandoned ceremony uses that
-/// override; the retry restores the production budget, including unlock and
-/// mesh setup, and tests fresh nonce state rather than a throughput deadline.
+/// Only the deliberately abandoned ceremony uses a 3s per-node budget; the
+/// retry restores the production budget, including unlock and mesh setup.
+/// This proves fresh nonce state without making retry a throughput deadline.
 pub async fn run_signing_timeout_then_retry_simulation(
     opts: SimulateOpts,
     message: &str,
@@ -851,6 +849,10 @@ pub async fn run_signing_timeout_then_retry_simulation(
         anyhow::bail!("DKG did not agree; aborting signing-timeout test");
     }
     let wallet_id = c.outcomes[0].wallet_id.clone();
+
+    c.node_states[0]
+        .set_signing_timeout(Duration::from_secs(3))
+        .await;
 
     // First ceremony: node 0 announces; nobody joins. Node 0 never
     // accumulates more than its own commitment, so it must time out on its
@@ -874,7 +876,7 @@ pub async fn run_signing_timeout_then_retry_simulation(
     // A fresh ceremony uses the production budget: co-signers decrypt and
     // materialize account shares before joining, which can exceed 3s under load.
     for state in &c.node_states {
-        state.restore_signing_timeout().await;
+        state.set_signing_timeout(SIGNING_TIMEOUT).await;
     }
 
     // Retry: a fresh ceremony, with a real co-signer, must succeed.
