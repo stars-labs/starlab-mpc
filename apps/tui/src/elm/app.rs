@@ -641,9 +641,11 @@ where
             _ => {
                 // Default to main menu for unimplemented screens
                 let wallet_count = self.model.wallet_state.wallet_groups().len();
+                let mut main_menu = MainMenu::with_wallet_count(wallet_count);
+                main_menu.set_ecdsa_setup(self.model.wallet_state.ecdsa_setup);
                 self.app.mount(
                     Id::MainMenu,
-                    Box::new(MainMenu::with_wallet_count(wallet_count)),
+                    Box::new(main_menu),
                     vec![]
                 )?;
                 self.app.active(&Id::MainMenu)?;
