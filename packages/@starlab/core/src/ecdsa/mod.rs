@@ -64,6 +64,33 @@ pub fn pregenerate_primes<R: RngCore + CryptoRng>(rng: &mut R) -> Primes {
     Primes::generate(rng)
 }
 
+/// One Paillier safe prime (a [`Primes`] set holds [`PRIME_COUNT`]).
+/// serde: `{"radix":16,"value":"<hex>"}`.
+pub type SafePrime = cggmp24::backend::Integer;
+
+/// Safe primes per [`Primes`] set.
+pub const PRIME_COUNT: usize = 4;
+
+/// Generate ONE of the [`PRIME_COUNT`] safe primes of a [`Primes`] set —
+/// the unit of work behind [`pregenerate_primes`], so a caller can spread
+/// the four over parallel workers and report real progress (the browser
+/// extension does). Join them with [`primes_from_parts`].
+pub fn generate_safe_prime<R: RngCore + CryptoRng>(rng: &mut R) -> SafePrime {
+    use cggmp24::security_level::SecurityLevel as _;
+    SafePrime::generate_safe_prime(rng, SecurityLevel128::RSA_PRIME_BITLEN)
+}
+
+/// Join [`PRIME_COUNT`] primes from [`generate_safe_prime`] into a set.
+/// Rejects numbers below the security level's size (primality itself is
+/// checked by the aux-info ZK proofs, as with any [`Primes`]).
+pub fn primes_from_parts(parts: Vec<SafePrime>) -> Result<Primes> {
+    let parts: [SafePrime; PRIME_COUNT] = parts.try_into().map_err(|v: Vec<SafePrime>| {
+        FrostError::EcdsaError(format!("need {PRIME_COUNT} safe primes, got {}", v.len()))
+    })?;
+    Primes::try_from(parts)
+        .map_err(|_| FrostError::EcdsaError("safe prime below the required size".into()))
+}
+
 /// The three ECDSA protocols (execution-id tag + wire tag).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {

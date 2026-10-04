@@ -47,6 +47,10 @@ def main():
     ap.add_argument("--cli", default="./target/release/starlab-cli")
     ap.add_argument("--pw-var", default=os.environ.get("MPC_PW_VAR", "MPC_REHEARSAL_PW"),
                     help="env var name holding the wallet password")
+    ap.add_argument("--insecure-test-primes", default="",
+                    help="TESTS ONLY: ECDSA safe primes file handed to "
+                         "`serve --insecure-test-primes` (skips minutes of "
+                         "prime generation; the wallet protects nothing)")
     args = ap.parse_args()
 
     node = args.device_id
@@ -67,6 +71,8 @@ def main():
     ]
     if args.room:
         cmd += ["--room", args.room]
+    if args.insecure_test_primes:
+        cmd += ["--insecure-test-primes", args.insecure_test_primes]
 
     log(node, f"spawning: {' '.join(cmd)}")
     proc = subprocess.Popen(

@@ -767,17 +767,11 @@ pub async fn wallet_accounts(
         for (display, key, curve, group) in &chains {
             let path_s = standard_path(key, i)
                 .ok_or_else(|| anyhow::anyhow!("no standard path for {key}"))?;
-            let path = starlab_core::DerivationPath::parse(&path_s)
-                .map_err(|e| anyhow::anyhow!("parse {path_s}: {e}"))?;
-            let child_pub = match curve.as_str() {
-                "ed25519" => starlab_core::derive_child_verifying_key_path::<
-                    frost_ed25519::Ed25519Sha512,
-                >(group, &path),
-                _ => starlab_core::derive_child_verifying_key_path::<
-                    frost_secp256k1_tr::Secp256K1Sha256TR,
-                >(group, &path),
-            }
-            .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
+            // accounts.rs is the single source of truth: the ECDSA key's
+            // Ethereum child has no Taproot finalize (a FROST-tr derivation
+            // here listed a different, unsignable Ethereum address).
+            let child_pub = starlab_core::accounts::account_verifying_key(key, curve, group, i)
+                .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
             let address = crate::bridge::derive_address(&hex::encode(&child_pub), curve, key);
             if !address.is_empty() {
                 addresses.push(crate::protocol::ChainAddress {
