@@ -5,15 +5,19 @@
 //! crypto, isolated per-node keystores. Self-contained for CI / LLM
 //! smoke-testing; also the shared orchestration the e2e tests use.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1, spawn_secp256k1_with_primes};
+use starlab_client::elm::headless::{HeadlessRunner, spawn_secp256k1};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
 use starlab_client::protocal::ecdsa::PrimeSupply;
+use starlab_client::protocal::signing::SIGNING_TIMEOUT;
+use starlab_client::utils::appstate_compat::AppState;
 use starlab_core::ecdsa::Primes;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The user-facing label the simulated DKG creator gives its wallet. Chosen
@@ -191,6 +195,7 @@ where
 /// senders/receivers are retained) so callers can drive signing afterwards.
 struct Cluster {
     device_ids: Vec<String>,
+    node_states: Vec<NodeState>,
     senders: Vec<UnboundedSender<Message>>,
     receivers: Vec<UnboundedReceiver<Evt>>,
     // Keystores must outlive the runners.
@@ -201,6 +206,22 @@ struct Cluster {
     ethereum_address: String,
     agreed: bool,
     elapsed_ms: u128,
+}
+
+/// State handles let the timeout scenario scope its deliberately short budget
+/// to the failed ceremony, without changing production commands or defaults.
+enum NodeState {
+    Ed25519(Arc<Mutex<AppState<frost_ed25519::Ed25519Sha512>>>),
+    Secp256k1(Arc<Mutex<AppState<frost_secp256k1_tr::Secp256K1Sha256TR>>>),
+}
+
+impl NodeState {
+    async fn restore_signing_timeout(&self) {
+        match self {
+            Self::Ed25519(state) => state.lock().await.signing_timeout = SIGNING_TIMEOUT,
+            Self::Secp256k1(state) => state.lock().await.signing_timeout = SIGNING_TIMEOUT,
+        }
+    }
 }
 
 /// A runner's per-message sync hook (see `HeadlessRunner`).
@@ -215,9 +236,18 @@ fn spawn_node(
     keystore_path: String,
     ws_url: String,
     cb: SyncCallback,
-) -> UnboundedSender<Message> {
+) -> (UnboundedSender<Message>, NodeState) {
     if opts.curve == "ed25519" {
-        return spawn_ed25519(device_id, keystore_path, ws_url, cb);
+        let state = Arc::new(Mutex::new(
+            AppState::<frost_ed25519::Ed25519Sha512>::with_device_id_and_server(
+                device_id.clone(),
+                ws_url,
+            ),
+        ));
+        let runner = HeadlessRunner::new(device_id, keystore_path, state.clone(), cb);
+        let tx = runner.sender();
+        tokio::spawn(runner.run());
+        return (tx, NodeState::Ed25519(state));
     }
     let primes = if opts.insecure_test_primes.is_empty() {
         PrimeSupply::background()
@@ -225,7 +255,17 @@ fn spawn_node(
         let set = &opts.insecure_test_primes[i % opts.insecure_test_primes.len()];
         PrimeSupply::insecure_test_fixed(set.clone())
     };
-    spawn_secp256k1_with_primes(device_id, keystore_path, ws_url, cb, primes)
+    let mut app_state =
+        AppState::<frost_secp256k1_tr::Secp256K1Sha256TR>::with_device_id_and_server(
+            device_id.clone(),
+            ws_url,
+        );
+    app_state.ecdsa.primes = primes;
+    let state = Arc::new(Mutex::new(app_state));
+    let runner = HeadlessRunner::new(device_id, keystore_path, state.clone(), cb);
+    let tx = runner.sender();
+    tokio::spawn(runner.run());
+    (tx, NodeState::Secp256k1(state))
 }
 
 /// Quit every runner and give the runtime a beat to reclaim their WebRTC/ICE
@@ -275,6 +315,7 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     };
 
     let mut keystores = Vec::new();
+    let mut node_states = Vec::new();
     let mut senders = Vec::new();
     let mut receivers = Vec::new();
     let device_ids: Vec<String> = (0..opts.nodes).map(|i| format!("sim-node-{i}")).collect();
@@ -282,7 +323,8 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         let ks = tempfile::TempDir::new()?;
         let (cb, rx) = watcher();
         let ks_path = ks.path().to_string_lossy().into_owned();
-        let tx = spawn_node(opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+        let (tx, state) = spawn_node(opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+        node_states.push(state);
         keystores.push(ks);
         senders.push(tx);
         receivers.push(rx);
@@ -356,6 +398,7 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
 
     Ok(Cluster {
         device_ids,
+        node_states,
         senders,
         receivers,
         keystores,
@@ -795,7 +838,9 @@ impl SigningTimeoutRetryResult {
 ///
 /// Needs `STARLAB_SIGNING_TIMEOUT_MS` set (by the caller, before any node is
 /// spawned) to something short — the real default is 120s, far too long for
-/// a test to sit through.
+/// a test to sit through. Only the deliberately abandoned ceremony uses that
+/// override; the retry restores the production budget, including unlock and
+/// mesh setup, and tests fresh nonce state rather than a throughput deadline.
 pub async fn run_signing_timeout_then_retry_simulation(
     opts: SimulateOpts,
     message: &str,
@@ -824,6 +869,13 @@ pub async fn run_signing_timeout_then_retry_simulation(
         Evt::SignFailed { error } => error,
         _ => unreachable!(),
     };
+
+    // The short budget proves failure/nonce cleanup, not unlock/mesh throughput.
+    // A fresh ceremony uses the production budget: co-signers decrypt and
+    // materialize account shares before joining, which can exceed 3s under load.
+    for state in &c.node_states {
+        state.restore_signing_timeout().await;
+    }
 
     // Retry: a fresh ceremony, with a real co-signer, must succeed.
     let (signature, signed_message) = drive_signing(
@@ -987,7 +1039,8 @@ pub async fn run_reshare_e2e(
             for (i, device_id) in device_ids.iter().enumerate() {
                 let (cb, rx) = watcher();
                 let ks_path = keystores[i].path().to_string_lossy().into_owned();
-                let tx = spawn_node(&opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+                let (tx, _state) =
+                    spawn_node(&opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
                 senders.push(tx);
                 receivers.push(rx);
             }
