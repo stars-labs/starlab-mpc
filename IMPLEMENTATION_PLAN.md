@@ -88,7 +88,19 @@ What it does:
   (per node, capped) and replayed; frames of other executions are dropped.
 - **Primes**: `PrimeSupply` generates in the background when a secp256k1
   runner / the TUI starts; a DKG takes the ready set (waiting with a status
-  toast if needed) and the generator starts the next. Memory only. Test-only
+  toast if needed) and the generator starts the next. Once the DKG finalize
+  password is available, unused sets are cached at
+  `<keystore>/<device>/unused-ecdsa-primes.cache` on Unix using the keystore's AES-GCM /
+  PBKDF2 format and a device-domain-derived cache-only secret. Setup/KDF/I/O
+  run on blocking workers; the wallet password is not retained by the supply.
+  Publication is atomic and never overwrites another set. Every consumer,
+  including the producer, must atomically claim and durably delete the matching
+  ciphertext lease before use; lost leases are discarded and caching is disabled
+  until a later password handoff, so claim/sync failure cannot starve fresh
+  private generation. Restored sets are
+  never republished, and old generators cannot replace them. Bad passwords,
+  corrupt caches, and write failures leave fresh generation available. Platforms
+  without durable directory sync retain fresh in-memory generation. Test-only
   injection: `PrimeSupply::insecure_test_fixed`, reached via the hidden
   `starlab-cli serve --insecure-test-primes <file>` flag and
   `SimulateOpts.insecure_test_primes` (both named insecure; tests feed the

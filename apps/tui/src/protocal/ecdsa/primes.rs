@@ -5,9 +5,12 @@
 //! long before a DKG needs them. A DKG takes the ready set (waiting if the
 //! generator is still running) and the generator immediately starts on the
 //! next set, so a second wallet in the same process doesn't wait again.
-//! Primes only ever live in memory; nothing is written to disk.
+//! Once a wallet password is available, unused sets are encrypted on disk.
+//! A published set is usable only after its unique disk lease is claimed.
 
+use super::prime_cache::{Cache, Lease};
 use starlab_core::ecdsa::Primes;
+use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -16,7 +19,10 @@ enum Slot {
     Idle,
     /// Generating since the instant.
     Generating(Instant),
-    Ready(Box<Primes>),
+    Ready {
+        primes: Box<Primes>,
+        lease: Option<Lease>,
+    },
 }
 
 /// What a UI shows about the primes (the "ECDSA setup" of the next wallet).
@@ -74,10 +80,18 @@ pub fn format_elapsed(secs: u64) -> String {
     }
 }
 
+struct State {
+    slot: Slot,
+    generation: u64,
+    cache: Option<Cache>,
+}
+
 struct Inner {
     /// Test-only fixed primes (see [`PrimeSupply::insecure_test_fixed`]).
     fixed: Option<Box<Primes>>,
-    slot: Mutex<Slot>,
+    state: Mutex<State>,
+    #[cfg(test)]
+    pause_generation: bool,
     ready: Condvar,
 }
 
@@ -109,7 +123,13 @@ impl PrimeSupply {
         Self {
             inner: Arc::new(Inner {
                 fixed: None,
-                slot: Mutex::new(Slot::Idle),
+                state: Mutex::new(State {
+                    slot: Slot::Idle,
+                    generation: 0,
+                    cache: None,
+                }),
+                #[cfg(test)]
+                pause_generation: false,
                 ready: Condvar::new(),
             }),
         }
@@ -127,24 +147,81 @@ impl PrimeSupply {
         Self {
             inner: Arc::new(Inner {
                 fixed: Some(Box::new(primes)),
-                slot: Mutex::new(Slot::Idle),
+                state: Mutex::new(State {
+                    slot: Slot::Idle,
+                    generation: 0,
+                    cache: None,
+                }),
+                #[cfg(test)]
+                pause_generation: false,
                 ready: Condvar::new(),
             }),
         }
     }
 
-    /// Start generating in the background (no-op when a set is ready, being
-    /// generated, or the supply is fixed).
+    /// Configure encrypted unused-prime persistence after a wallet password is
+    /// available. Blocking KDF and filesystem work: call via spawn_blocking.
+    pub fn configure_cache(&self, base: &Path, device: &str, password: &str) {
+        if self.inner.fixed.is_some() {
+            return;
+        }
+        let cache = match Cache::new(base, device, password) {
+            Ok(cache) => cache,
+            Err(e) => {
+                warn!("ECDSA prime cache disabled: {e}");
+                return;
+            }
+        };
+        let mut state = self.inner.state.lock().expect("prime state lock");
+        if state.cache.as_ref() == Some(&cache) {
+            return;
+        }
+        let loaded = cache.load();
+        let restored = loaded.is_some();
+        // Existing leased memory belongs to the previous configuration. Never
+        // turn it into a private set or republish it under another password.
+        if loaded.is_some() || matches!(state.slot, Slot::Ready { lease: Some(_), .. }) {
+            state.generation += 1;
+            state.slot = Slot::Idle;
+        }
+        state.cache = Some(cache);
+        if let Some((primes, lease)) = loaded {
+            state.slot = Slot::Ready {
+                primes: Box::new(primes),
+                lease: Some(lease),
+            };
+            self.inner.ready.notify_all();
+        }
+        let configured = state.cache.as_ref().expect("configured").clone();
+        if !restored && let Slot::Ready { primes, lease } = &mut state.slot {
+            // These primes were generated before configuration and never
+            // published, so they can safely become a new leased set.
+            match configured.publish(primes) {
+                Ok(published) => *lease = published,
+                Err(e) => warn!("ECDSA prime cache write failed; keeping fresh private set: {e}"),
+            }
+        }
+        drop(state);
+        self.start();
+    }
+
+    /// Start the launch-time pre-generator, preserving an already ready set.
     pub fn start(&self) {
         if self.inner.fixed.is_some() {
             return;
         }
-        let mut slot = self.inner.slot.lock().expect("prime slot lock");
-        if !matches!(*slot, Slot::Idle) {
+        let mut state = self.inner.state.lock().expect("prime state lock");
+        if !matches!(state.slot, Slot::Idle) {
             return;
         }
-        *slot = Slot::Generating(Instant::now());
-        drop(slot);
+        state.generation += 1;
+        let epoch = state.generation;
+        state.slot = Slot::Generating(Instant::now());
+        drop(state);
+        #[cfg(test)]
+        if self.inner.pause_generation {
+            return;
+        }
         let inner = self.inner.clone();
         let spawned = std::thread::Builder::new()
             .name("ecdsa-primes".into())
@@ -157,12 +234,14 @@ impl PrimeSupply {
                     "ECDSA: safe primes ready after {:.0}s",
                     started.elapsed().as_secs_f64()
                 );
-                *inner.slot.lock().expect("prime slot lock") = Slot::Ready(Box::new(primes));
-                inner.ready.notify_all();
+                finish_generation(&inner, epoch, primes);
             });
         if let Err(e) = spawned {
             warn!("ECDSA: could not spawn the prime generator: {e}");
-            *self.inner.slot.lock().expect("prime slot lock") = Slot::Idle;
+            let mut state = self.inner.state.lock().expect("prime state lock");
+            if state.generation == epoch {
+                state.slot = Slot::Idle;
+            }
         }
     }
 
@@ -176,12 +255,16 @@ impl PrimeSupply {
         if self.inner.fixed.is_some() {
             return PrimeStatus::InsecureTestFixed;
         }
-        match &*self.inner.slot.lock().expect("prime slot lock") {
+        // UI polling must not wait behind a blocking cache KDF/fsync.
+        let Ok(state) = self.inner.state.try_lock() else {
+            return PrimeStatus::Generating { elapsed_secs: 0 };
+        };
+        match &state.slot {
             Slot::Idle => PrimeStatus::Idle,
             Slot::Generating(since) => PrimeStatus::Generating {
                 elapsed_secs: since.elapsed().as_secs(),
             },
-            Slot::Ready(_) => PrimeStatus::Ready,
+            Slot::Ready { .. } => PrimeStatus::Ready,
         }
     }
 
@@ -194,38 +277,75 @@ impl PrimeSupply {
         }
         self.start();
         let deadline = Instant::now() + timeout;
-        let mut slot = self.inner.slot.lock().expect("prime slot lock");
+        let mut state = self.inner.state.lock().expect("prime state lock");
         loop {
-            if matches!(*slot, Slot::Ready(_)) {
-                let Slot::Ready(primes) = std::mem::replace(&mut *slot, Slot::Idle) else {
+            if matches!(state.slot, Slot::Ready { .. }) {
+                let Slot::Ready { primes, lease } = std::mem::replace(&mut state.slot, Slot::Idle)
+                else {
                     unreachable!()
                 };
-                drop(slot);
-                self.start(); // the next wallet's set
-                return Some(*primes);
+                let usable = lease.as_ref().is_none_or(|lease| {
+                    state.cache.as_ref().is_some_and(|cache| cache.claim(lease))
+                });
+                if !usable {
+                    // A failed claim can mean unsupported directory sync or
+                    // persistent contention. Do not endlessly publish and lose
+                    // the replacement: keep subsequent fresh sets private until
+                    // a later password handoff explicitly configures again.
+                    state.cache = None;
+                }
+                drop(state);
+                self.start();
+                if usable {
+                    return Some(*primes);
+                }
+                warn!(
+                    "ECDSA prime-cache lease was lost; discarding primes and generating a fresh set"
+                );
+                state = self.inner.state.lock().expect("prime state lock");
             }
             let left = deadline.checked_duration_since(Instant::now())?;
-            slot = self
+            state = self
                 .inner
                 .ready
-                .wait_timeout(slot, left)
-                .expect("prime slot lock")
+                .wait_timeout(state, left)
+                .expect("prime state lock")
                 .0;
         }
     }
 }
 
+fn finish_generation(inner: &Inner, epoch: u64, primes: Primes) {
+    let mut state = inner.state.lock().expect("prime state lock");
+    if state.generation != epoch || !matches!(state.slot, Slot::Generating(_)) {
+        return;
+    }
+    let lease = state
+        .cache
+        .as_ref()
+        .and_then(|cache| match cache.publish(&primes) {
+            Ok(lease) => lease,
+            Err(e) => {
+                warn!("ECDSA prime cache write failed; keeping fresh private set: {e}");
+                None
+            }
+        });
+    state.slot = Slot::Ready {
+        primes: Box::new(primes),
+        lease,
+    };
+    inner.ready.notify_all();
+}
+
+#[cfg(test)]
+#[path = "prime_cache_tests.rs"]
+mod cache_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fixture() -> Primes {
-        let all: Vec<Primes> = serde_json::from_str(include_str!(
-            "../../../../../packages/@starlab/core/src/ecdsa/testdata/primes.json"
-        ))
-        .expect("fixture primes");
-        all.into_iter().next().expect("one set")
-    }
+    use super::cache_tests::{controlled_supply, fixture};
 
     #[test]
     fn fixed_supply_hands_out_the_same_primes_repeatedly() {
@@ -238,7 +358,7 @@ mod tests {
 
     #[test]
     fn background_supply_is_lazy_and_times_out_while_generating() {
-        let supply = PrimeSupply::background();
+        let supply = controlled_supply();
         assert!(!supply.is_ready(), "nothing is generated before start()");
         // take() starts the generator; it can't finish within 1 ms.
         assert!(supply.take(Duration::from_millis(1)).is_none());
@@ -246,7 +366,7 @@ mod tests {
 
     #[test]
     fn status_reports_idle_then_generating() {
-        let supply = PrimeSupply::background();
+        let supply = controlled_supply();
         assert_eq!(supply.status(), PrimeStatus::Idle);
         supply.start();
         assert!(matches!(

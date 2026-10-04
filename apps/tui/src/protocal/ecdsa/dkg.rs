@@ -76,6 +76,20 @@ pub async fn run_after_frost<C>(
         )
     };
 
+    // The existing finalize password unlocks the per-device cache. Keep all
+    // KDF/filesystem work off the runtime and retain only a cache-domain secret.
+    let cache_supply = primes.clone();
+    let cache_path = std::path::PathBuf::from(&fin.keystore_path);
+    let cache_device = device_id.clone();
+    let cache_password = fin.password.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || {
+        cache_supply.configure_cache(&cache_path, &cache_device, &cache_password);
+    })
+    .await
+    {
+        tracing::warn!("ECDSA prime cache setup failed; fresh generation remains available: {e}");
+    }
+
     let (out_tx, out_rx) = unbounded_channel();
     let (status_tx, status_rx) = unbounded_channel();
     let (done_tx, done_rx) = tokio::sync::oneshot::channel();

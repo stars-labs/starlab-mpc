@@ -4,7 +4,7 @@
 //! across multiple devices and wallets. It supports encryption, backup, and recovery
 //! mechanisms in line with the threshold security model.
 
-mod encryption;
+pub(crate) mod encryption;
 mod extension_compat;
 mod models;
 mod storage;

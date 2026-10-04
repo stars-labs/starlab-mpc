@@ -16,6 +16,7 @@
 //!   ([`primes`]).
 
 pub mod dkg;
+mod prime_cache;
 pub mod primes;
 pub mod signing;
 pub mod wire;
