@@ -15,7 +15,7 @@ use tracing::{error, info};
 
 /// Bound on aux info + keygen once primes are in hand (aux info is ~20 s
 /// of CPU per party natively; slow wasm peers need much more).
-const DKG_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+pub const DKG_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// What the FROST finalize hands over: enough to persist the ECDSA share
 /// next to the FROST ones and then report the whole wallet.

@@ -22,7 +22,7 @@ use super::primes::PrimeSupply;
 use super::wire::execution_id_of;
 
 /// How long a DKG waits for the background prime generator.
-const PRIMES_WAIT: Duration = Duration::from_secs(15 * 60);
+pub const PRIMES_WAIT: Duration = Duration::from_secs(15 * 60);
 
 /// What a worker thread runs.
 pub enum Job {

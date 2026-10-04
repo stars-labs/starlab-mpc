@@ -92,17 +92,9 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
         *snapshot_for_sync.lock().unwrap() = b.snapshot(model);
         drop(b);
         for mut ev in events {
+            correlate_dkg_event(&mut ev, &pending_for_sync);
             // Stamp the originating command id onto terminal events.
             match &mut ev {
-                CliEvent::DkgComplete { correlates, .. } if correlates.is_none() => {
-                    *correlates = pending_for_sync.lock().unwrap().take();
-                }
-                // Announcement is mid-ceremony: correlate with the create
-                // command but DON'T consume the id — DkgComplete still
-                // needs it to close the loop.
-                CliEvent::SessionAnnounced { correlates, .. } if correlates.is_none() => {
-                    *correlates = *pending_for_sync.lock().unwrap();
-                }
                 CliEvent::SignatureComplete { correlates, .. } if correlates.is_none() => {
                     *correlates = pending_sign_for_sync.lock().unwrap().take();
                 }
@@ -353,4 +345,89 @@ pub async fn serve(opts: ServeOpts) -> anyhow::Result<()> {
     drop(out_tx);
     let _ = writer.await;
     Ok(())
+}
+
+/// An announcement keeps the pending command; either terminal DKG result
+/// consumes it, so a later ceremony cannot inherit the previous request id.
+fn correlate_dkg_event(event: &mut CliEvent, pending: &Mutex<Option<u64>>) {
+    match event {
+        CliEvent::DkgComplete { correlates, .. } if correlates.is_none() => {
+            *correlates = pending.lock().unwrap().take();
+        }
+        CliEvent::Error {
+            correlates, code, ..
+        } if correlates.is_none() && code == "dkg_failed" => {
+            *correlates = pending.lock().unwrap().take();
+        }
+        CliEvent::SessionAnnounced { correlates, .. } if correlates.is_none() => {
+            *correlates = *pending.lock().unwrap();
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod dkg_correlation_tests {
+    use super::*;
+
+    #[test]
+    fn dkg_failure_consumes_its_command_id_and_allows_next_ceremony() {
+        let pending = Mutex::new(Some(41));
+        let mut announced = CliEvent::SessionAnnounced {
+            correlates: None,
+            session_id: "first".into(),
+        };
+        correlate_dkg_event(&mut announced, &pending);
+        assert!(matches!(
+            announced,
+            CliEvent::SessionAnnounced {
+                correlates: Some(41),
+                ..
+            }
+        ));
+        assert_eq!(*pending.lock().unwrap(), Some(41));
+        let mut failure = CliEvent::Error {
+            correlates: None,
+            code: "dkg_failed".into(),
+            message: "proof rejected".into(),
+        };
+        correlate_dkg_event(&mut failure, &pending);
+        assert!(matches!(
+            failure,
+            CliEvent::Error {
+                correlates: Some(41),
+                ..
+            }
+        ));
+        assert_eq!(*pending.lock().unwrap(), None);
+        *pending.lock().unwrap() = Some(42);
+        let mut unrelated = CliEvent::Error {
+            correlates: None,
+            code: "invalid_command".into(),
+            message: "bad request".into(),
+        };
+        correlate_dkg_event(&mut unrelated, &pending);
+        assert_eq!(*pending.lock().unwrap(), Some(42));
+        correlate_dkg_event(&mut failure, &pending);
+        assert_eq!(
+            *pending.lock().unwrap(),
+            Some(42),
+            "already-correlated error cannot consume next command"
+        );
+        let mut completed = CliEvent::DkgComplete {
+            correlates: None,
+            wallet_id: "second".into(),
+            address: "address".into(),
+            group_public_key: "key".into(),
+        };
+        correlate_dkg_event(&mut completed, &pending);
+        assert!(matches!(
+            completed,
+            CliEvent::DkgComplete {
+                correlates: Some(42),
+                ..
+            }
+        ));
+        assert_eq!(*pending.lock().unwrap(), None);
+    }
 }

@@ -14,6 +14,20 @@ coverage and do not establish cryptographic or network interoperability.
 | Desktop interoperability | `stars-labs/starlab-desktop` ignored integration tests | Shared engine with desktop frontend, account signing and encrypted export/import |
 | Production-prime Ethereum transaction | [Sepolia evidence](evidence/sepolia-live-2026-10-04.json) | Real three-client key generation, recoverable ECDSA transaction and confirmed receipt |
 
+Cold production-prime startup also has a dedicated CI shard; the network suites
+usually use explicitly insecure prime fixtures to keep their protocol checks fast.
+Run the actual-prime two-node test separately:
+
+```sh
+cargo test -p starlab-cli --lib --locked -- --ignored --exact simulate::tests::simulate_2_of_2 --nocapture
+```
+
+The cold DKG wait includes the native 15-minute prime preparation and 10-minute
+aux-info/keygen budgets, plus two minutes for discovery/FROST. CLI wallet create
+and a discovered secp256k1/unified DKG join use that default. Discovery, signing,
+refresh, and ed25519-only DKG keep the ordinary 90-second default; an explicit
+`--timeout` overrides either default. A DKG failure is surfaced immediately.
+
 Run native network suites explicitly: their expensive tests are ignored in the
 default unit run. Serialize them to avoid fixture and machine resource interference.
 

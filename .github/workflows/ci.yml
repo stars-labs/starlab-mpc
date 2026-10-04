@@ -21,6 +21,7 @@ jobs:
   rust:
     name: Rust ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout || 40 }}
     strategy:
       fail-fast: false
       matrix:
@@ -32,6 +33,14 @@ jobs:
               cargo test -p starlab-cli -p starlab-signal-server --locked
               && cargo test -p starlab-client --lib --locked
               && cargo test -p starlab-core --locked
+          # Cold-start native safe primes must be covered without insecure fixtures.
+          - name: cold DKG (production primes)
+            timeout: 45
+            run: >-
+              cargo test -p starlab-cli --lib --locked --
+              --ignored --exact simulate::tests::simulate_2_of_2 --nocapture
+              && cargo test -p starlab-cli --lib --locked --
+              --ignored --exact oneshot::output_tests::session_join_discovers_and_completes_real_dkg --nocapture
           # e2e_dkg: real WebRTC DKG + threshold signing over loopback.
           - name: e2e (DKG, ECDSA, FROST quorum)
             run: >-
@@ -85,7 +94,7 @@ jobs:
       # loopback); they gate CI and pass on GitHub's shared runners.
       - name: ${{ matrix.name }}
         run: ${{ matrix.run }}
-        timeout-minutes: 30
+        timeout-minutes: ${{ matrix.timeout || 30 }}
 
   wasm:
     name: core-wasm + types build

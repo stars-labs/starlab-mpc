@@ -100,6 +100,9 @@ enum Evt {
         group_key: String,
         ethereum_address: String,
     },
+    DkgFailed {
+        error: String,
+    },
     SignDone {
         signature: String,
         message: String,
@@ -147,6 +150,11 @@ fn watcher() -> (
                             .unwrap_or_default(),
                     });
                 }
+                Message::DKGFailed { error } => {
+                    let _ = tx.send(Evt::DkgFailed {
+                        error: error.clone(),
+                    });
+                }
                 Message::ReshareComplete {
                     group_public_key, ..
                 } => {
@@ -181,6 +189,7 @@ where
     tokio::time::timeout(Duration::from_secs(secs), async {
         loop {
             match rx.recv().await {
+                Some(Evt::DkgFailed { error }) => anyhow::bail!("DKG failed: {error}"),
                 Some(e) if pred(&e) => return Ok(e),
                 Some(_) => continue,
                 None => anyhow::bail!("event channel closed"),
@@ -1536,15 +1545,38 @@ fn verify_ed25519(group_key_hex: &str, message_hex: &str, sig_hex: &str) -> anyh
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn dkg_failure_is_returned_immediately_instead_of_outer_timeout() {
+        let (callback, mut rx) = watcher();
+        callback(
+            &Model::new("device".into()),
+            Some(&Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            }),
+        );
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_for(&mut rx, 3600, |e| matches!(e, Evt::DkgDone { .. })),
+        )
+        .await
+        .expect("failure should not wait for DKG timeout")
+        .unwrap_err();
+        assert_eq!(error.to_string(), "DKG failed: aux-info proof rejected");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "real WebRTC/DKG over loopback; run with --ignored"]
     async fn simulate_2_of_2() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("starlab_client::protocal::ecdsa=info")
+            .with_test_writer()
+            .try_init();
         let result = run_simulation(SimulateOpts {
             nodes: 2,
             threshold: 2,
             curve: "secp256k1".into(),
             signal_url: None,
-            timeout_secs: 90,
+            timeout_secs: crate::oneshot::COLD_DKG_TIMEOUT_SECS,
             insecure_test_primes: Vec::new(),
         })
         .await
