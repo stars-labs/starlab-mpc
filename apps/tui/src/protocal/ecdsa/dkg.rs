@@ -100,6 +100,10 @@ pub async fn run_after_frost<C>(
         threshold,
         primes,
     };
+    let mut state = app_state.lock().await;
+    if !owns_dkg_session(&state, &session_id) {
+        return;
+    }
     let inbox = match worker::spawn(job, DKG_TIMEOUT, out_tx, status_tx, done_tx) {
         Ok(inbox) => inbox,
         Err(e) => {
@@ -107,7 +111,8 @@ pub async fn run_after_frost<C>(
             return;
         }
     };
-    app_state.lock().await.ecdsa.install_worker(inbox);
+    state.ecdsa.install_worker(inbox);
+    drop(state);
     super::spawn_transport(app_state.clone(), out_rx);
     super::spawn_status(status_rx, tx.clone());
     info!(
@@ -123,27 +128,38 @@ pub async fn run_after_frost<C>(
         .unwrap_or_else(|_| Err("ECDSA worker vanished".into()));
     {
         let mut state = app_state.lock().await;
+        // Aborting a worker closes its inbox. Its eventual result must not
+        // clear a newer worker or report failure for a different ceremony.
+        if !owns_dkg_session(&state, &session_id) {
+            return;
+        }
+        if let Err(e) = &result {
+            fail(format!("ECDSA key generation failed: {e}"));
+        }
         state.ecdsa.remove_worker();
         state.ceremony_outbox.clear();
     }
     let share = match result {
         Ok(Outcome::Dkg(share)) => share,
         Ok(Outcome::Sign(_)) => unreachable!("a DKG job yields a key share"),
-        Err(e) => {
-            fail(format!("ECDSA key generation failed: {e}"));
-            return;
-        }
+        Err(_) => return,
     };
 
     let mut ks = match crate::keystore::Keystore::new(&fin.keystore_path, &device_id) {
         Ok(ks) => ks,
         Err(e) => {
-            fail(format!("ECDSA DKG: keystore open failed: {e}"));
+            let state = app_state.lock().await;
+            if owns_dkg_session(&state, &session_id) {
+                fail(format!("ECDSA DKG: keystore open failed: {e}"));
+            }
             return;
         }
     };
     if let Err(e) = ks.save_ecdsa_share(&fin.wallet_id, &share, &fin.password, fin.label.clone()) {
-        fail(format!("ECDSA DKG: persisting the share failed: {e}"));
+        let state = app_state.lock().await;
+        if owns_dkg_session(&state, &session_id) {
+            fail(format!("ECDSA DKG: persisting the share failed: {e}"));
+        }
         return;
     }
     drop(fin.password);
@@ -164,13 +180,84 @@ pub async fn run_after_frost<C>(
 
     {
         let mut state = app_state.lock().await;
-        state.keystore = Some(Arc::new(ks));
-        state.ecdsa.key_share = Some((fin.wallet_id.clone(), *share));
+        publish_if_current(&mut state, &session_id, |state| {
+            state.keystore = Some(Arc::new(ks));
+            state.ecdsa.key_share = Some((fin.wallet_id.clone(), *share));
+            let _ = tx.send(Message::DKGFinalized {
+                wallet_id: fin.wallet_id,
+                group_pubkey_hex: fin.group_pubkey_hex,
+                curve_type: fin.curve_type,
+                addresses,
+            });
+        });
     }
-    let _ = tx.send(Message::DKGFinalized {
-        wallet_id: fin.wallet_id,
-        group_pubkey_hex: fin.group_pubkey_hex,
-        curve_type: fin.curve_type,
-        addresses,
-    });
+}
+
+fn owns_dkg_session<C: Ciphersuite>(state: &AppState<C>, id: &str) -> bool {
+    state.session.as_ref().is_some_and(|session| {
+        session.session_id == id
+            && matches!(
+                session.session_type,
+                crate::protocal::signal::SessionType::DKG
+            )
+    })
+}
+
+fn publish_if_current<C: Ciphersuite>(
+    state: &mut AppState<C>,
+    id: &str,
+    publish: impl FnOnce(&mut AppState<C>),
+) {
+    if owns_dkg_session(state, id) {
+        publish(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use frost_ed25519::Ed25519Sha512;
+
+    #[test]
+    fn persisted_old_result_cannot_publish_after_runtime_session_changes() {
+        let mut state = AppState::<Ed25519Sha512>::new();
+        state.session = Some(SessionInfo {
+            session_id: "new".into(),
+            proposer_id: "self".into(),
+            total: 2,
+            threshold: 2,
+            participants: vec![],
+            session_type: SessionType::DKG,
+            curve_type: "ed25519".into(),
+            coordination_type: "online".into(),
+            signing_message_hex: None,
+        });
+        state.current_wallet_id = Some("new-wallet".into());
+        let (tx, mut rx) = unbounded_channel();
+        // Represents the publication boundary after persistence released the lock.
+        publish_if_current(&mut state, "old", |state| {
+            state.current_wallet_id = Some("old-wallet".into());
+            tx.send(Message::DKGFinalized {
+                wallet_id: "old-wallet".into(),
+                group_pubkey_hex: "public".into(),
+                curve_type: "ecdsa".into(),
+                addresses: vec![],
+            })
+            .unwrap();
+        });
+        assert_eq!(state.current_wallet_id.as_deref(), Some("new-wallet"));
+        assert!(rx.try_recv().is_err());
+        publish_if_current(&mut state, "new", |_| {
+            tx.send(Message::Info {
+                message: "current result".into(),
+            })
+            .unwrap();
+        });
+        assert!(matches!(rx.try_recv().unwrap(), Message::Info { .. }));
+        state.session = None;
+        publish_if_current(&mut state, "new", |_| {
+            panic!("cancelled result cannot publish")
+        });
+    }
 }

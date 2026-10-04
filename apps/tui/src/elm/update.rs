@@ -1866,10 +1866,38 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 message: crate::elm::error_help::dkg(&error),
             });
 
-            // Reset DKG-in-progress flag so user can retry
-            model.pending_operations.clear();
-
-            None
+            let session_id = model
+                .active_session
+                .as_ref()
+                .filter(|s| matches!(s.session_type, SessionType::DKG))
+                .map(|s| s.session_id.clone())
+                .or_else(|| model.wallet_state.joining_session.clone());
+            if model.active_session.as_ref().is_some_and(|s| {
+                matches!(s.session_type, SessionType::DKG)
+                    && session_id.as_deref() == Some(s.session_id.as_str())
+            }) {
+                model.active_session = None;
+            }
+            if let Some(id) = &session_id {
+                model.session_invites.retain(|s| &s.session_id != id);
+            }
+            model.wallet_state.creating_wallet = None;
+            model.wallet_state.joining_session = None;
+            model.wallet_state.dkg_in_progress = false;
+            model.wallet_state.dkg_round = DKGRound::Initialization;
+            model.wallet_state.pending_password = None;
+            model.pending_operations.retain(|op| {
+                !matches!(
+                    op,
+                    Operation::CreateWallet(_)
+                        | Operation::StartDKG { .. }
+                        | Operation::JoinDKG { .. }
+                )
+            });
+            // "pending" is a creator placeholder, not a server session id.
+            Some(Command::AbortDKG {
+                session_id: session_id.filter(|id| id != "pending"),
+            })
         }
 
         Message::CancelDKG => {
@@ -4367,6 +4395,131 @@ mod tests {
             },
         );
         assert!(cmd.is_none());
+    }
+
+    #[test]
+    fn failed_creator_retires_dkg_preserves_error_and_can_create_again() {
+        let mut model = Model::new("dev".into());
+        let config = WalletConfig {
+            name: "first".into(),
+            threshold: 2,
+            total_participants: 2,
+            mode: WalletMode::Online,
+        };
+        update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config: config.clone(),
+                password: "pw".into(),
+                label: "first".into(),
+            },
+        );
+        update(
+            &mut model,
+            Message::CreateWallet {
+                config: config.clone(),
+            },
+        );
+        update(
+            &mut model,
+            Message::UpdateDKGSessionId {
+                real_session_id: "failed-creator".into(),
+            },
+        );
+        model.wallet_state.dkg_in_progress = true;
+        model.wallet_state.pending_password = Some("pw".into());
+        model.pending_operations.push(Operation::SignTransaction {
+            wallet_id: "other-wallet".into(),
+            data: vec![1],
+        });
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            },
+        );
+        assert!(
+            matches!(command, Some(Command::AbortDKG { session_id: Some(id) }) if id == "failed-creator")
+        );
+        assert!(model.wallet_state.creating_wallet.is_none());
+        assert!(model.wallet_state.joining_session.is_none());
+        assert!(!model.wallet_state.dkg_in_progress);
+        assert!(model.active_session.is_none());
+        assert!(model.wallet_state.pending_password.is_none());
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Error { message, .. }) if message.contains("aux-info proof rejected"))
+        );
+        assert!(matches!(
+            model.pending_operations.as_slice(),
+            [Operation::SignTransaction { .. }]
+        ));
+        let retry = update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config,
+                password: "new-pw".into(),
+                label: "retry".into(),
+            },
+        );
+        assert!(matches!(
+            retry,
+            Some(Command::SendMessage(Message::SubmitPassword { .. }))
+        ));
+        assert!(model.wallet_state.creating_wallet.is_some());
+    }
+
+    #[test]
+    fn failed_joiner_retires_only_its_invite_and_can_join_another() {
+        let mut model = Model::new("dev".into());
+        model.session_invites = vec![dkg_invite("failed"), dkg_invite("next")];
+        join(&mut model, "failed");
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "peer disconnected".into(),
+            },
+        );
+        assert!(
+            matches!(command, Some(Command::AbortDKG { session_id: Some(id) }) if id == "failed")
+        );
+        assert!(model.active_session.is_none());
+        assert!(model.wallet_state.joining_session.is_none());
+        assert_eq!(model.session_invites.len(), 1);
+        assert_eq!(model.session_invites[0].session_id, "next");
+        join(&mut model, "next");
+        assert_eq!(model.wallet_state.joining_session.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn dkg_failure_does_not_clear_an_unrelated_signing_session_or_draft() {
+        let mut model = Model::new("dev".into());
+        let mut signing = dkg_invite("sign-current");
+        signing.session_type = SessionType::Signing {
+            curve_type: "ecdsa".into(),
+            wallet_name: "wallet".into(),
+            blockchain: "ethereum".into(),
+            group_public_key: "public".into(),
+        };
+        model.active_session = Some(signing);
+        model.wallet_state.pending_sign_wallet_id = Some("wallet-ethereum-0".into());
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "old failure".into(),
+            },
+        );
+        assert!(matches!(
+            command,
+            Some(Command::AbortDKG { session_id: None })
+        ));
+        assert_eq!(
+            model.active_session.as_ref().unwrap().session_id,
+            "sign-current"
+        );
+        assert_eq!(
+            model.wallet_state.pending_sign_wallet_id.as_deref(),
+            Some("wallet-ethereum-0")
+        );
     }
 
     #[test]

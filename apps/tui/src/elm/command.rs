@@ -167,6 +167,10 @@ pub enum Command {
     CancelDKG {
         session_id: Option<String>,
     },
+    /// Retire a failed DKG without clearing unrelated signing state.
+    AbortDKG {
+        session_id: Option<String>,
+    },
     /// Encrypt the just-produced FROST key share with `password` and
     /// persist it to the keystore, then emit `Message::DKGFinalized`.
     /// Consumes the cleartext password — the update-layer handler that
@@ -3724,6 +3728,63 @@ impl Command {
                 let _ = tx.send(Message::Quit);
             }
 
+            Command::AbortDKG { session_id } => {
+                // Pre-announcement failures have no runtime session to retire.
+                // Never infer one: a newer ceremony may already have started.
+                let Some(session_id) = session_id else {
+                    return Ok(());
+                };
+                let (session_id, ws_tx) = {
+                    let mut state = app_state.lock().await;
+                    if state.session.as_ref().is_some_and(|s| {
+                        s.session_id == session_id
+                            && !matches!(s.session_type, crate::protocal::signal::SessionType::DKG)
+                    }) {
+                        return Ok(());
+                    }
+                    let current_dkg = state.session.as_ref().filter(|s| {
+                        matches!(s.session_type, crate::protocal::signal::SessionType::DKG)
+                    });
+                    let target = Some(session_id);
+                    let matches_current = current_dkg
+                        .is_some_and(|s| target.as_deref() == Some(s.session_id.as_str()));
+                    if matches_current {
+                        state.session = None;
+                        state.dkg_in_progress = false;
+                        state.dkg_state = crate::utils::state::DkgState::Idle;
+                        state.dkg_part1_public_package = None;
+                        state.dkg_part1_secret_package = None;
+                        state.dkg_part2_secret_package = None;
+                        state.pending_dkg_round1.clear();
+                        state.dkg_round1_packages.clear();
+                        state.dkg_round2_packages.clear();
+                        state.round2_secret_package = None;
+                        state.received_dkg_packages.clear();
+                        state.received_dkg_round2_packages.clear();
+                        state.unified_dkg = None;
+                        state.unified_finalize = None;
+                        state.pending_mesh_ready_signals.clear();
+                        state.own_mesh_ready_sent = false;
+                        state.ceremony_outbox.clear();
+                        if state.ecdsa.signing.is_none() {
+                            state.ecdsa.reset_for_new_dkg();
+                        }
+                    }
+                    (target, state.websocket_msg_tx.clone())
+                };
+                if let (Some(session_id), Some(ws_tx)) = (session_id, ws_tx) {
+                    let leave = starlab_signal_server::ClientMsg::LeaveSession { session_id };
+                    match serde_json::to_string(&leave) {
+                        Ok(json) => {
+                            if let Err(e) = ws_tx.send(json) {
+                                warn!("AbortDKG: outbound channel closed: {e}");
+                            }
+                        }
+                        Err(e) => error!("AbortDKG: failed to serialize withdrawal: {e}"),
+                    }
+                }
+            }
+
             Command::CancelDKG { session_id } => {
                 let (session_id, ws_tx) = {
                     let mut state = app_state.lock().await;
@@ -4282,5 +4343,117 @@ mod wallet_deletion_tests {
                 .is_none()
         );
         assert!(!dir.path().join("device/ed25519/wallet.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod dkg_failure_retirement_tests {
+    use super::*;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use crate::utils::{appstate_compat::AppState, state::DkgState};
+    use frost_ed25519::Ed25519Sha512;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    async fn retire(
+        target: Option<&str>,
+        current: &str,
+        kind: SessionType,
+    ) -> (AppState<Ed25519Sha512>, Vec<String>) {
+        let mut app = AppState::new();
+        app.session = Some(SessionInfo {
+            session_id: current.into(),
+            proposer_id: "self".into(),
+            total: 2,
+            threshold: 2,
+            participants: vec!["self".into(), "peer".into()],
+            session_type: kind,
+            curve_type: "ed25519".into(),
+            coordination_type: "online".into(),
+            signing_message_hex: None,
+        });
+        app.dkg_in_progress = true;
+        app.dkg_state = DkgState::Round1InProgress;
+        app.signing_message = Some(b"unrelated signing draft".to_vec());
+        let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel();
+        app.websocket_msg_tx = Some(ws_tx);
+        let state = Arc::new(Mutex::new(app));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::AbortDKG {
+            session_id: target.map(str::to_owned),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(
+            rx.try_recv().is_err(),
+            "retirement must not replace the failure with cancellation"
+        );
+        let messages = std::iter::from_fn(|| ws_rx.try_recv().ok()).collect();
+        (Arc::try_unwrap(state).ok().unwrap().into_inner(), messages)
+    }
+
+    #[tokio::test]
+    async fn matching_failed_dkg_is_withdrawn_and_runtime_can_retry() {
+        let (app, messages) = retire(Some("failed"), "failed", SessionType::DKG).await;
+        assert!(app.session.is_none());
+        assert!(!app.dkg_in_progress);
+        assert!(matches!(app.dkg_state, DkgState::Idle));
+        assert_eq!(
+            app.signing_message.as_deref(),
+            Some(b"unrelated signing draft".as_slice())
+        );
+        assert_eq!(messages.len(), 1);
+        let message: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+        assert_eq!(message["type"], "leave_session");
+        assert_eq!(message["session_id"], "failed");
+    }
+
+    #[tokio::test]
+    async fn queued_failure_does_not_abort_new_dkg_or_signing() {
+        for kind in [
+            SessionType::DKG,
+            SessionType::Signing {
+                wallet_name: "wallet".into(),
+                curve_type: "ecdsa".into(),
+                blockchain: "ethereum".into(),
+                group_public_key: "public".into(),
+            },
+        ] {
+            let (app, messages) = retire(Some("failed"), "new", kind).await;
+            assert_eq!(app.session.as_ref().unwrap().session_id, "new");
+            assert!(app.dkg_in_progress);
+            assert!(matches!(app.dkg_state, DkgState::Round1InProgress));
+            assert_eq!(messages.len(), 1);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&messages[0]).unwrap()["session_id"],
+                "failed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn same_id_non_dkg_cannot_be_withdrawn() {
+        let (app, messages) = retire(
+            Some("sign"),
+            "sign",
+            SessionType::Signing {
+                wallet_name: "wallet".into(),
+                curve_type: "ecdsa".into(),
+                blockchain: "ethereum".into(),
+                group_public_key: "public".into(),
+            },
+        )
+        .await;
+        assert!(app.session.is_some());
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failure_before_announcement_cannot_infer_a_new_runtime_session() {
+        let (app, messages) = retire(None, "new", SessionType::DKG).await;
+        assert_eq!(app.session.as_ref().unwrap().session_id, "new");
+        assert!(app.dkg_in_progress);
+        assert!(messages.is_empty());
     }
 }
