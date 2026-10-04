@@ -92,7 +92,10 @@ pub enum Message {
     DeleteWallet {
         wallet_id: String,
     },
-    WalletDeleted {
+    DeleteWalletConfirmed {
+        wallet_id: String,
+    },
+    WalletDeletionCompleted {
         wallet_id: String,
     },
     /// 'e' on Manage Wallets: open the export screen for this wallet.

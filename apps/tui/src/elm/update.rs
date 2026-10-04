@@ -1513,16 +1513,44 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     "Are you sure you want to delete wallet '{}'? This action cannot be undone.",
                     wallet_id
                 ),
-                on_confirm: Box::new(Message::WalletDeleted { wallet_id }),
+                on_confirm: Box::new(Message::DeleteWalletConfirmed { wallet_id }),
                 on_cancel: Box::new(Message::CloseModal),
             });
             None
         }
 
-        Message::WalletDeleted { wallet_id } => {
+        Message::DeleteWalletConfirmed { wallet_id } => {
             info!("Deleting wallet: {}", wallet_id);
             model.ui_state.modal = None;
             Some(Command::DeleteWallet { wallet_id })
+        }
+
+        Message::WalletDeletionCompleted { wallet_id } => {
+            let belongs = |id: &str| {
+                id == wallet_id
+                    || starlab_core::accounts::parse_child_wallet_id(id)
+                        .is_some_and(|(parent, _, _)| parent == wallet_id)
+            };
+            model
+                .wallet_state
+                .wallets
+                .retain(|w| !belongs(&w.session_id));
+            if model
+                .wallet_state
+                .selected_wallet
+                .as_deref()
+                .is_some_and(belongs)
+            {
+                model.wallet_state.selected_wallet = None;
+            }
+            if model.selected_wallet.as_deref().is_some_and(belongs) {
+                model.selected_wallet = None;
+            }
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Deleted wallet '{wallet_id}'"),
+            );
+            Some(Command::LoadWallets)
         }
 
         // ============= Wallet export / import =============
@@ -4367,6 +4395,27 @@ mod tests {
     }
 
     #[test]
+    fn wallet_deletion_completion_clears_only_matching_selection() {
+        let mut model = Model::new("device".into());
+        model.selected_wallet = Some("wallet-bitcoin-2".into());
+        model.wallet_state.selected_wallet = Some("wallet-other".into());
+        assert!(matches!(
+            update(
+                &mut model,
+                Message::WalletDeletionCompleted {
+                    wallet_id: "wallet".into()
+                }
+            ),
+            Some(Command::LoadWallets)
+        ));
+        assert!(model.selected_wallet.is_none());
+        assert_eq!(
+            model.wallet_state.selected_wallet.as_deref(),
+            Some("wallet-other")
+        );
+    }
+
+    #[test]
     fn withdrawing_signing_request_dismisses_matching_review_and_accepts_next() {
         let mut model = Model::new("dev".into());
         discover_signing_request(&mut model, "first");
@@ -4407,7 +4456,7 @@ mod tests {
         model.ui_state.modal = Some(Modal::Confirm {
             title: "Delete wallet".into(),
             message: "Keep this confirmation".into(),
-            on_confirm: Box::new(Message::WalletDeleted {
+            on_confirm: Box::new(Message::DeleteWalletConfirmed {
                 wallet_id: "wallet".into(),
             }),
             on_cancel: Box::new(Message::CancelModal),
@@ -4420,7 +4469,7 @@ mod tests {
         );
         assert!(
             matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
-            if matches!(on_confirm.as_ref(), Message::WalletDeleted { wallet_id } if wallet_id == "wallet"))
+            if matches!(on_confirm.as_ref(), Message::DeleteWalletConfirmed { wallet_id } if wallet_id == "wallet"))
         );
     }
 

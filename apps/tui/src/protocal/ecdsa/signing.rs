@@ -544,6 +544,178 @@ fn fail<C: Ciphersuite>(guard: &mut AppState<C>, reason: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    type Suite = frost_ed25519::Ed25519Sha512;
+
+    fn control_state() -> (
+        Arc<Mutex<AppState<Suite>>>,
+        tokio::sync::mpsc::UnboundedReceiver<Message>,
+        Control,
+    ) {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("testdata/insecure-control.json")).unwrap();
+        let share: EcdsaKeyShare = serde_json::from_value(fixture["share"].clone()).unwrap();
+        let signature = fixture["signature"].as_str().unwrap();
+        let mut bytes = hex::decode(signature).unwrap();
+        bytes[64] += 27;
+        let (tx, rx) = unbounded_channel();
+        let mut app = AppState::<Suite>::new();
+        app.ecdsa.signing_epoch = 7;
+        app.ecdsa.signing = Some(SigningCtx {
+            session_id: "sign-current".into(),
+            proposer: "device-0".into(),
+            self_id: "device-2".into(),
+            participants: vec!["device-0".into(), "device-1".into(), "device-2".into()],
+            threshold: 2,
+            prehash: [42; 32],
+            path: DerivationPath::parse(
+                &starlab_core::accounts::standard_path("ethereum", 0).unwrap(),
+            )
+            .unwrap(),
+            address: share.ethereum_address(0).unwrap(),
+            share,
+            ready: vec!["device-0".into()],
+            signer_set: None,
+            worker_started: false,
+            epoch: 7,
+            ui_tx: tx,
+        });
+        let control = Control {
+            session_id: "sign-current".into(),
+            signers: vec!["device-0".into(), "device-1".into()],
+            signature: hex::encode(bytes),
+        };
+        (Arc::new(Mutex::new(app)), rx, control)
+    }
+
+    #[tokio::test]
+    async fn control_frames_require_authorized_senders() {
+        let (state, mut rx, control) = control_state();
+        for prefix in [
+            wire::SIGN_READY_PREFIX,
+            wire::SIGN_SET_PREFIX,
+            wire::SIGN_DONE_PREFIX,
+        ] {
+            on_control(&state, "outsider", prefix, control.clone(), None).await;
+        }
+        let app = state.lock().await;
+        let ctx = app.ecdsa.signing.as_ref().unwrap();
+        assert_eq!(ctx.ready, ["device-0"]);
+        assert!(ctx.signer_set.is_none());
+        assert!(!ctx.worker_started);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn proposer_rejects_unknown_ready_and_deduplicates_existing_ready() {
+        let (state, mut rx, control) = control_state();
+        state.lock().await.ecdsa.signing.as_mut().unwrap().self_id = "device-0".into();
+        for from in ["outsider", "device-0", "device-0"] {
+            on_control(&state, from, wire::SIGN_READY_PREFIX, control.clone(), None).await;
+        }
+        let app = state.lock().await;
+        let ctx = app.ecdsa.signing.as_ref().unwrap();
+        assert_eq!(ctx.ready, ["device-0"]);
+        assert!(ctx.signer_set.is_none());
+        assert!(!ctx.worker_started);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn signer_set_rejects_invalid_cohorts_and_conflicting_fixed_set() {
+        for set in [
+            vec!["device-0", "device-0"],
+            vec!["device-0"],
+            vec!["device-1", "device-2"],
+            vec!["device-0", "outsider"],
+        ] {
+            let (state, mut rx, mut control) = control_state();
+            control.signers = set.into_iter().map(String::from).collect();
+            on_control(&state, "device-0", wire::SIGN_SET_PREFIX, control, None).await;
+            assert!(state.lock().await.ecdsa.signing.is_none());
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                Message::SigningFailed { .. }
+            ));
+        }
+        let (state, mut rx, control) = control_state();
+        on_control(
+            &state,
+            "device-0",
+            wire::SIGN_SET_PREFIX,
+            control.clone(),
+            None,
+        )
+        .await;
+        let mut reordered = control.clone();
+        reordered.signers.reverse();
+        on_control(&state, "device-0", wire::SIGN_SET_PREFIX, reordered, None).await;
+        assert!(state.lock().await.ecdsa.signing.is_some());
+        assert!(rx.try_recv().is_err());
+        let mut conflict = control;
+        conflict.signers = vec!["device-0".into(), "device-2".into()];
+        on_control(&state, "device-0", wire::SIGN_SET_PREFIX, conflict, None).await;
+        assert!(state.lock().await.ecdsa.signing.is_none());
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            Message::SigningFailed { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn done_checks_recovery_and_delivers_valid_signature_to_outsider() {
+        let (state, mut rx, control) = control_state();
+        on_control(
+            &state,
+            "device-0",
+            wire::SIGN_SET_PREFIX,
+            control.clone(),
+            None,
+        )
+        .await;
+        on_control(&state, "device-0", wire::SIGN_DONE_PREFIX, control, None).await;
+        assert!(state.lock().await.ecdsa.signing.is_none());
+        assert!(
+            matches!(rx.try_recv().unwrap(), Message::SigningComplete { message, signature, .. } if message == [42; 32] && signature.len() == 65)
+        );
+        for wrong_hash in [false, true] {
+            let (state, mut rx, mut control) = control_state();
+            if wrong_hash {
+                state.lock().await.ecdsa.signing.as_mut().unwrap().prehash = [43; 32];
+            } else {
+                control.signature = "invalid-hex".into();
+            }
+            on_control(&state, "device-0", wire::SIGN_DONE_PREFIX, control, None).await;
+            assert!(state.lock().await.ecdsa.signing.is_none());
+            assert!(matches!(
+                rx.try_recv().unwrap(),
+                Message::SigningFailed { .. }
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_sessions_and_worker_epochs_cannot_mutate_current_signing() {
+        let (state, mut rx, mut control) = control_state();
+        control.session_id = "sign-old".into();
+        for prefix in [
+            wire::SIGN_READY_PREFIX,
+            wire::SIGN_SET_PREFIX,
+            wire::SIGN_DONE_PREFIX,
+        ] {
+            on_control(&state, "device-0", prefix, control.clone(), None).await;
+        }
+        try_fix_set(&state, 6).await;
+        start_worker(&state, 6).await;
+        finish(&state, 6, Err("old worker failure".into())).await;
+        let app = state.lock().await;
+        let ctx = app.ecdsa.signing.as_ref().unwrap();
+        assert_eq!(ctx.session_id, "sign-current");
+        assert_eq!(ctx.epoch, 7);
+        assert!(ctx.signer_set.is_none());
+        assert!(!ctx.worker_started);
+        assert_eq!(app.ecdsa.pending_control.len(), 3);
+        assert!(rx.try_recv().is_err());
+    }
 
     #[test]
     fn only_ethereum_children_sign_with_ecdsa() {

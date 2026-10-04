@@ -2767,11 +2767,76 @@ impl Command {
             Command::DeleteWallet { wallet_id } => {
                 info!("Deleting wallet: {}", wallet_id);
 
-                // TODO: Implement wallet deletion in keystore
-                // For now, just send an error message
-                let _ = tx.send(Message::Error {
-                    message: "Wallet deletion not yet implemented".to_string(),
-                });
+                let mut state = app_state.lock().await;
+                if state.signing_state.is_active()
+                    || state.ecdsa.signing.is_some()
+                    || state.reshare_in_progress
+                    || !matches!(
+                        state.dkg_state,
+                        crate::utils::state::DkgState::Idle
+                            | crate::utils::state::DkgState::Complete
+                            | crate::utils::state::DkgState::Failed(_)
+                    )
+                {
+                    let _ = tx.send(Message::Error {
+                        message: "Finish or cancel the active ceremony before deleting a wallet."
+                            .into(),
+                    });
+                    return Ok(());
+                }
+                let result = state
+                    .keystore
+                    .as_ref()
+                    .ok_or_else(|| "Keystore not initialized".to_string())
+                    .and_then(|current| {
+                        crate::keystore::Keystore::new(current.base_path(), current.device_id())
+                            .map_err(|e| e.to_string())
+                    })
+                    .and_then(|mut ks| {
+                        ks.delete_wallet(&wallet_id).map_err(|e| e.to_string())?;
+                        Ok(ks)
+                    });
+                match result {
+                    Ok(ks) => {
+                        state.keystore = Some(std::sync::Arc::new(ks));
+                        if state.current_wallet_id.as_deref().is_some_and(|id| {
+                            id == wallet_id
+                                || starlab_core::accounts::parse_child_wallet_id(id)
+                                    .is_some_and(|(parent, _, _)| parent == wallet_id)
+                        }) {
+                            state.current_wallet_id = None;
+                            state.key_package = None;
+                            state.public_key_package = None;
+                            state.group_public_key = None;
+                            state.blockchain_addresses.clear();
+                            state.solana_public_key = None;
+                            state.etherum_public_key = None;
+                            state.frost_nonces = None;
+                            state.frost_commitments.clear();
+                            state.frost_signature_shares.clear();
+                            state.identifier_map = None;
+                            state.signing_message = None;
+                            state.signer_set = None;
+                        }
+                        if state
+                            .ecdsa
+                            .key_share
+                            .as_ref()
+                            .is_some_and(|(id, _)| id == &wallet_id)
+                        {
+                            state.ecdsa.key_share = None;
+                        }
+                        drop(state);
+                        let _ = tx.send(Message::WalletDeletionCompleted { wallet_id });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Message::Error {
+                            message: format!(
+                                "Could not delete wallet '{wallet_id}': {e}. Retry deletion."
+                            ),
+                        });
+                    }
+                }
             }
 
             Command::FinalizeWalletFromDkg {
@@ -4116,5 +4181,106 @@ mod account_wallet_tests {
         // No metadata (wallet only in memory): the live session's set.
         let from_live = signing_session(PARENT, "secp256k1", &group, "bob", None, Some(&dkg));
         assert_eq!(from_live.participants, dkg.participants);
+    }
+}
+
+#[cfg(test)]
+mod wallet_deletion_tests {
+    use super::*;
+    use frost_ed25519::Ed25519Sha512;
+
+    #[tokio::test]
+    async fn deletion_refuses_active_ceremony_without_removing_disk_or_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ks = crate::keystore::Keystore::new(dir.path(), "device").unwrap();
+        ks.create_wallet_multi_chain(
+            "wallet",
+            "ed25519",
+            Vec::new(),
+            2,
+            3,
+            &"aa".repeat(33),
+            b"secret",
+            "password-12345",
+            Vec::new(),
+            None,
+            1,
+            vec!["device".into()],
+            None,
+        )
+        .unwrap();
+        let mut app = crate::utils::appstate_compat::AppState::<Ed25519Sha512>::new();
+        app.keystore = Some(std::sync::Arc::new(ks));
+        app.current_wallet_id = Some("wallet".into());
+        app.dkg_state = crate::utils::state::DkgState::Round1InProgress;
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(app));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), Message::Error { .. }));
+        assert!(rx.try_recv().is_err());
+        assert!(
+            state
+                .lock()
+                .await
+                .keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_some()
+        );
+        assert!(dir.path().join("device/ed25519/wallet.json").exists());
+        state.lock().await.dkg_state = crate::utils::state::DkgState::Idle;
+        let blocked = dir.path().join("device/secp256k1/wallet.json");
+        std::fs::create_dir(&blocked).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), Message::Error { .. }));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            state.lock().await.current_wallet_id.as_deref(),
+            Some("wallet")
+        );
+        assert!(
+            state
+                .lock()
+                .await
+                .keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_some()
+        );
+        assert!(dir.path().join("device/ed25519/wallet.json").exists());
+        std::fs::remove_dir(blocked).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(
+            matches!(rx.try_recv().unwrap(), Message::WalletDeletionCompleted { wallet_id } if wallet_id == "wallet")
+        );
+        let app = state.lock().await;
+        assert!(app.current_wallet_id.is_none());
+        assert!(
+            app.keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_none()
+        );
+        assert!(!dir.path().join("device/ed25519/wallet.json").exists());
     }
 }
