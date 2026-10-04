@@ -7,7 +7,7 @@
 
 **Starlab MPC** is a threshold wallet engine for **Ethereum, Bitcoin, Solana, and Sui**. Ethereum uses cggmp24 threshold ECDSA; Bitcoin uses FROST BIP-340 signatures, and Solana/Sui use FROST ed25519. A unified wallet contains separate distributed keys for these signing suites, split across the same devices. No single device holds a complete private key.
 
-> **Status — early-stage (`0.1.0`).** The engine works end-to-end (real multi-device DKG, signing, and resharing, exercised by a CI real-DKG e2e), but it is **not audited**: no third-party security review, no `criterion` benchmarks, no regulatory certification. Treat it as research-grade until those land (see § Security). Earlier drafts called this "production-ready"; that claim has been removed.
+> **Status — early-stage (`0.1.0`).** The engine works end-to-end (real multi-device DKG, signing, and FROST resharing, exercised by CI), but it is **not audited**: no third-party security review, no `criterion` benchmarks, no regulatory certification. Treat it as research-grade until those land (see § Security).
 
 ## Overview
 
@@ -22,18 +22,18 @@ Starlab MPC enables threshold signatures where the private key is split across m
 - **Peer-to-Peer**: Direct WebRTC connections between participants (signaling over WSS)
 - **FROST key resharing**: Rotate Bitcoin/Solana/Sui shares without changing their group public keys. The ECDSA key cannot be refreshed or reshared; replacing an Ethereum signer requires a new key and moving funds (see [Recovery and Resharing](docs/RECOVERY_AND_RESHARING.md))
 - **Offline Mode**: Air-gapped SD-card operation option
-- **Tested**: `cargo test --workspace`, with real network suites run using `--ignored`; browser extension tests live in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet). Verification evidence is recorded in [the ECDSA completion log](docs/changes/2026-10-04-ecdsa-completion.md)
+- **Tested**: `cargo test --workspace --locked`, with real network suites run using `--ignored`; browser extension tests live in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet). Current source, artifact hashes and verification boundaries are recorded in [product acceptance](docs/changes/2026-10-05-product-closeout.md).
 
 ## Use it as a library
 
-The engine is published to **crates.io** and **npm** under the `starlab` / `@starlab` names.
+Packages are published under `starlab-*` on [crates.io](https://crates.io/crates/starlab-cli) and `@stars-labs/*` on [npm](https://www.npmjs.com/package/@stars-labs/core-wasm). The registry installation examples below refer to published releases, separate from the reviewed development revision. The GUI repositories pin their engine dependency and document their source builds.
 
 **Rust (crates.io):**
 
 ```toml
 [dependencies]
-starlab-core = "0.1"          # FROST + threshold ECDSA: DKG, signing, keystore
-starlab-blockchain = "0.1"    # address derivation + tx building (EVM / BTC / Solana / Sui)
+starlab-core = "0.1"          # published core package
+starlab-blockchain = "0.1"    # published multi-chain package
 ```
 
 ```bash
@@ -78,11 +78,8 @@ The extension lives in its own repo: **[stars-labs/starlab-wallet](https://githu
 cargo run -p starlab-client --bin starlab-tui -- --device-id Device-001
 ```
 
-Inside the TUI, navigate with arrow keys → `Create New Wallet`
-and fill in the form; there is no REPL prompt. (Earlier drafts of
-this section showed a `> create my_wallet 2 3` command; no such
-slash-style command shipped — the TUI is ratatui-based, not a
-line-mode REPL.)
+Inside the TUI, use the arrow keys to select `Create New Wallet` and fill in
+the form.
 
 #### Desktop Application
 
@@ -91,7 +88,7 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ## Documentation
 
 ### 📚 Documentation Hub
-- [Technical Documentation](docs/MPC_WALLET_TECHNICAL_DOCUMENTATION.md) - Comprehensive technical reference (~1,440 lines; earlier drafts said "100+ pages" — overstated, it's closer to ~30 pages at typical print density)
+- [Technical Documentation](docs/MPC_WALLET_TECHNICAL_DOCUMENTATION.md) - Technical reference
 - [Contributing Guidelines](docs/CONTRIBUTING.md) - How to contribute to the project
 
 ### 🏗️ Architecture & Design
@@ -120,7 +117,7 @@ The Iced desktop app lives in its own repo: **[stars-labs/starlab-desktop](https
 ### 🔧 Development Resources
 - [Testing Documentation](docs/testing/README.md) - Testing strategies and tools
   - [Test Coverage](docs/testing/COVERAGE.md) - Code coverage reports
-  - [E2E Testing Plan](docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md) - Plan for real-signal-server E2E tests
+  - [End-to-End Tests](docs/testing/END_TO_END.md) - Implemented network coverage, commands and fixture boundaries
   - [Running Tests](docs/testing/RUN_TEST_INSTRUCTIONS.md) - How to run test suites
 
 ### 🚀 Deployment & Operations
@@ -171,8 +168,8 @@ starlab-mpc/
 ### Cryptography
 
 - **FROST**: Threshold signature scheme
-- **secp256k1**: Ethereum signatures
-- **ed25519**: Solana signatures
+- **secp256k1**: Ethereum ECDSA and Bitcoin BIP-340 signatures
+- **ed25519**: Solana and Sui signatures
 - **AES-256-GCM**: Encryption at rest
 - **PBKDF2**: Key derivation
 
@@ -210,23 +207,17 @@ whole. Report vulnerabilities via [GitHub Security Advisories](https://github.co
 
 ## Performance
 
-The repo has no `criterion` benches yet (PR welcome — see the open
-deferred work in `CLAUDE.md`). Functional coverage that exercises the
-real FROST paths:
+The repo has no `criterion` benchmarks. Functional test timings and screenshot
+capture timings are not performance benchmarks. [Product acceptance](docs/changes/2026-10-05-product-closeout.md)
+records executed counts, exact revisions and production-prime evidence;
+[end-to-end coverage](docs/testing/END_TO_END.md) lists commands for the
+default-ignored network suites. Bare `cargo test` covers only the default TUI
+member; use `cargo test --workspace --locked` for the full workspace.
 
-- `cargo test` — ~180 tests across the workspace (184
-  `#[test]` / `#[tokio::test]` annotations as of this writing;
-  covers DKG, signing, keystore round-trip, HD derivation,
-  WebRTC mesh simulator). Refresh count via
-  `grep -c '#\[test\]\|#\[tokio::test\]' $(find . -name '*.rs'
-  | grep -v target)`.
-- The browser extension's ~530 Bun test cases moved with it to
-  [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet).
-- FROST itself is parameter-generic over `t`/`n`; the bottleneck at
-  larger cohorts is the WebRTC full-mesh degree (n·(n-1)/2 peer
-  connections), not the cryptography. No hard participant cap is
-  enforced, but production use has only been exercised at small
-  cohorts (2-of-3, 3-of-5).
+Browser tests live in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet).
+The WebRTC mesh needs n·(n-1)/2 peer connections. Ethereum setup also performs
+safe-prime generation and Paillier proofs; the cold-start tests exercise that
+work separately from faster protocol tests using explicit insecure fixtures.
 
 ## Contributing
 
@@ -251,9 +242,9 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 ### Shipped
 - [x] **Unified multi-chain wallet** — one DKG ceremony → one wallet
   with addresses on Ethereum, Bitcoin, Solana, and Sui
-- [x] **Key resharing** — recover/rotate the cohort over the mesh while
-  preserving the group public key (driven by `starlab-cli`)
-- [x] Browser extension (Chrome / Firefox) — FROST DKG + threshold
+- [x] **FROST key resharing** — rotate Bitcoin/Solana/Sui shares over the mesh
+  while preserving their group public keys; Ethereum ECDSA shares remain unchanged
+- [x] Browser extension (verified Chromium runtime) — FROST DKG + threshold
   signing + EIP-1193 / EIP-6963 dApp integration; now in its own repo
   **[stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet)**
 - [x] Terminal UI (`apps/tui/`) — keyboard-driven FROST
@@ -269,13 +260,9 @@ We welcome contributions! Please see our [Contributing Guide](docs/CONTRIBUTING.
 
 ### Open work (no committed timelines)
 
-Items below are listed in rough priority order. None has a
-scheduled delivery date; contributions welcome via PR. See
-[`CLAUDE.md`](CLAUDE.md) for deeper context where noted.
-
-- [ ] Extract `SigningManager::approve` onto a ciphersuite-generic
-  backend so the desktop app (starlab-desktop) shares the real
-  signing path with the TUI (its last feature-parity gap).
+Items below have no scheduled delivery date; contributions welcome via PR.
+Firefox build success does not establish its offscreen cryptographic runtime;
+the verified extension runtime is Chromium.
 - [ ] `criterion` benches for DKG / signing / keystore so future
   perf-optimization claims have reproducible numbers.
 - [ ] Third-party security audit of the full stack. The upstream
@@ -314,7 +301,7 @@ If you use this software in your research, please cite:
 
 ```bibtex
 @software{starlab_mpc,
-  title = {Starlab MPC: A FROST Threshold-Signature Wallet Engine},
+  title = {Starlab MPC: A Multi-Chain Threshold Wallet Engine},
   author = {Stars Labs},
   year = {2026},
   url = {https://github.com/stars-labs/starlab-mpc}

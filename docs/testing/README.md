@@ -12,4 +12,5 @@ Reference material for the MPC Wallet test suite.
 Per-crate test docs live with the code:
 - Browser-extension tests moved with the extension to
   [`stars-labs/starlab-wallet`](https://github.com/stars-labs/starlab-wallet)
-- Rust tests run with `cargo test --workspace` (see repo CLAUDE.md)
+- Rust tests run with `cargo test --workspace --locked`; expensive network
+  suites require the explicit commands in [END_TO_END.md](END_TO_END.md).
