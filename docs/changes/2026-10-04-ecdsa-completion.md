@@ -134,3 +134,30 @@ any unverified gate rather than substituting simulated-chain evidence.
   Ethereum account as extension and TUI. In the Xvfb software environment,
   wgpu small text has glyph artifacts; ICED_BACKEND=tiny-skia renders clearly
   without changing source or wallet data. Screenshots live-shots/15 and 16.
+
+- Final visual acceptance now has 198 public-fixture extension images with
+  zero action/page errors and source-revision provenance, plus 58 desktop
+  images across 29 states. All 27 GUI feature rows have reviewed evidence;
+  nonexistent invitation-expiry and message-only dApp preflight screens are
+  explicitly marked not applicable by source inspection.
+- Reproducible desktop dependency audit fixed the former temporary-patch
+  validation gap: all three engine dependencies now pin Git 3c5982d. Locked
+  49 tests, strict Clippy, release and real three-node DKG/sign/account-1
+  recovery/export/import pass without overrides. Desktop a72a131; release
+  SHA-256 be7b032699ccf838f27089b9a139d13a602ac063229ba965104c71227db6da60.
+- Final fetched-Git desktop + production extension 7e41efb signed through
+  actual GUI review/approval. Independent viem recovery matches the MPC
+  wallet; the TUI did not approve. Session sign_fd806d69183a579757eff217.
+  /tmp/starlab-stage5/final-pinned-live-signature-evidence.json and
+  shots/25-pinned-final-signature-card.png; live-shots/23-pinned-desktop-signed.png.
+- Final normal ED25519 browser interoperability: 8 passed, 5 conditional
+  skips; independent namespace outage: 1 passed. /tmp/starlab-final-ed-head.log
+  and /tmp/starlab-final-ed-netns-head.log. Secp namespace outage: 1 passed,
+  /tmp/starlab-final-secp-netns-head.log; full secp suite is running.
+- Later visual-head CI exposed stale signing-button test copy and three
+  global viem-mock contamination failures (944 passed, 3 failed). The UI
+  selector was corrected without dropping assertions; the real-RPC transport
+  tests are being isolated. Branch-head CI must pass before release.
+- Interoperability CI now pins the same integrated Git engine as desktop.
+  Vendored WASM SHA-256 7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389
+  exactly matches the fresh integrated build.
