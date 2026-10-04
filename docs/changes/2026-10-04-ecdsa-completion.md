@@ -78,3 +78,32 @@ any unverified gate rather than substituting simulated-chain evidence.
   matches the wallet address. Desktop Foundry verification against both the
   original EIP-191 text and raw digest passes: cast-signature-verify.log.
   Screenshot: live-shots/14-desktop-signed.png.
+
+- Final functional extension unit suite: 938 passed, 0 failed, 107 files;
+  /tmp/starlab-retirement-fullsuite.log. WebSocket test harness constants were
+  corrected after the full CI suite exposed undefined OPEN/CLOSED values.
+- Account browser cases: 2-of-3 and 3-of-3 both passed (5.2 min),
+  /tmp/starlab-secp-final-cosign.log. Send/signing/persistence: 5 passed,
+  1 namespace-only case skipped (8.8 min), /tmp/starlab-secp-final-rest.log.
+  Namespace-only WebRTC outage separately passed for both curves:
+  /tmp/starlab-{secp,ed}-netns.log.
+- Final ignored native e2e rerun still failed its short-timeout retry under
+  concurrent load (10 passed, 1 failed). The peer had not finished unlocking
+  within the inherited 3-second timer; deterministic fixture scheduling is
+  being corrected. /tmp/starlab-final-engine-e2e.log.
+- Added user scope: designer participates; token icons and every implemented
+  feature must meet the competitive visual acceptance matrix in
+  2026-10-04-wallet-visual-design.md. Implementation and screenshot review
+  are in progress across extension and desktop.
+
+- Live popup completion regression verified after clearing stale browser code
+  caches: signature banner shows actual Ethereum address verification, progress
+  ends, public signature independently recovers to the wallet address.
+  /tmp/starlab-stage5/live-popup-signature-evidence.json;
+  shots/19-live-verified-ecdsa-result.png.
+- Native timeout fixture now has no process environment mutation: only the
+  abandoned proposer ceremony uses 3 seconds, retry uses the existing
+  production budget. Final serial full e2e gate is running on 05f219e; prior
+  parallel-run environment contamination (1 pass, 10 fails) is recorded and
+  superseded by the source fix, not counted as a passing gate.
+- User confirmed Rabby, MetaMask and Phantom as the visual benchmark.
