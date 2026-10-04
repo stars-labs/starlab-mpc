@@ -72,7 +72,7 @@ export → import round trip; existing FROST e2e (Bitcoin BIP-340, reshare,
 timeout, ed25519) unchanged.
 **Status**: Complete (integrated in draft PR #135 targeting
 `feat/ecdsa-cggmp24`). Native gates are green; coordinate the engine, desktop
-and extension release after the remaining visual and live transaction gates.
+and extension release after the final branch-head interoperability gate.
 
 What it does:
 - **DKG**: after the FROST ceremonies of a secp256k1 (or unified) DKG, the
@@ -168,7 +168,7 @@ wallet and sign an Ethereum message/tx together.
 `feat/ecdsa-cggmp24`), desktop draft PR stars-labs/starlab-desktop#23
 (`feat/ecdsa-engine`), with final desktop follow-up #24. All three engine
 dependencies and the committed lock pin integrated Git revision
-`3c5982d0d458fce1a04c393a679fb5a91a2a168f`. Locked tests, release, strict
+`fab8e16634ce4c03d71b00ff9f92bcb058ecc9d4`. Locked tests, release, strict
 Clippy and three-node signing/recovery pass without local overrides. Merge
 only together with the engine after the remaining cross-product gates.
 
@@ -233,17 +233,18 @@ works.
 **Success Criteria**: extension ↔ CLI interop (2-of-3, 3-of-3) green in CI.
 **Tests**: bun unit tests (real WASM); interop spec: CLI + extension ECDSA
 DKG, co-sign, and extension-initiated sign.
-**Status**: In Progress — WASM is integrated in engine PR #135; extension
-draft PR stars-labs/starlab-wallet#83 includes the signing implementation.
-Remote extension CI run 37185987825 passed all three jobs, including 12
-secp256k1 interoperability cases and separate network-namespace recovery.
-Final extension a260304 passes 947 unit tests and ED25519 interop. The final
-local secp256k1 suite passes all 12 cases plus separate namespace recovery.
-Branch-head CI run 37190375406 passes check and ED25519; remote secp256k1
-interoperability is still running.
-Designer acceptance covers 198 extension images and 58 desktop images;
-implemented feature states and token identities have reviewed evidence.
-Merge together with the engine and desktop after the remaining gates.
+**Status**: In Progress — implementation and local acceptance complete.
+Engine PR #135, extension PR stars-labs/starlab-wallet#83 and desktop #24
+share integrated engine revision `fab8e166`. Extension head `1954ed3` CI
+run [37193441768](https://github.com/stars-labs/starlab-wallet/actions/runs/37193441768)
+passes check (947 tests, zero failures; Svelte and production build) and
+ED25519 interoperability. Final remote secp256k1 interoperability is running.
+Previous `a260304` CI passes all three jobs, including 12 secp256k1 cases
+and separate network-namespace recovery. Final local suites also pass both
+curves and namespace recovery. Designer acceptance covers 206 extension
+images, 58 desktop images and all 27 implemented feature rows against
+Rabby, MetaMask and Phantom. Token identities and unknown-token fallback
+have reviewed evidence. Live Sepolia receipt acceptance is complete.
 
 What it does:
 - **core-wasm**: `EcdsaAuxInfo` / `EcdsaKeygen` / `EcdsaSigning` over
@@ -282,16 +283,18 @@ Findings:
 **Goal**: TUI + desktop + extension 2-of-3 wallet sends a real Sepolia tx.
 **Success Criteria**: tx hash confirmed on Sepolia from the MPC address.
 **Tests**: live run with screenshots + tx hash.
-**Status**: In Progress — the real-prime TUI + desktop + production extension
-2-of-3 wallet ceremony completed on 2026-10-04. Ethereum account 0 is
-`0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`. Extension-initiated EIP-191
-signing co-signed by the desktop passed independent viem and Foundry
-recovery verification; screenshot and public signature evidence are recorded
-in `docs/changes/2026-10-04-ecdsa-completion.md`.
+**Status**: Complete (not merged). A real-prime TUI + desktop + production
+extension created the 2-of-3 wallet on 2026-10-04. Final desktop `ae34bc6`,
+TUI engine `fab8e166` and extension presentation `e18da4c` restored the same
+wallet. Extension Send and desktop approval signed a real EIP-1559 self-transfer
+of 0.00001 Sepolia ETH. Receipt status is `0x1`, block 11841485, gas 21000:
 
-A Sepolia transaction receipt is still required. The address has no test ETH
-and the attempted faucet returned `INVALID_CAPTCHA`. Popup account-key, lock
-and result-display defects found during live testing have been repaired; the
-production popup shows a completed signature verified against the wallet
-Ethereum address. Independent viem recovery confirms the same address.
-Message-signing evidence does not satisfy the transaction receipt gate.
+[0xe83cfdfba02c82fb067e7bdc195b8f729abe32ffaa247be9a2950805d1e4ff54](https://eth-sepolia.blockscout.com/tx/0xe83cfdfba02c82fb067e7bdc195b8f729abe32ffaa247be9a2950805d1e4ff54)
+
+Sender and recipient are MPC account 0
+`0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`. Independent raw-transaction
+hashing, signature recovery and desktop approval-digest verification pass;
+RPC and Blockscout agree. The non-signing TUI request disappears automatically
+after withdrawal without manual dismissal. No fixture primes were used.
+See [public evidence](docs/testing/evidence/sepolia-live-2026-10-04.json)
+and [acceptance report](docs/testing/SEPOLIA_LIVE_ACCEPTANCE.md).

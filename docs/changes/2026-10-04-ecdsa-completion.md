@@ -28,148 +28,90 @@ Risk: safe-prime generation and interactive browser cryptography are slow;
 Sepolia completion needs test ETH and a working RPC. Preserve logs and report
 any unverified gate rather than substituting simulated-chain evidence.
 
-## Acceptance evidence (in progress)
+## Current acceptance evidence
 
-- Extension Send regression: real CLI peers + production signing path build,
-  EIP-1559 signed sender recovery equals wallet address; 1 passed in 1.8 min.
-  Log: /tmp/starlab-send-interop.log.
-- Extension real-WASM/ECDSA + approval regression subset: 39 passed, 0 failed,
-  129 assertions (470.70 s); /tmp/starlab-extension-unit.log.
-- Remaining extension unit tests: 909 passed, 0 failed, 2450 assertions;
-  /tmp/starlab-extension-all-unit.log. ECDSA files excluded here because the
-  previous gate exercised them separately.
-- Extension type check: 0 errors and 0 warnings after lifecycle changes and
-  removal of obsolete EVM caveat; /tmp/starlab-extension-check-final.log.
-- Rust workspace snapshot before reconnect follow-up: 509 passed, 0 failed,
-  31 ignored (26 test/doc-test suites); /tmp/starlab-engine-tests.log.
-  Native client follow-up: 274 passed; ignored conformance 9 passed, L3 serve
-  8 passed, wire protocol 2 passed. Full ignored e2e had 10 passes and one
-  FROST timeout fixture mismatch; corrected fixture passed its targeted retry
-  gate without increasing the 3-second timeout. Final workspace rerun:
-  513 passed, 0 failed, 31 ignored (26 suites), final-workspace-tests.log.
-- ed25519 browser interoperability: 8 passed, 5 conditionally skipped,
-  2.3 min; /tmp/starlab-full-ed-interop.log.
-- secp256k1 browser interoperability: full process terminated (exit 143)
-  before a final summary. Seven completed cases passed; the 2-of-3 account
-  case teardown failed because concurrent Playwright jobs shared an output
-  directory. Both account cases and remaining Send/signing/persistence cases
-  are rerunning with distinct output directories and the final engine build.
-  This gate has NOT passed.
-- Desktop integrated-engine tests: 47 passed, ignored real 3-device
-  DKG/sign/export/import 1 passed (34 s); strict integrated clippy passed.
-  Final fmt, strict clippy and release pass: recheck.log.
-  Follow-up draft PR: stars-labs/starlab-desktop#24.
-- Production extension build succeeds; fixture injection hook absent.
-  /tmp/starlab-production-build.log and /tmp/starlab-stage5/extension-build.
-- Stage 5 TUI + desktop + production extension completed a real-prime
-  2-of-3 wallet ceremony; all show Ethereum account 0
+Source pins: native engine `fab8e166`, desktop `ae34bc6` (all three Git
+engine dependencies and Cargo.lock pinned to `fab8e166`), extension
+`1954ed3`, presentation `e18da4c`. No local dependency overrides.
+
+### Native, WASM and desktop
+
+- Engine [CI run 37193367450](https://github.com/stars-labs/starlab-mpc/actions/runs/37193367450)
+  passes all eight jobs on `fab8e166`.
+- Native workspace baseline: 513 passed, zero failed, 31 ignored across 26
+  suites (`/tmp/starlab-final-workspace-tests.log`). Final session-modal fix
+  adds three lifecycle tests; current full client suite: 277 passed, zero
+  failed. Formatting, all-target check and TUI release pass.
+- Ignored native e2e: 11 passed, zero failed, 687.61 seconds on `05f219e`
+  (`/tmp/starlab-retry-budget-final-e2e.log`). Crypto source is unchanged in
+  the final engine; only matching withdrawn TUI prompts are additionally
+  dismissed. Conformance: 9 passed; L3 serve: 8; wire: 2.
+- The timeout fixture applies 3 seconds only to an abandoned ceremony;
+  the fresh retry uses the production budget. It does not mutate process
+  environment variables.
+- Fresh WASM and shared TypeScript types build. Vendored WASM SHA-256
+  `7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389`
+  matches the fresh integrated build.
+- Desktop locked tests: 49 passed, zero failed, one ignored; strict Clippy,
+  formatting and locked release pass. Explicit real three-node
+  DKG/sign/account-1 recovery/encrypted FROST export/import: one passed,
+  37.56 seconds. No temporary patches or Cargo overrides.
+- Final desktop release SHA-256:
+  `d668b407ab273db91426a8c2f12b1cd2f4f6bc4122f5c3b9ef4d045a3e672d7d`.
+  Final TUI release SHA-256:
+  `f55a9504ae3d764f83f914446afeac6b1a00fe15d43df75345a2777c4331b268`.
+
+### Extension
+
+- Final `1954ed3` [CI run 37193441768](https://github.com/stars-labs/starlab-wallet/actions/runs/37193441768):
+  check and ED25519 interoperability pass; remote secp256k1 remains running.
+  Check: 947 tests passed, zero failed, 2,581 assertions, 620.88 seconds;
+  Svelte has zero errors/warnings and the production build passes.
+- Prior `a260304` [run 37190375406](https://github.com/stars-labs/starlab-wallet/actions/runs/37190375406)
+  passes all three jobs. Secp256k1: 12 cases passed (41.4 minutes), separate
+  network-namespace recovery: one passed (3.8 minutes).
+- Final local ED25519: 8 passed and 5 conditional skips; namespace outage:
+  one passed. Final local secp256k1: 12 passed, zero failed, one conditional
+  namespace skip (25 minutes); separate namespace recovery: one passed
+  (2.4 minutes). These cover threshold sizes, accounts, Ethereum/Bitcoin
+  signing, EIP-1559 sender recovery, FROST refresh, signaling outage and
+  imported-wallet restart.
+- Encrypted restore/chain metadata/sign/lock/restart regression: 19 passed,
+  67 assertions. Recipient-topic discovery real-RPC regression: 24 passed.
+  Mock-isolation/real-transport combined regression: 103 passed. Production
+  receive QR clearing and asynchronous stale-result guard pass.
+- Final presentation fixes correctly label raw-hash signatures and show
+  unavailable fiat value as a dash. Production-component checks exercise
+  missing prices, network/account changes and delayed stale responses;
+  ten light/dark captures have zero action/page errors.
+- Production live bundle contains no insecure fixture-prime hook.
+
+### Designer and real-client transaction
+
+- User confirmed **Rabby, MetaMask and Phantom**. Designer reviewed every
+  implemented feature against the [27-row matrix](2026-10-04-wallet-visual-design.md)
+  and the [public competitor reference audit](2026-10-04-wallet-competitor-reference.md).
+- Final extension manifest: 206 unique public-fixture images, zero action/page
+  errors, per-image source provenance. Desktop: 58 images across 29 states.
+  Native/curated token icons are keyed by chain and contract, with neutral
+  unknown-token fallback. Nonexistent features are explicitly not applicable.
+- Actual real-prime TUI + desktop + production extension 2-of-3 wallet and
+  final GUI transaction acceptance **pass**. MPC account 0 is
   `0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`.
-  Screenshots: /tmp/starlab-stage5/shots and desktop live-shots.
-  Sepolia balance remains zero; faucet returned INVALID_CAPTCHA.
-  Live extension initially revealed a popup public-key snapshot defect and
-  missing lock/signature feedback. Those were repaired and verified in the
-  production popup: the Ethereum address is consistent, genuine extension +
-  desktop EIP-191 signing completes, independent address recovery passes, and
-  the invitation is withdrawn. A successful real transaction receipt remains
-  required.
-  This gate has NOT passed.
+- Final [Sepolia transaction](https://eth-sepolia.blockscout.com/tx/0xe83cfdfba02c82fb067e7bdc195b8f729abe32ffaa247be9a2950805d1e4ff54)
+  succeeds (`0x1`), block 11841485, gas 21000. Independent signed-transaction
+  hashing, sender recovery and desktop approval-digest verification pass;
+  RPC and Blockscout agree. The non-signing TUI request closes automatically
+  on withdrawal without manual dismissal.
+- [Durable public transaction evidence](../testing/evidence/sepolia-live-2026-10-04.json)
+  and [live acceptance report](../testing/SEPOLIA_LIVE_ACCEPTANCE.md) preserve
+  source revisions and independently reviewable receipt/signature checks.
+- Ethereum ECDSA has no share refresh. Documentation and GUI clearly state
+  that FROST refresh covers Bitcoin/Solana/Sui and leaves Ethereum unchanged.
 
-- Real-client message signature public evidence:
-  /tmp/starlab-stage5/live-signature-evidence.json; independent viem recovery
-  matches the wallet address. Desktop Foundry verification against both the
-  original EIP-191 text and raw digest passes: cast-signature-verify.log.
-  Screenshot: live-shots/14-desktop-signed.png.
+### Remaining release gate
 
-- Final functional extension unit suite: 938 passed, 0 failed, 107 files;
-  /tmp/starlab-retirement-fullsuite.log. WebSocket test harness constants were
-  corrected after the full CI suite exposed undefined OPEN/CLOSED values.
-- Account browser cases: 2-of-3 and 3-of-3 both passed (5.2 min),
-  /tmp/starlab-secp-final-cosign.log. Send/signing/persistence: 5 passed,
-  1 namespace-only case skipped (8.8 min), /tmp/starlab-secp-final-rest.log.
-  Namespace-only WebRTC outage separately passed for both curves:
-  /tmp/starlab-{secp,ed}-netns.log.
-- Final ignored native e2e gate: 11 passed, 0 failed, 687.61 seconds on
-  05f219e. /tmp/starlab-retry-budget-final-e2e.log. The fixture gives only
-  the abandoned ceremony 3 seconds and restores the production timeout for
-  the fresh retry; it no longer mutates process environment variables. This
-  supersedes the earlier short-timeout failures under concurrent load.
-- Added user scope: designer participates; token icons and every implemented
-  feature must meet the competitive visual acceptance matrix in
-  2026-10-04-wallet-visual-design.md. Implementation and screenshot review
-  are in progress across extension and desktop.
-
-- Live popup completion regression verified after clearing stale browser code
-  caches: signature banner shows actual Ethereum address verification, progress
-  ends, public signature independently recovers to the wallet address.
-  /tmp/starlab-stage5/live-popup-signature-evidence.json;
-  shots/19-live-verified-ecdsa-result.png.
-- Native timeout fixture now has no process environment mutation: only the
-  abandoned proposer ceremony uses 3 seconds, retry uses the existing
-  production budget. Final serial full e2e gate passed on 05f219e; prior
-  parallel-run environment contamination (1 pass, 10 fails) is recorded and
-  superseded by the source fix, not counted as a passing gate.
-- User confirmed Rabby, MetaMask and Phantom as the visual benchmark.
-
-- Backup audit found and fixed selected Ethereum metadata becoming Bitcoin
-  after multi-file restore. Real restore, ECDSA sign, lock and fresh-service
-  unlock regression passes with persisted Ethereum address and chain.
-  /tmp/starlab-restore-audit-final.log: 19 passed, 67 assertions.
-- Recovery documentation and refresh UI explicitly distinguish FROST share
-  refresh (Bitcoin/Solana/Sui) from Ethereum ECDSA keys, which remain unchanged.
-
-- Asset discovery regression: real viem transport verifies ERC20/ERC721/ERC1155
-  recipient topics reach eth_getLogs. Previous raw-topic getLogs calls silently
-  dropped the filter. Fixed in extension a9cb023; 24 tests passed, Svelte check
-  has zero errors and warnings. /tmp/starlab-discovery-rpc-tests.log.
-
-- Remote extension CI on 5db73b1 is fully green: check, ed25519 interop,
-  secp256k1 interop. Secp main suite: 12 passed (32.5 minutes); separate
-  namespace outage: 1 passed (3.1 minutes). Run 37185987825. Later visual
-  and restore/discovery fixes require the next branch-head CI run.
-- Designer final extension baseline: 106 public-fixture captures, zero page
-  or action errors, /tmp/starlab-extension-design-final/manifest.json.
-  Remaining edge-state coverage is being expanded before visual acceptance.
-- Desktop final visual code: 49 passed, 0 failed, 1 ignored; strict Clippy
-  passed; release built in 1m28s. Actual saved-wallet window uses the same
-  Ethereum account as extension and TUI. In the Xvfb software environment,
-  wgpu small text has glyph artifacts; ICED_BACKEND=tiny-skia renders clearly
-  without changing source or wallet data. Screenshots live-shots/15 and 16.
-
-- Final visual acceptance now has 198 public-fixture extension images with
-  zero action/page errors and source-revision provenance, plus 58 desktop
-  images across 29 states. All 27 GUI feature rows have reviewed evidence;
-  nonexistent invitation-expiry and message-only dApp preflight screens are
-  explicitly marked not applicable by source inspection.
-- Reproducible desktop dependency audit fixed the former temporary-patch
-  validation gap: all three engine dependencies now pin Git 3c5982d. Locked
-  49 tests, strict Clippy, release and real three-node DKG/sign/account-1
-  recovery/export/import pass without overrides. Desktop a72a131; release
-  SHA-256 be7b032699ccf838f27089b9a139d13a602ac063229ba965104c71227db6da60.
-- Final fetched-Git desktop + production extension 7e41efb signed through
-  actual GUI review/approval. Independent viem recovery matches the MPC
-  wallet; the TUI did not approve. Session sign_fd806d69183a579757eff217.
-  /tmp/starlab-stage5/final-pinned-live-signature-evidence.json and
-  shots/25-pinned-final-signature-card.png; live-shots/23-pinned-desktop-signed.png.
-- Final normal ED25519 browser interoperability: 8 passed, 5 conditional
-  skips; independent namespace outage: 1 passed. /tmp/starlab-final-ed-head.log
-  and /tmp/starlab-final-ed-netns-head.log. Secp namespace outage: 1 passed,
-  /tmp/starlab-final-secp-netns-head.log. Final normal secp suite completed:
-  12 passed, zero failures, one conditional namespace skip, 25.0 minutes;
-  separate namespace recovery passed in 2.4 minutes. The normal suite covers
-  both threshold sizes, Ethereum/Bitcoin signing, Send sender recovery,
-  FROST refresh, signaling outage and imported-wallet browser restart.
-  /tmp/starlab-final-secp-head.log; both result directories report passed.
-- Later visual-head CI exposed stale signing-button test copy and three
-  global viem-mock contamination failures (944 passed, 3 failed). The UI
-  selector was corrected without dropping assertions; real-RPC transport
-  probes now run in fresh Bun processes. Final extension a260304 passes all
-  947 tests (2,581 assertions, 281.63 seconds); the combined mock/transport
-  regression passes 103 tests. /tmp/starlab-extension-final-full-unit.log and
-  /tmp/starlab-discovery-combined.log. Branch-head CI run 37190375406 passes
-  check (947 tests, 698.95 seconds; production build and Svelte check) and
-  ED25519 interoperability. Remote secp256k1 interoperability is still running.
-  /tmp/starlab-extension-a260-check-job.log. Engine c08a1db CI run 37190778009
-  passes all eight jobs.
-- Interoperability CI now pins the same integrated Git engine as desktop.
-  Vendored WASM SHA-256 7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389
-  exactly matches the fresh integrated build.
+The final extension remote secp256k1 job is still running. Prior full remote
+and final local interop are green, but they do not substitute for the final
+branch-head job. PRs remain unmerged pending that result and coordinated
+review. No simulated-chain evidence substitutes for the real Sepolia receipt.
