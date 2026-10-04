@@ -28,7 +28,8 @@ entries in the TUI configuration are separate from the canonical account API;
 the configuration alone does not guarantee signing or transaction support.
 
 FROST share refresh can retain the group public key while changing the
-participating devices. ECDSA resharing is not implemented. A wallet carrying
-an ECDSA share cannot use the existing FROST-only refresh flow; changing its
-ECDSA participants requires a new wallet and moving funds to its new address.
+participating devices. ECDSA resharing is not implemented. The existing refresh
+flow changes only FROST shares; a mixed wallet’s ECDSA
+shares and Ethereum participants remain unchanged. Changing its ECDSA
+participants requires a new wallet and moving funds to its new address.
 See [`RECOVERY_AND_RESHARING.md`](RECOVERY_AND_RESHARING.md).
