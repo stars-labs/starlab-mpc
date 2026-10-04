@@ -3505,6 +3505,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         Message::RemoveSession { session_id } => {
+            // An idle co-signer may still be reviewing this invitation when
+            // its proposer withdraws it. Leave other confirmations untouched.
+            if matches!(
+                model.ui_state.modal.as_ref(),
+                Some(Modal::Confirm { on_confirm, .. })
+                    if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id: reviewed } if reviewed == &session_id)
+            ) {
+                model.ui_state.modal = None;
+            }
             // The creator withdrew the invite we're waiting on: we're no
             // longer in a ceremony.
             if model.wallet_state.joining_session.as_deref() == Some(session_id.as_str()) {
@@ -4342,6 +4351,77 @@ mod tests {
             cmd,
             Some(Command::CancelDKG { session_id: Some(ref id) }) if id == "s1"
         ));
+    }
+
+    fn discover_signing_request(model: &mut Model, session_id: &str) {
+        let mut session = dkg_invite(session_id);
+        session.participants.push(model.device_id.clone());
+        session.session_type = SessionType::Signing {
+            wallet_name: "wallet".into(),
+            curve_type: "secp256k1-ecdsa".into(),
+            blockchain: "ethereum".into(),
+            group_public_key: "02".repeat(33),
+        };
+        update(model, Message::SessionDiscovered { session });
+        assert!(matches!(model.ui_state.modal, Some(Modal::Confirm { .. })));
+    }
+
+    #[test]
+    fn withdrawing_signing_request_dismisses_matching_review_and_accepts_next() {
+        let mut model = Model::new("dev".into());
+        discover_signing_request(&mut model, "first");
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "first".into(),
+            },
+        );
+        assert!(model.ui_state.modal.is_none());
+        assert!(model.session_invites.is_empty());
+        discover_signing_request(&mut model, "next");
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id } if session_id == "next"))
+        );
+    }
+
+    #[test]
+    fn withdrawing_signing_request_keeps_other_session_review() {
+        let mut model = Model::new("dev".into());
+        discover_signing_request(&mut model, "reviewed");
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "other".into(),
+            },
+        );
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id } if session_id == "reviewed"))
+        );
+    }
+
+    #[test]
+    fn withdrawing_signing_request_keeps_unrelated_confirmation() {
+        let mut model = Model::new("dev".into());
+        model.ui_state.modal = Some(Modal::Confirm {
+            title: "Delete wallet".into(),
+            message: "Keep this confirmation".into(),
+            on_confirm: Box::new(Message::WalletDeleted {
+                wallet_id: "wallet".into(),
+            }),
+            on_cancel: Box::new(Message::CancelModal),
+        });
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "withdrawn".into(),
+            },
+        );
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::WalletDeleted { wallet_id } if wallet_id == "wallet"))
+        );
     }
 
     #[test]
