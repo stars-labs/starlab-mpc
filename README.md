@@ -5,7 +5,7 @@
 [![TypeScript](https://img.shields.io/badge/typescript-%23007ACC.svg?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=flat&logo=webrtc&logoColor=white)](https://webrtc.org/)
 
-**Starlab MPC** is a Multi-Party Computation wallet engine built on FROST (Flexible Round-Optimized Schnorr Threshold) signatures — one distributed key, split across devices, that controls accounts on **Ethereum, Bitcoin, Solana, and Sui** at once. No single party ever holds the whole key.
+**Starlab MPC** is a threshold wallet engine for **Ethereum, Bitcoin, Solana, and Sui**. Ethereum uses cggmp24 threshold ECDSA; Bitcoin uses FROST BIP-340 signatures, and Solana/Sui use FROST ed25519. A unified wallet contains separate distributed keys for these signing suites, split across the same devices. No single device holds a complete private key.
 
 > **Status — early-stage (`0.1.0`).** The engine works end-to-end (real multi-device DKG, signing, and resharing, exercised by a CI real-DKG e2e), but it is **not audited**: no third-party security review, no `criterion` benchmarks, no regulatory certification. Treat it as research-grade until those land (see § Security). Earlier drafts called this "production-ready"; that claim has been removed.
 
@@ -15,14 +15,14 @@ Starlab MPC enables threshold signatures where the private key is split across m
 
 ### Key Features
 
-- **Real FROST DKG**: Distributed key generation via the ZCash Foundation's `frost-core 3.0` crates
+- **Distributed key generation**: FROST via the ZCash Foundation's `frost-core 3.0` crates, plus cggmp24 ECDSA for Ethereum
 - **Threshold Signatures**: Configurable t-of-n threshold signing
-- **Unified multi-chain wallet**: One DKG → addresses on **Ethereum & Bitcoin** (secp256k1) plus **Solana & Sui** (ed25519)
+- **Unified multi-chain wallet**: One setup ceremony creates separate ECDSA, Taproot and ed25519 keys; account addresses derive publicly without unlocking a share
 - **Multi-Platform**: Browser extension, desktop GUI, terminal UI, and a headless CLI
 - **Peer-to-Peer**: Direct WebRTC connections between participants (signaling over WSS)
-- **Key resharing**: Recover or rotate the cohort without changing the group public key
+- **FROST key resharing**: Rotate Bitcoin/Solana/Sui shares without changing their group public keys. The ECDSA key cannot be refreshed or reshared; replacing an Ethereum signer requires a new key and moving funds (see [Recovery and Resharing](docs/RECOVERY_AND_RESHARING.md))
 - **Offline Mode**: Air-gapped SD-card operation option
-- **Tested**: `cargo test --workspace` (~180 Rust tests incl. a real-DKG e2e); the browser extension's 500+ Bun tests live with it in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet) — **not** a substitute for a security audit
+- **Tested**: `cargo test --workspace`, with real network suites run using `--ignored`; browser extension tests live in [stars-labs/starlab-wallet](https://github.com/stars-labs/starlab-wallet). Verification evidence is recorded in [the ECDSA completion log](docs/changes/2026-10-04-ecdsa-completion.md)
 
 ## Use it as a library
 
@@ -32,7 +32,7 @@ The engine is published to **crates.io** and **npm** under the `starlab` / `@sta
 
 ```toml
 [dependencies]
-starlab-core = "0.1"          # ciphersuite-generic FROST: DKG, signing, unified keystore
+starlab-core = "0.1"          # FROST + threshold ECDSA: DKG, signing, keystore
 starlab-blockchain = "0.1"    # address derivation + tx building (EVM / BTC / Solana / Sui)
 ```
 
