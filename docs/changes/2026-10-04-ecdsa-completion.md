@@ -121,3 +121,16 @@ any unverified gate rather than substituting simulated-chain evidence.
   recipient topics reach eth_getLogs. Previous raw-topic getLogs calls silently
   dropped the filter. Fixed in extension a9cb023; 24 tests passed, Svelte check
   has zero errors and warnings. /tmp/starlab-discovery-rpc-tests.log.
+
+- Remote extension CI on 5db73b1 is fully green: check, ed25519 interop,
+  secp256k1 interop. Secp main suite: 12 passed (32.5 minutes); separate
+  namespace outage: 1 passed (3.1 minutes). Run 37185987825. Later visual
+  and restore/discovery fixes require the next branch-head CI run.
+- Designer final extension baseline: 106 public-fixture captures, zero page
+  or action errors, /tmp/starlab-extension-design-final/manifest.json.
+  Remaining edge-state coverage is being expanded before visual acceptance.
+- Desktop final visual code: 49 passed, 0 failed, 1 ignored; strict Clippy
+  passed; release built in 1m28s. Actual saved-wallet window uses the same
+  Ethereum account as extension and TUI. In the Xvfb software environment,
+  wgpu small text has glyph artifacts; ICED_BACKEND=tiny-skia renders clearly
+  without changing source or wallet data. Screenshots live-shots/15 and 16.
