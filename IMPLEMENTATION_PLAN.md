@@ -166,8 +166,11 @@ wallet and sign an Ethereum message/tx together.
 **Tests**: unit + L3 serve-process tests; live TUI+desktop run.
 **Status**: Complete (not merged) — engine PR #133 (into
 `feat/ecdsa-cggmp24`), desktop draft PR stars-labs/starlab-desktop#23
-(`feat/ecdsa-engine`; engine deps on branch `feat/ecdsa-cggmp24`, back to
-`main` when that merges; merge only together with it, after Stage 4).
+(`feat/ecdsa-engine`), with final desktop follow-up #24. All three engine
+dependencies and the committed lock pin integrated Git revision
+`3c5982d0d458fce1a04c393a679fb5a91a2a168f`. Locked tests, release, strict
+Clippy and three-node signing/recovery pass without local overrides. Merge
+only together with the engine after the remaining cross-product gates.
 
 Live run (2026-10-04, local signal server, desktop on Xvfb): TUI (real
 primes) creates a 2-of-3 wallet, the desktop (real primes) and a CLI `serve`
@@ -234,7 +237,10 @@ DKG, co-sign, and extension-initiated sign.
 draft PR stars-labs/starlab-wallet#83 includes the signing implementation.
 Remote extension CI run 37185987825 passed all three jobs, including 12
 secp256k1 interoperability cases and separate network-namespace recovery.
-Final visual and recovery/discovery fixes require branch-head validation.
+Final extension a260304 passes 947 unit tests and ED25519 interop. The final
+secp256k1 suite and branch-head CI run 37190375406 are still running.
+Designer acceptance covers 198 extension images and 58 desktop images;
+implemented feature states and token identities have reviewed evidence.
 Merge together with the engine and desktop after the remaining gates.
 
 What it does:
