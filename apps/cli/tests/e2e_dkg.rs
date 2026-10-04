@@ -199,7 +199,10 @@ async fn signing_times_out_when_nobody_joins_then_retry_succeeds() {
         SimulateOpts {
             nodes: 3,
             threshold: 2,
-            curve: "secp256k1".into(),
+            // This regression exercises FROST nonce/state cleanup.
+            // The secp256k1 simulator also provisions ECDSA and selects
+            // Ethereum; its Paillier worker cannot use this 3s FROST budget.
+            curve: "ed25519".into(),
             signal_url: None,
             timeout_secs: 60,
             insecure_test_primes: support::test_primes(),
