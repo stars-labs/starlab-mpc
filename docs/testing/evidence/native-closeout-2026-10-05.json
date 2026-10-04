@@ -1,0 +1,76 @@
+{
+  "source": "18328a1b8f6d04c769818036b2a0b835c58d22bb",
+  "workspace": {
+    "passed": 549,
+    "failed": 0,
+    "ignored": 32
+  },
+  "ci_run": 37225188943,
+  "ci_jobs_passed": 9,
+  "workspace_log": "/tmp/starlab-18328-final-workspace.log",
+  "release_log": "/tmp/starlab-18328-final-release.log",
+  "artifacts": [
+    {
+      "file": "/tmp/starlab-native-versioned-releases/18328a1/starlab-cli",
+      "sha256": "4dcba9c4eac9207aa488b63c599a2580a0fe9f64d48b2e08f520a8672acb5308"
+    },
+    {
+      "file": "/tmp/starlab-native-versioned-releases/18328a1/starlab-tui",
+      "sha256": "8aa63822a1936321fcbe0c5715f82907097b84ac88e3f868762327a01aeb2de9"
+    }
+  ],
+  "scope": "Current production native clients with shared failed-DKG lifecycle cleanup, cold CLI budgets and encrypted prime-cache leasing; historical on-chain evidence is separate.",
+  "crypto_baseline": "fab8e16634ce4c03d71b00ff9f92bcb058ecc9d4",
+  "core_and_core_wasm_source_diff": [],
+  "client_tests": {
+    "passed": 304,
+    "failed": 0
+  },
+  "prime_cache_tests": 15,
+  "default_ignored_cli_test_coverage": {
+    "total": 32,
+    "remote_shards": {
+      "cold_DKG_production_primes": 2,
+      "e2e_DKG_ECDSA_FROST": 6,
+      "e2e_Bitcoin_reshare_timeout": 5,
+      "conformance_DKG": 2,
+      "conformance_sign": 3,
+      "conformance_reload_errors_replay": 4,
+      "L3_processes": 8,
+      "L2_wire_golden": 2
+    }
+  },
+  "cold_production_primes": {
+    "passed": 1,
+    "seconds": 129.88,
+    "test": "simulate::tests::simulate_2_of_2"
+  },
+  "actual_discovered_join": {
+    "passed": 1,
+    "seconds": 3.9,
+    "test": "oneshot::output_tests::session_join_discovers_and_completes_real_dkg"
+  },
+  "clippy": {
+    "normal": "passed",
+    "strict": "existing workspace warnings; not claimed green"
+  },
+  "platform_scope": {
+    "Linux": "runtime verified",
+    "non_Unix": "persistent prime cache disabled, fresh memory-only fallback",
+    "macOS": "cache runtime unverified"
+  },
+  "checks": [
+    "exact wallet and owned child-share deletion, unrelated wallet preservation, disk-error retry, inflight guards",
+    "READY/SET/DONE authorization, cohort conflicts, duplicate and stale epochs",
+    "encrypted device-bound prime cache, independent process exactly-once claim, wrong-password/corruption/lease/claim fallback",
+    "DKG failure closes creator/joiner setup, releases retry, preserves unrelated signing/new-session state",
+    "late old DKG preparation/persistence results do not publish into a replacement session",
+    "cold CLI default budget, explicit override preservation, immediate correlated DKG failure"
+  ],
+  "limits": [
+    "No new live-chain transaction",
+    "No physical YubiKey verification",
+    "Historical crypto and live-chain source versions remain separate",
+    "Public DKGFailed payload still has no origin ID; guarded real producer paths do not imply arbitrary queued public failures are origin-correlated"
+  ]
+}

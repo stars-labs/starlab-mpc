@@ -28,7 +28,12 @@ Risk: safe-prime generation and interactive browser cryptography are slow;
 Sepolia completion needs test ETH and a working RPC. Preserve logs and report
 any unverified gate rather than substituting simulated-chain evidence.
 
-## Current acceptance evidence
+## Historical acceptance evidence (4 October 2026)
+
+The revisions and live transaction below describe the original cryptographic
+acceptance. [Product closeout](2026-10-05-product-closeout.md) records subsequent
+UI, lifecycle, encrypted-prime cache, packaging and final-source verification.
+These historical results are not relabeled as tests of later product commits.
 
 Source pins: native engine `fab8e166`, desktop `ae34bc6` (all three Git
 engine dependencies and Cargo.lock pinned to `fab8e166`), extension
