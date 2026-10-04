@@ -66,11 +66,12 @@ any unverified gate rather than substituting simulated-chain evidence.
   `0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548`.
   Screenshots: /tmp/starlab-stage5/shots and desktop live-shots.
   Sepolia balance remains zero; faucet returned INVALID_CAPTCHA.
-  Live extension revealed a popup public-key snapshot defect: header address
-  correct, hero falls back to Bitcoin. No-share error was caused by auto-lock;
-  after UI unlock, genuine extension + desktop EIP-191 signing completed and
-  the invitation was withdrawn. Popup lock/signature feedback repairs and a
-  successful real transaction receipt remain required.
+  Live extension initially revealed a popup public-key snapshot defect and
+  missing lock/signature feedback. Those were repaired and verified in the
+  production popup: the Ethereum address is consistent, genuine extension +
+  desktop EIP-191 signing completes, independent address recovery passes, and
+  the invitation is withdrawn. A successful real transaction receipt remains
+  required.
   This gate has NOT passed.
 
 - Real-client message signature public evidence:
@@ -115,3 +116,8 @@ any unverified gate rather than substituting simulated-chain evidence.
   /tmp/starlab-restore-audit-final.log: 19 passed, 67 assertions.
 - Recovery documentation and refresh UI explicitly distinguish FROST share
   refresh (Bitcoin/Solana/Sui) from Ethereum ECDSA keys, which remain unchanged.
+
+- Asset discovery regression: real viem transport verifies ERC20/ERC721/ERC1155
+  recipient topics reach eth_getLogs. Previous raw-topic getLogs calls silently
+  dropped the filter. Fixed in extension a9cb023; 24 tests passed, Svelte check
+  has zero errors and warnings. /tmp/starlab-discovery-rpc-tests.log.

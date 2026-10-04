@@ -278,6 +278,8 @@ recovery verification; screenshot and public signature evidence are recorded
 in `docs/changes/2026-10-04-ecdsa-completion.md`.
 
 A Sepolia transaction receipt is still required. The address has no test ETH
-and the attempted faucet returned `INVALID_CAPTCHA`. Live testing also found
-popup account-key/lock/result display defects; repairs are in progress.
+and the attempted faucet returned `INVALID_CAPTCHA`. Popup account-key, lock
+and result-display defects found during live testing have been repaired; the
+production popup shows a completed signature verified against the wallet
+Ethereum address. Independent viem recovery confirms the same address.
 Message-signing evidence does not satisfy the transaction receipt gate.
