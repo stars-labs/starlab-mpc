@@ -3262,10 +3262,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             info!("Initializing application");
 
             // Initialize keystore
-            let keystore_path = format!(
-                "{}/.frost_keystore",
-                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
-            );
+            let keystore_path = std::env::var("MPC_KEYSTORE_PATH")
+                .ok()
+                .filter(|path| !path.trim().is_empty())
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}/.frost_keystore",
+                        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+                    )
+                });
 
             Some(Command::InitializeKeystore {
                 path: keystore_path,
