@@ -87,10 +87,11 @@ any unverified gate rather than substituting simulated-chain evidence.
   1 namespace-only case skipped (8.8 min), /tmp/starlab-secp-final-rest.log.
   Namespace-only WebRTC outage separately passed for both curves:
   /tmp/starlab-{secp,ed}-netns.log.
-- Final ignored native e2e rerun still failed its short-timeout retry under
-  concurrent load (10 passed, 1 failed). The peer had not finished unlocking
-  within the inherited 3-second timer; deterministic fixture scheduling is
-  being corrected. /tmp/starlab-final-engine-e2e.log.
+- Final ignored native e2e gate: 11 passed, 0 failed, 687.61 seconds on
+  05f219e. /tmp/starlab-retry-budget-final-e2e.log. The fixture gives only
+  the abandoned ceremony 3 seconds and restores the production timeout for
+  the fresh retry; it no longer mutates process environment variables. This
+  supersedes the earlier short-timeout failures under concurrent load.
 - Added user scope: designer participates; token icons and every implemented
   feature must meet the competitive visual acceptance matrix in
   2026-10-04-wallet-visual-design.md. Implementation and screenshot review
@@ -103,7 +104,14 @@ any unverified gate rather than substituting simulated-chain evidence.
   shots/19-live-verified-ecdsa-result.png.
 - Native timeout fixture now has no process environment mutation: only the
   abandoned proposer ceremony uses 3 seconds, retry uses the existing
-  production budget. Final serial full e2e gate is running on 05f219e; prior
+  production budget. Final serial full e2e gate passed on 05f219e; prior
   parallel-run environment contamination (1 pass, 10 fails) is recorded and
   superseded by the source fix, not counted as a passing gate.
 - User confirmed Rabby, MetaMask and Phantom as the visual benchmark.
+
+- Backup audit found and fixed selected Ethereum metadata becoming Bitcoin
+  after multi-file restore. Real restore, ECDSA sign, lock and fresh-service
+  unlock regression passes with persisted Ethereum address and chain.
+  /tmp/starlab-restore-audit-final.log: 19 passed, 67 assertions.
+- Recovery documentation and refresh UI explicitly distinguish FROST share
+  refresh (Bitcoin/Solana/Sui) from Ethereum ECDSA keys, which remain unchanged.
