@@ -156,8 +156,11 @@ any unverified gate rather than substituting simulated-chain evidence.
   /tmp/starlab-final-secp-netns-head.log; full secp suite is running.
 - Later visual-head CI exposed stale signing-button test copy and three
   global viem-mock contamination failures (944 passed, 3 failed). The UI
-  selector was corrected without dropping assertions; the real-RPC transport
-  tests are being isolated. Branch-head CI must pass before release.
+  selector was corrected without dropping assertions; real-RPC transport
+  probes now run in fresh Bun processes. Final extension a260304 passes all
+  947 tests (2,581 assertions, 281.63 seconds); the combined mock/transport
+  regression passes 103 tests. /tmp/starlab-extension-final-full-unit.log and
+  /tmp/starlab-discovery-combined.log. Branch-head CI run 37190375406 is pending.
 - Interoperability CI now pins the same integrated Git engine as desktop.
   Vendored WASM SHA-256 7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389
   exactly matches the fresh integrated build.
