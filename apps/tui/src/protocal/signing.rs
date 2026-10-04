@@ -922,6 +922,8 @@ where
         guard.commitment_arrival_order.clear();
     }
 
+    withdraw_completed_invite(state).await;
+
     info!(
         "🎉 Signing complete: {}",
         hex::encode(&signature_bytes[..16.min(signature_bytes.len())])
@@ -1008,6 +1010,33 @@ fn describe_timeout_reason<C: Ciphersuite>(guard: &AppState<C>, timeout: Duratio
 // -----------------------------------------------------------------
 // helpers
 // -----------------------------------------------------------------
+
+/// Retire discovery only. Keep the session and mesh alive so slower peers
+/// can finish receiving their shares / final signature, including outsiders
+/// in a more-than-threshold ceremony. Joiners must never alter the roster.
+pub(crate) async fn withdraw_completed_invite<C: Ciphersuite>(state: &Arc<Mutex<AppState<C>>>) {
+    let guard = state.lock().await;
+    let Some(session) = guard.session.as_ref() else {
+        return;
+    };
+    if session.proposer_id != guard.device_id {
+        return;
+    }
+    let Some(tx) = guard.websocket_msg_tx.as_ref() else {
+        return;
+    };
+    let leave = starlab_signal_server::ClientMsg::LeaveSession {
+        session_id: session.session_id.clone(),
+    };
+    match serde_json::to_string(&leave) {
+        Ok(json) => {
+            if let Err(e) = tx.send(json) {
+                warn!("completed signing invite withdrawal failed: {e}");
+            }
+        }
+        Err(e) => warn!("completed signing invite serialization failed: {e}"),
+    }
+}
 
 fn fail_and_notify<C: Ciphersuite>(
     guard: &mut AppState<C>,
@@ -1257,6 +1286,45 @@ mod tests {
             coordination_type: "Network".to_string(),
             signing_message_hex: None,
         }
+    }
+
+    #[tokio::test]
+    async fn completed_proposer_withdraws_discovery_without_tearing_down_session() {
+        let mut guard = crate::utils::appstate_compat::AppState::<Secp256K1Sha256TR>::new();
+        guard.device_id = "a".into();
+        guard.session = Some(signing_session("a", &["a", "b", "c"], 2));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        guard.websocket_msg_tx = Some(tx);
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(guard));
+        super::withdraw_completed_invite(&state).await;
+        let message: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(
+            message,
+            serde_json::json!({"type": "leave_session", "session_id": "sim-sign"})
+        );
+        assert_eq!(
+            state
+                .lock()
+                .await
+                .session
+                .as_ref()
+                .unwrap()
+                .participants
+                .len(),
+            3
+        );
+        // A joiner completing later must not mutate the surviving signer roster.
+        state.lock().await.device_id = "b".into();
+        super::withdraw_completed_invite(&state).await;
+        assert!(rx.try_recv().is_err());
+        // The next ceremony retires its own invite, never the previous one.
+        let mut guard = state.lock().await;
+        guard.device_id = "a".into();
+        guard.session.as_mut().unwrap().session_id = "next-sign".into();
+        drop(guard);
+        super::withdraw_completed_invite(&state).await;
+        let message: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(message["session_id"], "next-sign");
     }
 
     #[test]

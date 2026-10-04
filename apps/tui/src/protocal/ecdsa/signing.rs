@@ -496,6 +496,7 @@ where
             super::send_texts(state, peer, std::slice::from_ref(&done)).await;
         }
     }
+    crate::protocal::signing::withdraw_completed_invite(state).await;
     let _ = ctx.ui_tx.send(Message::SigningComplete {
         request_id: INLINE_SIGNING_ID.to_string(),
         message: ctx.prehash.to_vec(),
