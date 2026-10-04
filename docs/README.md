@@ -30,10 +30,7 @@ workspace member.
   root secret yields per-curve / per-account threshold wallets, and
   the **recovery model** (the seed alone ≠ your share; back up the
   keystore). Read alongside the next entry.
-- [`SIGNATURE_CHAIN_COMPATIBILITY.md`](SIGNATURE_CHAIN_COMPATIBILITY.md)
-  — which chains can actually *verify* a FROST (Schnorr) signature,
-  and the sharp EVM-EOA exception (standard Ethereum EOAs verify
-  ECDSA → need a smart-contract account).
+- [Signing keys and chain compatibility](SIGNATURE_CHAIN_COMPATIBILITY.md) — ECDSA for EVM EOAs, FROST for Bitcoin Taproot and ed25519 chains, and the ECDSA resharing limit.
 - [`RECOVERY_AND_RESHARING.md`](RECOVERY_AND_RESHARING.md) — "what if a
   device is lost or stolen?" — threat model, recovery flows, and the
   design for share refresh/resharing (same address, fresh shares, drop a
