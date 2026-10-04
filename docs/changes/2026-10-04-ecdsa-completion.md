@@ -153,14 +153,23 @@ any unverified gate rather than substituting simulated-chain evidence.
 - Final normal ED25519 browser interoperability: 8 passed, 5 conditional
   skips; independent namespace outage: 1 passed. /tmp/starlab-final-ed-head.log
   and /tmp/starlab-final-ed-netns-head.log. Secp namespace outage: 1 passed,
-  /tmp/starlab-final-secp-netns-head.log; full secp suite is running.
+  /tmp/starlab-final-secp-netns-head.log. Final normal secp suite completed:
+  12 passed, zero failures, one conditional namespace skip, 25.0 minutes;
+  separate namespace recovery passed in 2.4 minutes. The normal suite covers
+  both threshold sizes, Ethereum/Bitcoin signing, Send sender recovery,
+  FROST refresh, signaling outage and imported-wallet browser restart.
+  /tmp/starlab-final-secp-head.log; both result directories report passed.
 - Later visual-head CI exposed stale signing-button test copy and three
   global viem-mock contamination failures (944 passed, 3 failed). The UI
   selector was corrected without dropping assertions; real-RPC transport
   probes now run in fresh Bun processes. Final extension a260304 passes all
   947 tests (2,581 assertions, 281.63 seconds); the combined mock/transport
   regression passes 103 tests. /tmp/starlab-extension-final-full-unit.log and
-  /tmp/starlab-discovery-combined.log. Branch-head CI run 37190375406 is pending.
+  /tmp/starlab-discovery-combined.log. Branch-head CI run 37190375406 passes
+  check (947 tests, 698.95 seconds; production build and Svelte check) and
+  ED25519 interoperability. Remote secp256k1 interoperability is still running.
+  /tmp/starlab-extension-a260-check-job.log. Engine c08a1db CI run 37190778009
+  passes all eight jobs.
 - Interoperability CI now pins the same integrated Git engine as desktop.
   Vendored WASM SHA-256 7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389
   exactly matches the fresh integrated build.

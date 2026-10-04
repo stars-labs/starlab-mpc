@@ -238,7 +238,9 @@ draft PR stars-labs/starlab-wallet#83 includes the signing implementation.
 Remote extension CI run 37185987825 passed all three jobs, including 12
 secp256k1 interoperability cases and separate network-namespace recovery.
 Final extension a260304 passes 947 unit tests and ED25519 interop. The final
-secp256k1 suite and branch-head CI run 37190375406 are still running.
+local secp256k1 suite passes all 12 cases plus separate namespace recovery.
+Branch-head CI run 37190375406 passes check and ED25519; remote secp256k1
+interoperability is still running.
 Designer acceptance covers 198 extension images and 58 desktop images;
 implemented feature states and token identities have reviewed evidence.
 Merge together with the engine and desktop after the remaining gates.
