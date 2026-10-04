@@ -13,6 +13,11 @@ Designer audit, 4 October 2026. Covers the existing extension and desktop featur
 
 ## Current evidence
 
+Final acceptance contains 206 unique extension captures with zero action/page
+errors, including unavailable/stale fiat pricing and truthful signature labels,
+and 58 desktop captures across 29 states. Final production live transaction
+evidence is recorded in [the acceptance report](../testing/SEPOLIA_LIVE_ACCEPTANCE.md).
+
 The accepted extension captures are indexed by `/tmp/starlab-extension-design-acceptance/manifest.json`, with a per-function evidence map in `docs/design/visual-evidence.md`. Desktop normal/narrow presentation evidence is `/tmp/starlab-desktop-visual-final-shots/manifest.json`; actual release TinySkia screenshot `/tmp/starlab-desktop-validation/live-shots/16-final-desktop-skia.png` was independently inspected. Packaged native/curated asset identity, primary wallet actions, per-feature loading/error/approval states and recovery limits are implemented. Real signatures and chain receipts remain separate functional evidence.
 
 The later [primary competitor reference audit](2026-10-04-wallet-competitor-reference.md) adds actual browser inspection of Rabby's official site and official Send/Approvals assets, plus Phantom's official sending illustration. No blocking visual mismatch was found; marketing images do not establish every competitor runtime state.

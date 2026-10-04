@@ -36,8 +36,9 @@ engine dependencies and Cargo.lock pinned to `fab8e166`), extension
 
 ### Native, WASM and desktop
 
-- Engine [CI run 37193367450](https://github.com/stars-labs/starlab-mpc/actions/runs/37193367450)
-  passes all eight jobs on `fab8e166`.
+- Engine [CI run 37194799128](https://github.com/stars-labs/starlab-mpc/actions/runs/37194799128)
+  passes all eight jobs on documentation head `550707f`; native source remains
+  `fab8e166`, whose run 37193367450 also passes all eight jobs.
 - Native workspace baseline: 513 passed, zero failed, 31 ignored across 26
   suites (`/tmp/starlab-final-workspace-tests.log`). Final session-modal fix
   adds three lifecycle tests; current full client suite: 277 passed, zero
@@ -64,7 +65,9 @@ engine dependencies and Cargo.lock pinned to `fab8e166`), extension
 ### Extension
 
 - Final `1954ed3` [CI run 37193441768](https://github.com/stars-labs/starlab-wallet/actions/runs/37193441768):
-  check and ED25519 interoperability pass; remote secp256k1 remains running.
+  all three jobs pass. Secp256k1 main suite: 12 passed (39.7 minutes),
+  one conditional namespace skip; separate namespace recovery: one passed
+  (3.2 minutes). Log: `/tmp/starlab-extension-1954-secp-job.log`.
   Check: 947 tests passed, zero failed, 2,581 assertions, 620.88 seconds;
   Svelte has zero errors/warnings and the production build passes.
 - Prior `a260304` [run 37190375406](https://github.com/stars-labs/starlab-wallet/actions/runs/37190375406)
@@ -109,9 +112,17 @@ engine dependencies and Cargo.lock pinned to `fab8e166`), extension
 - Ethereum ECDSA has no share refresh. Documentation and GUI clearly state
   that FROST refresh covers Bitcoin/Solana/Sui and leaves Ethereum unchanged.
 
-### Remaining release gate
+### Completion audit
 
-The final extension remote secp256k1 job is still running. Prior full remote
-and final local interop are green, but they do not substitute for the final
-branch-head job. PRs remain unmerged pending that result and coordinated
-review. No simulated-chain evidence substitutes for the real Sepolia receipt.
+All five stages are complete with the original scope: transport-independent
+threshold ECDSA and HD/replay/serialization checks; native client, CLI and
+wire integration; TUI/desktop operation; WASM/extension operation and final
+remote interop; real three-client wallet and confirmed Sepolia transaction.
+Designer participation, token icons and every implemented feature's visual
+acceptance against the three user-selected competitors are complete.
+
+Engine #135, extension #83 and desktop #24 are reviewable follow-up PRs on
+the existing feature branches. Their complete implementations and acceptance
+evidence are ready for coordinated review; they have not been merged to main.
+The final documentation-only commit does not change the validated runtime
+source pins or vendored WASM.

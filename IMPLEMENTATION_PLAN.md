@@ -72,7 +72,7 @@ export → import round trip; existing FROST e2e (Bitcoin BIP-340, reshare,
 timeout, ed25519) unchanged.
 **Status**: Complete (integrated in draft PR #135 targeting
 `feat/ecdsa-cggmp24`). Native gates are green; coordinate the engine, desktop
-and extension release after the final branch-head interoperability gate.
+and extension release together; all acceptance gates are complete.
 
 What it does:
 - **DKG**: after the FROST ceremonies of a secp256k1 (or unified) DKG, the
@@ -170,7 +170,7 @@ wallet and sign an Ethereum message/tx together.
 dependencies and the committed lock pin integrated Git revision
 `fab8e16634ce4c03d71b00ff9f92bcb058ecc9d4`. Locked tests, release, strict
 Clippy and three-node signing/recovery pass without local overrides. Merge
-only together with the engine after the remaining cross-product gates.
+only together with the engine; final cross-product gates are complete.
 
 Live run (2026-10-04, local signal server, desktop on Xvfb): TUI (real
 primes) creates a 2-of-3 wallet, the desktop (real primes) and a CLI `serve`
@@ -233,12 +233,15 @@ works.
 **Success Criteria**: extension ↔ CLI interop (2-of-3, 3-of-3) green in CI.
 **Tests**: bun unit tests (real WASM); interop spec: CLI + extension ECDSA
 DKG, co-sign, and extension-initiated sign.
-**Status**: In Progress — implementation and local acceptance complete.
+**Status**: Complete (not merged) — implementation, local acceptance and
+final remote interoperability are complete.
 Engine PR #135, extension PR stars-labs/starlab-wallet#83 and desktop #24
 share integrated engine revision `fab8e166`. Extension head `1954ed3` CI
 run [37193441768](https://github.com/stars-labs/starlab-wallet/actions/runs/37193441768)
 passes check (947 tests, zero failures; Svelte and production build) and
-ED25519 interoperability. Final remote secp256k1 interoperability is running.
+ED25519 and secp256k1 interoperability. Final secp256k1 main suite: 12 passed
+(39.7 minutes), one conditional namespace skip; separate namespace recovery:
+one passed (3.2 minutes). All three final CI jobs succeed.
 Previous `a260304` CI passes all three jobs, including 12 secp256k1 cases
 and separate network-namespace recovery. Final local suites also pass both
 curves and namespace recovery. Designer acceptance covers 206 extension
