@@ -23,9 +23,8 @@ struct Args {
     log_level: String,
 
     /// Device ID for this instance (must be unique)
-    /// If not provided, uses hostname. The keystore is always at
-    /// ~/.frost_keystore (not per-device-id — device_id is the
-    /// participant identity in the FROST mesh, not a filesystem prefix).
+    /// If not provided, uses hostname. The keystore defaults to
+    /// ~/.frost_keystore; MPC_KEYSTORE_PATH overrides its location.
     #[arg(long = "device-id")]
     device_id: Option<String>,
 
@@ -203,10 +202,15 @@ async fn run_elm_tui(
     elm_app.set_desktop_notify(desktop_notify);
 
     // Initialize keystore automatically
-    let keystore_path = format!(
-        "{}/.frost_keystore",
-        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
-    );
+    let keystore_path = std::env::var("MPC_KEYSTORE_PATH")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+        .unwrap_or_else(|| {
+            format!(
+                "{}/.frost_keystore",
+                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+            )
+        });
     info!(
         "Initializing keystore at: {} for device: {}",
         keystore_path, device_id

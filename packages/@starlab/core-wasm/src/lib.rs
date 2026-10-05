@@ -10,6 +10,10 @@ use starlab_core::{
 use std::collections::BTreeMap;
 use wasm_bindgen::prelude::*;
 
+// Threshold ECDSA (Ethereum key): aux-info / keygen / signing ceremonies.
+mod ecdsa;
+pub use ecdsa::*;
+
 // Re-export specific FROST types needed by WASM
 use frost_ed25519::{
     Identifier as Ed25519Identifier,
@@ -707,16 +711,6 @@ impl FrostDkgSecp256k1 {
         Ok(Secp256k1Curve::get_address(&verifying_key))
     }
 
-    pub fn get_eth_address(&self) -> Result<String, WasmError> {
-        let public_key_package = self
-            .public_key_package
-            .as_ref()
-            .ok_or_else(|| WasmError::new("DKG not complete"))?;
-
-        let verifying_key = Secp256k1Curve::verifying_key(public_key_package);
-        Ok(Secp256k1Curve::get_eth_address(&verifying_key)?)
-    }
-
     pub fn is_dkg_complete(&self) -> bool {
         self.key_package.is_some() && self.public_key_package.is_some()
     }
@@ -994,11 +988,6 @@ impl FrostDkgUnified {
     /// Get Solana address (ed25519 base58).
     pub fn get_solana_address(&self) -> Result<String, WasmError> {
         self.dkg.get_solana_address().map_err(|e| e.into())
-    }
-
-    /// Get Ethereum address (secp256k1 keccak256).
-    pub fn get_eth_address(&self) -> Result<String, WasmError> {
-        self.dkg.get_eth_address().map_err(|e| e.into())
     }
 
     /// Get ed25519 group public key (hex).

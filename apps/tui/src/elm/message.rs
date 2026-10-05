@@ -92,7 +92,10 @@ pub enum Message {
     DeleteWallet {
         wallet_id: String,
     },
-    WalletDeleted {
+    DeleteWalletConfirmed {
+        wallet_id: String,
+    },
+    WalletDeletionCompleted {
         wallet_id: String,
     },
     /// 'e' on Manage Wallets: open the export screen for this wallet.
@@ -513,6 +516,15 @@ pub enum Message {
     CommandFailed {
         command: String,
         error: String,
+    },
+
+    /// The ECDSA part of the running wallet DKG reached `phase`.
+    EcdsaDkgProgress {
+        phase: crate::protocal::ecdsa::DkgPhase,
+    },
+    /// The background safe-prime generator's state (polled by the app loop).
+    EcdsaSetupStatus {
+        status: crate::protocal::ecdsa::PrimeStatus,
     },
 
     // Time-based events

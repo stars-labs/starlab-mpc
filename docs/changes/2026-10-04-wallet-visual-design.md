@@ -1,0 +1,81 @@
+# Starlab visual acceptance specification
+
+Designer audit, 4 October 2026. Covers the existing extension and desktop feature set; recommendations below are design decisions informed by primary competitor references, not claims that competitors implement Starlab's threshold protocol. Functional ECDSA acceptance remains a separate required gate.
+
+## Primary references
+
+- [Phantom send guide](https://phantom.com/learn/guides/how-to-send-tokens-to-an-exchange): token selection with network identity; chain badges distinguish non-native assets.
+- [Phantom receive guide](https://help.phantom.com/articles/4406393831187): network-specific address, QR and copy affordance, network selection.
+- [MetaMask send guide](https://support.metamask.io/manage-crypto/move-crypto/send/how-to-send-tokens-from-your-metamask-wallet): asset/network → recipient/amount → fee review → confirmation → activity status.
+- [MetaMask permissions](https://support.metamask.io/more-web3/dapps/manage-dapp-permissions/): review requested accounts and networks before connecting.
+- [Phantom token and collectible management](https://help.phantom.com/sections/19998228548499): token contract identity and collectible handling.
+- [Rabby official repository](https://github.com/RabbyHub/Rabby) and [official site](https://rabby.io/): multi-chain wallet benchmark. Website is client-rendered and web reader cannot inspect its rendered visuals; do not use similarly named unofficial sites as evidence. Designer comparison here uses known wallet hierarchy and the primary MetaMask/Phantom flows, not invented Rabby screenshots.
+
+## Current evidence
+
+Final acceptance contains 206 unique extension captures with zero action/page
+errors, including unavailable/stale fiat pricing and truthful signature labels,
+and 58 desktop captures across 29 states. Final production live transaction
+evidence is recorded in [the acceptance report](../testing/SEPOLIA_LIVE_ACCEPTANCE.md).
+
+The accepted extension captures are indexed by `/tmp/starlab-extension-design-acceptance/manifest.json`, with a per-function evidence map in `docs/design/visual-evidence.md`. Desktop normal/narrow presentation evidence is `/tmp/starlab-desktop-visual-final-shots/manifest.json`; actual release TinySkia screenshot `/tmp/starlab-desktop-validation/live-shots/16-final-desktop-skia.png` was independently inspected. Packaged native/curated asset identity, primary wallet actions, per-feature loading/error/approval states and recovery limits are implemented. Real signatures and chain receipts remain separate functional evidence.
+
+The later [primary competitor reference audit](2026-10-04-wallet-competitor-reference.md) adds actual browser inspection of Rabby's official site and official Send/Approvals assets, plus Phantom's official sending illustration. No blocking visual mismatch was found; marketing images do not establish every competitor runtime state.
+
+## Shared visual system
+
+Keep Starlab violet as the brand. Use neutral surfaces as the dominant background; reserve gradient for a small brand accent rather than every CTA. Extension light: canvas #F5F6FA, surface white, text #171923, muted #667085, line #E4E7EE, violet #6753FF. Desktop dark: canvas #11131B, surface #191D29, elevated #22283A, text #F5F6FA, muted #A1ABC0, line #313A50, violet #8B7CFF. Success #20B97D, warning #E6AA45, error #F26878. State must also use icon and text, never color alone.
+
+Typography: 14px body, 12px label/helper, 18px panel title, 28–32px portfolio amount, minimum 11px ancillary text. Spacing scale 4/8/12/16/24/32. Card radius 16px; controls 10px; button height 40px or larger; desktop controls 42px. Icons 20px stroke icons with one consistent family; asset icons 36px list, 24px selectors, 48px review/receive; chain corner badge 12px. Retain visible text labels for principal actions. Full tab extension view should center a 400–480px wallet surface; popup remains 380px. Desktop use all window space naturally, fixed 248–280px navigation, content max width around 1000px. Avoid vast unfilled black area or a horizontally cramped settings form.
+
+Token assets must be packaged locally, never guessed from an untrusted ticker. Native ETH/BTC/SOL/SUI marks must preserve recognizable official geometry and colors. Also native EVM currency POL/BNB/AVAX where supported. Existing curated ERC-20 assets: USDC, USDT, DAI; icons map by chain ID plus canonical contract from tokenService.ts, not symbol alone. An unknown/custom token gets a neutral geometric coin with its first two characters and accessible full name. Do not give a fake token a trusted USDC image merely because its symbol says USDC. No internet dependency for native icons. Provide light/dark neutral background ring, equal optical size, no emoji stand-ins. All asset surfaces must display icon + name/symbol + chain context where ambiguous.
+
+## Per-function acceptance matrix
+
+| Function | Exact implementation surface | Competitive visual acceptance | Required screenshot states |
+|---|---|---|---|
+| App shell/home | extension popup/App.svelte + app.css; desktop main.rs view/header/sidebar/main_panel | Wallet/account identity above funds; clear chain pill with chain icon; Send and Receive primary. Secondary Sign/Create under labeled Tools or wallet menu. Desktop navigation rather than always-visible configuration wall. | funded, zero, disconnected; popup and wide tab; desktop normal and narrow |
+| Wallet selection | WalletSelector.svelte; desktop wallets_card | Named wallet row with wallet/avatar icon, threshold chip, active check; address secondary. Human name leads, not raw UUID/ciphersuite. | one wallet, multiple, empty |
+| Account switch/add | AccountPicker.svelte + AccountManager.svelte; desktop wallets_card | Consistent avatar/icon and name, short address, explicit active marker; add account row. Watch-only/hardware badges differentiated by icon and text. | active, hardware, watch-only, add/error |
+| Portfolio/assets | TokenList.svelte | 36px native/curated token image, token name and symbol left; amount and fiat right. One portfolio total, not duplicate hero and list totals. Zero balances remain useful, unavailable fiat = dash. | populated/native+3tokens, zero, skeleton, retry error, custom fallback |
+| Send | SendForm.svelte | Token icon/name and network at form top; recipient, amount, balance and Max; review summary with icon and dominant amount, full recipient, fee, total. No raw RPC details as headline. Primary CTA reads Review then Confirm send. | input, validation, review, preparing, waiting for cosigners, submitted, rejected/error |
+| Receive | ReceiveCard.svelte | Prominent chain/token identity and label, centered QR on white frame, readable full address, Copy confirmation and network reminder. Chain shown even when same EVM address across networks. | every supported native chain, copied, QR error |
+| Activity | ActivityFeed.svelte; desktop activity_tab | Direction/type icon, human action title, asset+amount, timestamp, pending/success/failure badge. Click/detail or existing explorer affordance visible; raw JSON/hex collapsed. | empty, mixed statuses, loading, RPC error |
+| Collectibles | NftGallery.svelte | Square artwork cards with collection/name and chain badge; consistent image fallback; metadata secondary. Skeleton grid and purposeful empty panel. | populated, failed image, empty, error/loading |
+| Onboarding/unlock | Onboarding.svelte + PasswordPrompt.svelte | Brand mark/quiet wallet illustration, single main action, password feedback near field, show/hide icon, error inline. Never decorate by exposing secret/share material. | welcome, locked, wrong password, busy |
+| Create wallet | CreateWalletForm.svelte; desktop setup_tab | Step hierarchy: wallet details → devices/threshold → connect → create. Device pictograms and clear threshold summary (2 of 3 devices required). Default information avoids curve names; advanced details remain available. | form, validation, waiting lobby |
+| Join/invitations | popup/App.svelte invitation blocks; desktop setup_banner/setup_tab | Invitation cards show inviter/wallet, threshold and device rows with readiness. Approve and decline aligned, no large opaque session IDs. Room invite copy affordance as product share card. | discovered, joined, declined; expired = N/A (no expiry/TTL UI branch in current invite model) |
+| DKG/setup progress | popup/App.svelte ceremony sections; desktop setup_banner/ecdsa_keygen_banner | Stepper: Connect devices → Secure setup → Create wallet → Ready; phase accurate and animated indeterminate where no honest percent exists. Named device rows, waiting vs working distinguished. Avoid falsely saying ready because future prime supply exists. | peers missing, prime preparation, aux/keygen, complete, failure |
+| Save encrypted wallet | popup/App.svelte pendingKeystoreReady; desktop setup completion | Success shield/check illustration and wallet identity; password/save main action; explain device backup plainly. No unsigned claim wallet is persisted until actual save. | pending save, mismatch/error, saved |
+| Sign message | popup/App.svelte sign form/preview; desktop sign_tab | Chain icon and wallet/account identity, message content first, protocol/hash in collapsed details. Review then Request signature. Keep hex support but label it; do not invent text conversion behavior. | input, preview, invalid, waiting, completed |
+| Threshold co-sign approval | popup/App.svelte incomingSigningInvite/progress; desktop signature_requests | Dedicated high-priority approval card showing requesting wallet/device, chain, readable request, threshold device status, separate Reject and Approve. A transaction uses human amount/recipient/fee when available; unknown bytes clearly shown, never pretend decoded. | pending, password error, approved, declined, quorum, complete |
+| dApp connection | ConnectRequest.svelte | Origin identity prominently, account/network selection rows with icons, explicit permission description, paired Cancel/Connect footer. Site favicon optional with fallback, not trusted identity assertion. | account choices, error, connected |
+| dApp signature/transaction | SignatureRequest.svelte | Origin at top, operation type and chain, readable semantic request, risk panel only backed by available result; details collapsible. Approval buttons visually separated and always visible. | safe/unknown request, preflight warning, rejected, busy |
+| Backup/restore | Settings.svelte backup; desktop wallets_card import/export | Dedicated Security/Backup section, icon, concise encrypted-device-share explanation, file actions and password scoped to workflow. Desktop main sidebar must not show permanently disabled backup controls. | export, import, wrong password, success |
+| Device replacement/refresh | ReshareCard.svelte | Device cards with state/selected replacement, threshold summary; explicit unchanged addresses claim only where protocol guarantees it. Diagram showing removed/new devices, warning and confirmation hierarchy. | select, progress, failure, complete |
+| Connected apps | Settings.svelte connected dApps | Site identity rows, account/network summaries, Disconnect action with neutral destructive styling; distinct empty state. | populated, empty, disconnect |
+| Contacts/address book | Settings.svelte Address book; SendForm.svelte contacts | Person/avatar glyph, contact name, network icon, short address; edit/delete trailing actions. Clear empty Add contact. | populated, add/edit, invalid |
+| Token management | Settings.svelte Tokens | Reuse token icon/name rows and chain/contract secondary; custom token preview with fallback before import. | curated, custom, invalid, loading |
+| Token approvals | Settings.svelte Token approvals | Asset+spender identity, allowance amount/risk status and Revoke action; do not style raw address as primary name. | list, unlimited warning, revoke busy/error, empty |
+| Spending policy | Settings.svelte Spending policy | Shield icon, labeled enabled state, grouped limits and help, save feedback. No decorative claim of security beyond actual enforcement. | enabled, disabled, validation, saved |
+| Sandbox | Settings.svelte Sandbox mode; AccountManager.svelte | Persistent obvious Simulation badge in sandbox account context; real/simulated operations visually distinct. | off/on, watch-only, results |
+| Network/room/custom RPC | Settings.svelte Network/room; desktop network_card | Settings/advanced destination, chain image/icon and human label; testnet badge. Room sharing card accessible from device flow; URL editor not dominant home content. | default, custom, disconnected, invalid URL |
+| Errors/toasts/status | app.css/UI primitives; desktop status_bar | Icon+plain-English message+action when recoverable; long technical details expandable. Toast does not obscure approval; no endless spinner without current phase. | load retry, protocol failure, peer decline, success |
+
+## Implementation ownership and priorities
+
+P0: preserve chain-address fix; audit every copy/receive/send/portfolio address binding against active chain. Chain identity must agree across header/hero/token/approval. Token visual branding must key canonical contract, not ticker.
+
+P1 extension shared assets/primitives: introduce local TokenIcon/ChainIcon component and asset mapping; wire into TokenList, SendForm, ReceiveCard, ActivityFeed, WalletSelector/AccountPicker, AccountManager, SignatureRequest/ConnectRequest, Settings token/approval rows. Reuse existing Button/Icon rather than add a new framework. Native SVG assets belong in the existing repo asset system. Rework App home action order and concise portfolio hierarchy; retain exact business handlers.
+
+P1 desktop: split main.rs presentation helpers into a small ui module before adding extensive graphics; share native token asset geometry with extension (embedded SVG or reliable vector rendering). Add actual palette/card/button styling, shell navigation and chain/asset rows, icon-bearing review and progress cards. Move connection/backup forms behind dedicated panels while keeping their actions reachable. No business-manager refactor or compatibility layer needed.
+
+P2: feature-by-feature state polish according to matrix, including secondary settings, NFT fallback, consistent empty/skeleton/error panels. Do not introduce unavailable swap/buy/sell functionality merely to imitate competitors.
+
+## Designer verification protocol
+
+Capture every row's meaningful states in a controlled screenshot harness with public fixture data, never exported private shares. Validate 380px popup, 1280px tab, desktop 1024×768 and normal full size; both light/dark for extension. Designer reviews contact sheets per feature and rejects clipped text, inconsistent icon scale, unknown-token trusted branding, contrast failures, incorrect chain identity and developer data as primary content. Keep screenshots and manifest labeling fixture vs live. Screenshots show visual correctness; live ECDSA and transaction tests separately prove operation. Completion means every existing user-facing function has reviewed evidence, not only the home page.
+
+## Asset provenance
+
+Use primary native brand repositories/pages as geometry sources and store a provenance manifest alongside packaged SVGs: [Ethereum brand assets](https://ethereum.org/assets/), [Bitcoin press resources](https://bitcoin.org/en/press), [Solana branding](https://solana.com/branding), [Sui Foundation media assets](https://suifoundation.notion.site/Media-and-Partner-Resources-Sui-2025-26-fe24926c42a74c2b90dbf54ebf6defb9). The Sui droplet should follow its real outline; do not use a generic water drop. USDC Circle mark, Tether USDT mark and DAI mark are token identifiers, with asset provenance recorded when downloaded. Avoid AI-generated substitutes for existing token trademarks; vector assets are the proper implementation here. Desktop may use Iced SVG feature and embedded bytes, keeping the same asset files and contract-aware fallback semantics as extension. Shared means identical asset geometry/provenance and role rules; it does not require a new cross-repo package.

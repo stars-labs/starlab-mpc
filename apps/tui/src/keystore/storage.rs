@@ -111,6 +111,62 @@ impl Keystore {
         self.wallet_cache.iter().find(|w| w.session_id == wallet_id)
     }
 
+    /// Remove all curve shares belonging to this exact wallet ID on this device.
+    /// Missing files are tolerated so an interrupted deletion can be retried.
+    pub fn delete_wallet(&mut self, wallet_id: &str) -> Result<()> {
+        check_wallet_id(wallet_id)?;
+        let ids: std::collections::BTreeSet<String> = self
+            .wallet_cache
+            .iter()
+            .filter(|w| {
+                w.session_id == wallet_id
+                    || starlab_core::accounts::parse_child_wallet_id(&w.session_id)
+                        .is_some_and(|(parent, _, _)| parent == wallet_id)
+            })
+            .map(|w| w.session_id.clone())
+            .collect();
+        if ids.is_empty() {
+            return Err(KeystoreError::WalletNotFound(wallet_id.to_owned()));
+        }
+        // Detect invalid targets before removing any share, so failures remain retryable.
+        for id in &ids {
+            for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+                let path = self
+                    .base_path
+                    .join(&self.device_id)
+                    .join(curve)
+                    .join(format!("{id}.json"));
+                match fs::symlink_metadata(&path) {
+                    Ok(meta) if !meta.file_type().is_file() => {
+                        return Err(KeystoreError::General(format!(
+                            "Wallet share is not a regular file: {}",
+                            path.display()
+                        )));
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        for id in &ids {
+            for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+                let path = self
+                    .base_path
+                    .join(&self.device_id)
+                    .join(curve)
+                    .join(format!("{id}.json"));
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        self.wallet_cache.retain(|w| !ids.contains(&w.session_id));
+        Ok(())
+    }
+
     /// Gets this device's info (for compatibility)
     pub fn get_this_device(&self) -> Option<DeviceInfo> {
         Some(DeviceInfo::new(
@@ -943,6 +999,103 @@ fn share_group_key<C: frost_core::Ciphersuite>(blob: &[u8]) -> Result<String> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn delete_wallet_removes_encrypted_shares_and_preserves_other_wallets() {
+        let tmp = TempDir::new().unwrap();
+        let mut ks = Keystore::new(tmp.path(), "device").unwrap();
+        for id in ["wallet", "wallet-bitcoin-1", "wallet-other"] {
+            ks.create_wallet_multi_chain(
+                id,
+                "ed25519",
+                Vec::new(),
+                2,
+                3,
+                &"aa".repeat(33),
+                b"secret-share",
+                "password-12345",
+                Vec::new(),
+                None,
+                1,
+                vec!["device".into()],
+                None,
+            )
+            .unwrap();
+        }
+        for curve in ["secp256k1", ECDSA_CURVE] {
+            let mut metadata = ks.get_wallet("wallet").unwrap().clone();
+            metadata.curve_type = curve.into();
+            ks.save_wallet_file_atomic("wallet", b"secret-share", "password-12345", &metadata)
+                .unwrap();
+        }
+        let other_device = tmp.path().join("other-device/ed25519");
+        fs::create_dir_all(&other_device).unwrap();
+        fs::copy(
+            tmp.path().join("device/ed25519/wallet.json"),
+            other_device.join("wallet.json"),
+        )
+        .unwrap();
+        ks.delete_wallet("wallet").unwrap();
+        assert!(other_device.join("wallet.json").exists());
+        for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+            assert!(
+                !tmp.path()
+                    .join("device")
+                    .join(curve)
+                    .join("wallet.json")
+                    .exists()
+            );
+        }
+        assert!(
+            !tmp.path()
+                .join("device/ed25519/wallet-bitcoin-1.json")
+                .exists()
+        );
+        let reopened = Keystore::new(tmp.path(), "device").unwrap();
+        assert!(reopened.get_wallet("wallet").is_none());
+        assert_eq!(
+            reopened
+                .load_wallet_file("wallet-other", "password-12345")
+                .unwrap(),
+            b"secret-share"
+        );
+        assert!(ks.delete_wallet("../wallet-other").is_err());
+    }
+
+    #[test]
+    fn delete_wallet_io_failure_keeps_metadata_and_can_retry() {
+        let tmp = TempDir::new().unwrap();
+        let mut ks = Keystore::new(tmp.path(), "device").unwrap();
+        ks.create_wallet_multi_chain(
+            "wallet",
+            "ed25519",
+            Vec::new(),
+            2,
+            3,
+            &"aa".repeat(33),
+            b"secret",
+            "password-12345",
+            Vec::new(),
+            None,
+            1,
+            vec!["device".into()],
+            None,
+        )
+        .unwrap();
+        let blocked = tmp.path().join("device/secp256k1/wallet.json");
+        fs::create_dir(&blocked).unwrap();
+        assert!(ks.delete_wallet("wallet").is_err());
+        assert!(ks.get_wallet("wallet").is_some());
+        fs::remove_dir(blocked).unwrap();
+        ks.delete_wallet("wallet").unwrap();
+        assert!(ks.get_wallet("wallet").is_none());
+        assert!(
+            Keystore::new(tmp.path(), "device")
+                .unwrap()
+                .get_wallet("wallet")
+                .is_none()
+        );
+    }
 
     #[test]
     fn wallet_metadata_round_trips_participants_field() {

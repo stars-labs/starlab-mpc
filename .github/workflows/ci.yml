@@ -11,59 +11,90 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The Rust suites run as parallel shards. With threshold ECDSA every
+  # secp256k1 DKG also runs cggmp24 aux info (Paillier + ZK proofs, ~20-40 s
+  # per DKG), which took the old single serial job from ~7 to ~31 min. Each
+  # shard gets its own runner, so the wall time is the slowest shard instead
+  # of the sum. Nothing is skipped: where a suite is split, one shard selects
+  # tests by name filters and the other runs the same suite with exactly
+  # those filters `--skip`ped, so a new test always lands in some shard.
   rust:
-    name: Rust tests + real-DKG e2e
+    name: Rust ${{ matrix.name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout || 40 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: unit + core crypto
+            # Core crypto runs real ECDSA aux-info / keygen / signing
+            # ceremonies in-process (~2 min).
+            run: >-
+              cargo test -p starlab-cli -p starlab-signal-server --locked
+              && cargo test -p starlab-client --lib --locked
+              && cargo test -p starlab-core --locked
+          # Cold-start native safe primes must be covered without insecure fixtures.
+          - name: cold DKG (production primes)
+            timeout: 45
+            run: >-
+              cargo test -p starlab-cli --lib --locked --
+              --ignored --exact simulate::tests::simulate_2_of_2 --nocapture
+              && cargo test -p starlab-cli --lib --locked --
+              --ignored --exact oneshot::output_tests::session_join_discovers_and_completes_real_dkg --nocapture
+          # e2e_dkg: real WebRTC DKG + threshold signing over loopback.
+          - name: e2e (DKG, ECDSA, FROST quorum)
+            run: >-
+              cargo test -p starlab-cli --test e2e_dkg --locked --
+              --ignored --test-threads=1 dkg_2_of ecdsa_ frost_
+          - name: e2e (Bitcoin, reshare, timeout)
+            run: >-
+              cargo test -p starlab-cli --test e2e_dkg --locked --
+              --ignored --test-threads=1 --skip dkg_2_of --skip ecdsa_ --skip frost_
+          # L1 conformance matrix (docs/cli-conformance-testing.md): the full
+          # (n,t) DKG + quorum-signing table, reporting every shape that breaks.
+          - name: conformance (DKG shapes)
+            run: >-
+              cargo test -p starlab-cli --test conformance_matrix --locked --
+              --ignored --test-threads=1 dkg_
+          - name: conformance (signing shapes)
+            run: >-
+              cargo test -p starlab-cli --test conformance_matrix --locked --
+              --ignored --test-threads=1 sign_
+          - name: conformance (reload, errors, replay)
+            run: >-
+              cargo test -p starlab-cli --test conformance_matrix --locked --
+              --ignored --test-threads=1 --skip dkg_ --skip sign_
+          # L3 process isolation across real `serve` binaries (DKG, malformed
+          # input, cold-start signing after a restart) + L2 wire-frame golden
+          # (the signal-server protocol the extension must match).
+          - name: L3 serve processes + L2 wire golden
+            run: >-
+              cargo test -p starlab-cli --test l3_serve_process --locked --
+              --ignored --test-threads=1
+              && cargo test -p starlab-cli --test wire_trace --locked --
+              --ignored --test-threads=1
     steps:
       - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # One cache for every shard (same dependency set); only the unit shard
+      # writes it, so the shards don't race to save near-identical caches.
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2.9.2
+        with:
+          shared-key: rust-tests
+          save-if: ${{ matrix.name == 'unit + core crypto' }}
 
       - name: System deps
         run: sudo apt-get update && sudo apt-get install -y pkg-config
 
-      # This repo is the headless engine + terminal clients. The GUI products
-      # (browser extension in stars-labs/starlab-wallet, Iced desktop in
-      # stars-labs/starlab-desktop) live elsewhere. The headless stack
-      # (cli, starlab-client, signal-server) covers the real DKG/signing path.
-      - name: Unit tests
-        run: cargo test -p starlab-cli -p starlab-signal-server --locked
-             && cargo test -p starlab-client --lib --locked
-
-      # Core crypto: FROST + threshold ECDSA (cggmp24). The ECDSA module runs
-      # real aux-info / keygen / signing ceremonies in-process (~1-2 min).
-      - name: Core crypto tests (FROST + threshold ECDSA)
-        run: cargo test -p starlab-core --locked
-        timeout-minutes: 15
-
       # The end-to-end tests are #[ignore] by default (real WebRTC over
-      # loopback). They gate the job: they pass on GitHub's shared runners.
-      - name: End-to-end DKG + threshold signing (real FROST/WebRTC)
-        run: cargo test -p starlab-cli --test e2e_dkg --locked -- --ignored --test-threads=1
-        timeout-minutes: 30
-
-      # L1 conformance matrix (docs/cli-conformance-testing.md): the full
-      # (n,t) DKG + quorum-signing table, reporting every shape that breaks.
-      - name: L1 conformance matrix (DKG/sign over all shapes)
-        run: cargo test -p starlab-cli --test conformance_matrix --locked -- --ignored --test-threads=1
-        timeout-minutes: 30
-
-      # L3 process isolation across two real `serve` binaries: DKG, malformed-
-      # input survival, and LIFE-2 cold-start signing after a real restart.
-      - name: L3 serve-process interop (DKG + signing + error handling)
-        run: cargo test -p starlab-cli --test l3_serve_process --locked -- --ignored --test-threads=1
-        timeout-minutes: 30
-
-      # L2 wire-frame golden: captures the real signal-server protocol via a
-      # recording proxy and pins its normalized shape (the contract the
-      # extension must match).
-      - name: L2 wire-protocol golden (recording proxy; DKG + signing)
-        run: cargo test -p starlab-cli --test wire_trace --locked -- --ignored --test-threads=1
-        timeout-minutes: 20
+      # loopback); they gate CI and pass on GitHub's shared runners.
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.run }}
+        timeout-minutes: ${{ matrix.timeout || 30 }}
 
   wasm:
     name: core-wasm + types build

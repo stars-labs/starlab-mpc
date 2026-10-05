@@ -46,6 +46,7 @@ fn forget_finished_ceremony(model: &mut Model) {
 /// loaded is dropped for the new ceremony, so no wallet counts as unlocked.
 fn begin_dkg(model: &mut Model) {
     model.wallet_state.dkg_round = DKGRound::Initialization;
+    model.wallet_state.ecdsa_dkg_phase = None;
     model.wallet_state.wallet_unlocked_id = None;
 }
 
@@ -985,6 +986,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 .as_ref()
                 .map(|s| s.session_id.clone())
                 .unwrap_or_else(|| "inline".to_string());
+            model.wallet_state.signing_wallet_id = Some(request.wallet_id.clone());
             // Stage 4: wipe any stale roster from a previous ceremony
             // before the new one starts recording commitments.
             model.wallet_state.signing_commitments_received.clear();
@@ -1012,11 +1014,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 signature.len()
             );
 
+            // The account the ceremony signed for (`{root}-{chain}-{n}`),
+            // recorded when it started; older fallbacks for safety.
             let wallet_id = model
                 .wallet_state
-                .last_finalized_wallet
-                .as_ref()
-                .map(|w| w.wallet_id.clone())
+                .signing_wallet_id
+                .take()
+                .or_else(|| {
+                    model
+                        .wallet_state
+                        .last_finalized_wallet
+                        .as_ref()
+                        .map(|w| w.wallet_id.clone())
+                })
                 .or_else(|| model.selected_wallet.clone())
                 .or_else(|| {
                     model
@@ -1047,6 +1057,11 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 None
             };
             let display_message = raw_message.unwrap_or_else(|| message.clone());
+            let (verified, verification) =
+                verify_account_signature(&model.wallet_state, &wallet_id, &message, &signature);
+            if !verified {
+                warn!("Signature for {wallet_id} did not verify: {verification}");
+            }
 
             model.wallet_state.last_completed_signature =
                 Some(crate::elm::model::CompletedSignatureInfo {
@@ -1055,11 +1070,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     message: display_message,
                     signed_hash,
                     signature,
-                    // `protocal::signing::try_aggregate` gates the emit
-                    // on a successful verify — see the guard there.
-                    // If that ever changes we'll need to re-verify
-                    // here.
-                    verified: true,
+                    verified,
+                    verification,
                 });
 
             model.ui_state.notify(
@@ -1093,6 +1105,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::SigningFailed { request_id, error } => {
             error!("Signing ceremony {} failed: {}", request_id, error);
+            model.wallet_state.signing_wallet_id = None;
             desktop_notify::send(model.ui_state.desktop_notify, "Signing failed", &error);
             model.ui_state.modal = Some(Modal::Error {
                 title: "Signing Failed".to_string(),
@@ -1177,7 +1190,13 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             None
         }
         Message::SignToggleChain => {
-            if model.wallet_state.curve_type == "secp256k1" {
+            let offers_choice = match &model.current_screen {
+                Screen::SignTransaction { wallet_id } => {
+                    model.wallet_state.sign_chains_for(wallet_id).len() > 1
+                }
+                _ => false,
+            };
+            if offers_choice {
                 model.wallet_state.sign_on_bitcoin = !model.wallet_state.sign_on_bitcoin;
                 model.wallet_state.sign_error = None;
             }
@@ -1215,14 +1234,19 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // "BIP-44 all the way": the UI navigates with the ROOT wallet id,
             // but signing must use an ACCOUNT key — map to the account-0
-            // child of the chosen chain (Tab picks Ethereum or Bitcoin for a
-            // secp256k1 wallet). (No per-account selection exists on the
-            // accounts table yet; when it does, the selected index slots in
-            // here.) The child share is materialized on demand at unlock time.
-            let chain = sign_chain(
-                model.wallet_state.curve_type,
-                model.wallet_state.sign_on_bitcoin,
-            );
+            // child of the chosen chain (Tab picks Ethereum [ECDSA key] or
+            // Bitcoin [Taproot key] for a wallet with both). (No per-account
+            // selection exists on the accounts table yet; when it does, the
+            // selected index slots in here.) A FROST child share is
+            // materialized on demand at unlock time; Ethereum signs with the
+            // root's ECDSA share at the account path.
+            let Some(chain) = model.wallet_state.chosen_sign_chain(&wallet_id) else {
+                model.wallet_state.sign_error = Some(format!(
+                    "This wallet has no {} key to sign with on this device",
+                    model.wallet_state.curve_type
+                ));
+                return None;
+            };
             let wallet_id = account_signing_wallet_id(&wallet_id, chain);
 
             // Bitcoin signs a BIP-341 sighash the user supplies as hex;
@@ -1387,6 +1411,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     model.push_screen(Screen::SigningProgress {
                         request_id: sid.clone(),
                     });
+                    model.wallet_state.signing_wallet_id = Some(wallet_id.clone());
                     let proposer_id = pending_proposer.unwrap_or_else(|| {
                         warn!(
                             "WalletUnlocked joiner path with no pending_sign_proposer_id — \
@@ -1454,7 +1479,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::WalletsLoaded { wallets } => {
             info!("Loaded {} wallets", wallets.len());
-            let old_count = model.wallet_state.wallets.len();
+            let old_count = model.wallet_state.wallet_groups().len();
             // Materialized HD account children carry their derivation path
             // as the label ("m/44'/…"). They're an implementation detail of
             // signing — listing them would double-derive (account 0 OF an
@@ -1467,12 +1492,12 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
             // If on main menu and wallet count changed, force remount to update menu
             if matches!(model.current_screen, Screen::MainMenu | Screen::Welcome)
-                && old_count != model.wallet_state.wallets.len()
+                && old_count != model.wallet_state.wallet_groups().len()
             {
                 info!(
                     "Wallet count changed from {} to {}, forcing menu update",
                     old_count,
-                    model.wallet_state.wallets.len()
+                    model.wallet_state.wallet_groups().len()
                 );
                 Some(Command::SendMessage(Message::Refresh))
             } else {
@@ -1488,16 +1513,44 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     "Are you sure you want to delete wallet '{}'? This action cannot be undone.",
                     wallet_id
                 ),
-                on_confirm: Box::new(Message::WalletDeleted { wallet_id }),
+                on_confirm: Box::new(Message::DeleteWalletConfirmed { wallet_id }),
                 on_cancel: Box::new(Message::CloseModal),
             });
             None
         }
 
-        Message::WalletDeleted { wallet_id } => {
+        Message::DeleteWalletConfirmed { wallet_id } => {
             info!("Deleting wallet: {}", wallet_id);
             model.ui_state.modal = None;
             Some(Command::DeleteWallet { wallet_id })
+        }
+
+        Message::WalletDeletionCompleted { wallet_id } => {
+            let belongs = |id: &str| {
+                id == wallet_id
+                    || starlab_core::accounts::parse_child_wallet_id(id)
+                        .is_some_and(|(parent, _, _)| parent == wallet_id)
+            };
+            model
+                .wallet_state
+                .wallets
+                .retain(|w| !belongs(&w.session_id));
+            if model
+                .wallet_state
+                .selected_wallet
+                .as_deref()
+                .is_some_and(belongs)
+            {
+                model.wallet_state.selected_wallet = None;
+            }
+            if model.selected_wallet.as_deref().is_some_and(belongs) {
+                model.selected_wallet = None;
+            }
+            model.ui_state.notify(
+                NotificationKind::Success,
+                format!("Deleted wallet '{wallet_id}'"),
+            );
+            Some(Command::LoadWallets)
         }
 
         // ============= Wallet export / import =============
@@ -1800,6 +1853,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
 
         Message::DKGFailed { error } => {
             error!("DKG failed: {}", error);
+            model.wallet_state.ecdsa_dkg_phase = None;
             desktop_notify::send(
                 model.ui_state.desktop_notify,
                 "Wallet creation failed",
@@ -1812,10 +1866,38 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 message: crate::elm::error_help::dkg(&error),
             });
 
-            // Reset DKG-in-progress flag so user can retry
-            model.pending_operations.clear();
-
-            None
+            let session_id = model
+                .active_session
+                .as_ref()
+                .filter(|s| matches!(s.session_type, SessionType::DKG))
+                .map(|s| s.session_id.clone())
+                .or_else(|| model.wallet_state.joining_session.clone());
+            if model.active_session.as_ref().is_some_and(|s| {
+                matches!(s.session_type, SessionType::DKG)
+                    && session_id.as_deref() == Some(s.session_id.as_str())
+            }) {
+                model.active_session = None;
+            }
+            if let Some(id) = &session_id {
+                model.session_invites.retain(|s| &s.session_id != id);
+            }
+            model.wallet_state.creating_wallet = None;
+            model.wallet_state.joining_session = None;
+            model.wallet_state.dkg_in_progress = false;
+            model.wallet_state.dkg_round = DKGRound::Initialization;
+            model.wallet_state.pending_password = None;
+            model.pending_operations.retain(|op| {
+                !matches!(
+                    op,
+                    Operation::CreateWallet(_)
+                        | Operation::StartDKG { .. }
+                        | Operation::JoinDKG { .. }
+                )
+            });
+            // "pending" is a creator placeholder, not a server session id.
+            Some(Command::AbortDKG {
+                session_id: session_id.filter(|id| id != "pending"),
+            })
         }
 
         Message::CancelDKG => {
@@ -2095,6 +2177,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 &group_pubkey_hex[..16.min(group_pubkey_hex.len())],
                 addresses.len()
             );
+            model.wallet_state.ecdsa_dkg_phase = None;
 
             // Belt-and-suspenders: the Command consumed `password` already,
             // but there's no harm in clearing `pending_password` here too —
@@ -2622,7 +2705,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                     info!("JoinSession selection moved down to: {}", current_idx);
                 }
                 Screen::ManageWallets => {
-                    let wallet_count = model.wallet_state.wallets.len();
+                    let wallet_count = model.wallet_state.wallet_groups().len();
                     if wallet_count == 0 {
                         return None;
                     }
@@ -3133,8 +3216,8 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         .get(&crate::elm::model::ComponentId::WalletList)
                         .copied()
                         .unwrap_or(0);
-                    if let Some(wallet) = model.wallet_state.wallets.get(selected) {
-                        let wallet_id = wallet.session_id.clone();
+                    if let Some(wallet) = model.wallet_state.wallet_group_at(selected) {
+                        let wallet_id = wallet.id().to_string();
                         info!(
                             "ManageWallets SelectItem[{}] → SignTransaction({})",
                             selected, wallet_id
@@ -3147,7 +3230,7 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                         warn!(
                             "ManageWallets SelectItem[{}] but list only has {} wallets",
                             selected,
-                            model.wallet_state.wallets.len()
+                            model.wallet_state.wallet_groups().len()
                         );
                     }
                     None
@@ -3190,6 +3273,14 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         // ============= Notifications =============
+        Message::EcdsaDkgProgress { phase } => {
+            model.wallet_state.ecdsa_dkg_phase = Some(phase);
+            None
+        }
+        Message::EcdsaSetupStatus { status } => {
+            model.wallet_state.ecdsa_setup = status;
+            None
+        }
         Message::ShowNotification { text, kind } => {
             model.ui_state.notify(kind, text);
             None
@@ -3227,10 +3318,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
             info!("Initializing application");
 
             // Initialize keystore
-            let keystore_path = format!(
-                "{}/.frost_keystore",
-                std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
-            );
+            let keystore_path = std::env::var("MPC_KEYSTORE_PATH")
+                .ok()
+                .filter(|path| !path.trim().is_empty())
+                .unwrap_or_else(|| {
+                    format!(
+                        "{}/.frost_keystore",
+                        std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+                    )
+                });
 
             Some(Command::InitializeKeystore {
                 path: keystore_path,
@@ -3465,6 +3561,15 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
         }
 
         Message::RemoveSession { session_id } => {
+            // An idle co-signer may still be reviewing this invitation when
+            // its proposer withdraws it. Leave other confirmations untouched.
+            if matches!(
+                model.ui_state.modal.as_ref(),
+                Some(Modal::Confirm { on_confirm, .. })
+                    if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id: reviewed } if reviewed == &session_id)
+            ) {
+                model.ui_state.modal = None;
+            }
             // The creator withdrew the invite we're waiting on: we're no
             // longer in a ceremony.
             if model.wallet_state.joining_session.as_deref() == Some(session_id.as_str()) {
@@ -3521,6 +3626,69 @@ fn expand_home(path: &str) -> std::path::PathBuf {
     match (path.strip_prefix("~/"), std::env::var("HOME")) {
         (Some(rest), Ok(home)) => std::path::Path::new(&home).join(rest),
         _ => std::path::PathBuf::from(path),
+    }
+}
+
+/// Check a finished signature over `signed` (the bytes the ceremony signed:
+/// the EIP-191 hash / tx prehash for Ethereum, the sighash for Bitcoin)
+/// against the account `wallet_id` names, from public data only:
+/// Ethereum → `ecrecover` must give the account address (exactly what an
+/// EVM node checks); Bitcoin → BIP-340 under the account's P2TR output key.
+/// Other chains rely on the group-key check FROST aggregation ran before
+/// emitting `SigningComplete`.
+fn verify_account_signature(
+    ws: &crate::elm::model::WalletState,
+    wallet_id: &str,
+    signed: &[u8],
+    signature: &[u8],
+) -> (bool, String) {
+    let Some((root, chain, account)) = starlab_core::accounts::parse_child_wallet_id(wallet_id)
+    else {
+        return (
+            true,
+            "checked under the group key by the ceremony".to_string(),
+        );
+    };
+    if !matches!(chain, "ethereum" | "bitcoin") {
+        return (
+            true,
+            "checked under the group key by the ceremony".to_string(),
+        );
+    }
+    let expected = ws.wallet_group(root).and_then(|group| {
+        group
+            .accounts(account)
+            .into_iter()
+            .find(|(name, _, _)| name.eq_ignore_ascii_case(chain))
+            .map(|(_, _, address)| address)
+    });
+    let Some(expected) = expected else {
+        return (
+            false,
+            format!("cannot verify: no {chain} account {account} for wallet {root} on this device"),
+        );
+    };
+    if chain == "ethereum" {
+        match starlab_core::accounts::recover_ethereum_address(signed, signature) {
+            Ok(recovered) if recovered.eq_ignore_ascii_case(&expected) => (
+                true,
+                format!("ecrecover gives {recovered} = Ethereum account {account}"),
+            ),
+            Ok(recovered) => (
+                false,
+                format!("ecrecover gives {recovered}, expected {expected}"),
+            ),
+            Err(e) => (false, format!("ecrecover failed: {e}")),
+        }
+    } else {
+        match starlab_core::accounts::verify_taproot_signature(&expected, signed, signature) {
+            Ok(true) => (
+                true,
+                format!("BIP-340 valid for {expected} (Bitcoin account {account})"),
+            ),
+            Ok(false) => (false, format!("BIP-340 check failed for {expected}")),
+            Err(e) => (false, format!("BIP-340 check failed: {e}")),
+        }
     }
 }
 
@@ -3674,6 +3842,99 @@ fn preview_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A secp256k1 wallet as Stage 2 persists it: Taproot + ECDSA entries.
+    fn ecdsa_wallet(model: &mut Model, id: &str) {
+        let key = "021de2d69979f0a03ea413e7ed6a32ad02111b90d1f03793649157d3e4ee952143";
+        model.wallet_state.wallets = ["secp256k1", starlab_core::ecdsa::ECDSA_CURVE]
+            .into_iter()
+            .map(|curve| {
+                crate::keystore::WalletMetadata::new(
+                    id.to_string(),
+                    "dev".to_string(),
+                    curve.to_string(),
+                    2,
+                    3,
+                    1,
+                    key.to_string(),
+                )
+            })
+            .collect();
+    }
+
+    /// `r ‖ s ‖ v` by a single (non-threshold) key over `hash`.
+    fn foreign_signature(hash: &[u8; 32]) -> Vec<u8> {
+        let key = k256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+        let (sig, recid) = key.sign_prehash_recoverable(hash);
+        let mut out = sig.to_bytes().to_vec();
+        out.push(27 + recid.to_byte());
+        out
+    }
+
+    #[test]
+    fn ethereum_signature_from_another_key_fails_ecrecover_check() {
+        let mut model = Model::new("dev".to_string());
+        ecdsa_wallet(&mut model, "w");
+        let hash = [0x42u8; 32];
+        let (ok, detail) = verify_account_signature(
+            &model.wallet_state,
+            "w-ethereum-0",
+            &hash,
+            &foreign_signature(&hash),
+        );
+        assert!(!ok);
+        assert!(detail.starts_with("ecrecover gives 0x"), "{detail}");
+        assert!(detail.contains("expected 0x"), "{detail}");
+    }
+
+    #[test]
+    fn ethereum_signature_for_an_unknown_wallet_is_not_claimed_verified() {
+        let model = Model::new("dev".to_string());
+        let hash = [0x42u8; 32];
+        let (ok, detail) = verify_account_signature(
+            &model.wallet_state,
+            "w-ethereum-0",
+            &hash,
+            &foreign_signature(&hash),
+        );
+        assert!(!ok);
+        assert!(detail.starts_with("cannot verify"), "{detail}");
+    }
+
+    /// The result screen of an ECDSA signing names the Ethereum account
+    /// (recorded when the signing started), not the DKG'd root wallet.
+    #[test]
+    fn signing_complete_labels_the_account_the_ceremony_signed_for() {
+        let mut model = Model::new("dev".to_string());
+        ecdsa_wallet(&mut model, "w");
+        update(
+            &mut model,
+            Message::InitiateSigning {
+                request: crate::elm::message::SigningRequest {
+                    wallet_id: "w-ethereum-0".to_string(),
+                    transaction_data: vec![0x42; 32],
+                    chain: "secp256k1".to_string(),
+                    metadata: None,
+                    raw_message: None,
+                },
+            },
+        );
+        let hash = [0x42u8; 32];
+        update(
+            &mut model,
+            Message::SigningComplete {
+                request_id: "inline".to_string(),
+                message: hash.to_vec(),
+                signature: foreign_signature(&hash),
+            },
+        );
+        let info = model
+            .wallet_state
+            .last_completed_signature
+            .expect("snapshot");
+        assert_eq!(info.wallet_id, "w-ethereum-0");
+        assert!(!info.verified, "a foreign key's signature must not verify");
+    }
 
     use crossterm::event::KeyEvent;
 
@@ -4137,6 +4398,131 @@ mod tests {
     }
 
     #[test]
+    fn failed_creator_retires_dkg_preserves_error_and_can_create_again() {
+        let mut model = Model::new("dev".into());
+        let config = WalletConfig {
+            name: "first".into(),
+            threshold: 2,
+            total_participants: 2,
+            mode: WalletMode::Online,
+        };
+        update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config: config.clone(),
+                password: "pw".into(),
+                label: "first".into(),
+            },
+        );
+        update(
+            &mut model,
+            Message::CreateWallet {
+                config: config.clone(),
+            },
+        );
+        update(
+            &mut model,
+            Message::UpdateDKGSessionId {
+                real_session_id: "failed-creator".into(),
+            },
+        );
+        model.wallet_state.dkg_in_progress = true;
+        model.wallet_state.pending_password = Some("pw".into());
+        model.pending_operations.push(Operation::SignTransaction {
+            wallet_id: "other-wallet".into(),
+            data: vec![1],
+        });
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            },
+        );
+        assert!(
+            matches!(command, Some(Command::AbortDKG { session_id: Some(id) }) if id == "failed-creator")
+        );
+        assert!(model.wallet_state.creating_wallet.is_none());
+        assert!(model.wallet_state.joining_session.is_none());
+        assert!(!model.wallet_state.dkg_in_progress);
+        assert!(model.active_session.is_none());
+        assert!(model.wallet_state.pending_password.is_none());
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Error { message, .. }) if message.contains("aux-info proof rejected"))
+        );
+        assert!(matches!(
+            model.pending_operations.as_slice(),
+            [Operation::SignTransaction { .. }]
+        ));
+        let retry = update(
+            &mut model,
+            Message::HeadlessCreateWallet {
+                config,
+                password: "new-pw".into(),
+                label: "retry".into(),
+            },
+        );
+        assert!(matches!(
+            retry,
+            Some(Command::SendMessage(Message::SubmitPassword { .. }))
+        ));
+        assert!(model.wallet_state.creating_wallet.is_some());
+    }
+
+    #[test]
+    fn failed_joiner_retires_only_its_invite_and_can_join_another() {
+        let mut model = Model::new("dev".into());
+        model.session_invites = vec![dkg_invite("failed"), dkg_invite("next")];
+        join(&mut model, "failed");
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "peer disconnected".into(),
+            },
+        );
+        assert!(
+            matches!(command, Some(Command::AbortDKG { session_id: Some(id) }) if id == "failed")
+        );
+        assert!(model.active_session.is_none());
+        assert!(model.wallet_state.joining_session.is_none());
+        assert_eq!(model.session_invites.len(), 1);
+        assert_eq!(model.session_invites[0].session_id, "next");
+        join(&mut model, "next");
+        assert_eq!(model.wallet_state.joining_session.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn dkg_failure_does_not_clear_an_unrelated_signing_session_or_draft() {
+        let mut model = Model::new("dev".into());
+        let mut signing = dkg_invite("sign-current");
+        signing.session_type = SessionType::Signing {
+            curve_type: "ecdsa".into(),
+            wallet_name: "wallet".into(),
+            blockchain: "ethereum".into(),
+            group_public_key: "public".into(),
+        };
+        model.active_session = Some(signing);
+        model.wallet_state.pending_sign_wallet_id = Some("wallet-ethereum-0".into());
+        let command = update(
+            &mut model,
+            Message::DKGFailed {
+                error: "old failure".into(),
+            },
+        );
+        assert!(matches!(
+            command,
+            Some(Command::AbortDKG { session_id: None })
+        ));
+        assert_eq!(
+            model.active_session.as_ref().unwrap().session_id,
+            "sign-current"
+        );
+        assert_eq!(
+            model.wallet_state.pending_sign_wallet_id.as_deref(),
+            Some("wallet-ethereum-0")
+        );
+    }
+
+    #[test]
     fn cancel_dkg_leaves_the_active_session_on_the_server() {
         let mut model = Model::new("dev".to_string());
         model.session_invites.push(dkg_invite("s1"));
@@ -4146,6 +4532,98 @@ mod tests {
             cmd,
             Some(Command::CancelDKG { session_id: Some(ref id) }) if id == "s1"
         ));
+    }
+
+    fn discover_signing_request(model: &mut Model, session_id: &str) {
+        let mut session = dkg_invite(session_id);
+        session.participants.push(model.device_id.clone());
+        session.session_type = SessionType::Signing {
+            wallet_name: "wallet".into(),
+            curve_type: "secp256k1-ecdsa".into(),
+            blockchain: "ethereum".into(),
+            group_public_key: "02".repeat(33),
+        };
+        update(model, Message::SessionDiscovered { session });
+        assert!(matches!(model.ui_state.modal, Some(Modal::Confirm { .. })));
+    }
+
+    #[test]
+    fn wallet_deletion_completion_clears_only_matching_selection() {
+        let mut model = Model::new("device".into());
+        model.selected_wallet = Some("wallet-bitcoin-2".into());
+        model.wallet_state.selected_wallet = Some("wallet-other".into());
+        assert!(matches!(
+            update(
+                &mut model,
+                Message::WalletDeletionCompleted {
+                    wallet_id: "wallet".into()
+                }
+            ),
+            Some(Command::LoadWallets)
+        ));
+        assert!(model.selected_wallet.is_none());
+        assert_eq!(
+            model.wallet_state.selected_wallet.as_deref(),
+            Some("wallet-other")
+        );
+    }
+
+    #[test]
+    fn withdrawing_signing_request_dismisses_matching_review_and_accepts_next() {
+        let mut model = Model::new("dev".into());
+        discover_signing_request(&mut model, "first");
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "first".into(),
+            },
+        );
+        assert!(model.ui_state.modal.is_none());
+        assert!(model.session_invites.is_empty());
+        discover_signing_request(&mut model, "next");
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id } if session_id == "next"))
+        );
+    }
+
+    #[test]
+    fn withdrawing_signing_request_keeps_other_session_review() {
+        let mut model = Model::new("dev".into());
+        discover_signing_request(&mut model, "reviewed");
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "other".into(),
+            },
+        );
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::ReviewSigningRequest { session_id } if session_id == "reviewed"))
+        );
+    }
+
+    #[test]
+    fn withdrawing_signing_request_keeps_unrelated_confirmation() {
+        let mut model = Model::new("dev".into());
+        model.ui_state.modal = Some(Modal::Confirm {
+            title: "Delete wallet".into(),
+            message: "Keep this confirmation".into(),
+            on_confirm: Box::new(Message::DeleteWalletConfirmed {
+                wallet_id: "wallet".into(),
+            }),
+            on_cancel: Box::new(Message::CancelModal),
+        });
+        update(
+            &mut model,
+            Message::RemoveSession {
+                session_id: "withdrawn".into(),
+            },
+        );
+        assert!(
+            matches!(model.ui_state.modal.as_ref(), Some(Modal::Confirm { on_confirm, .. })
+            if matches!(on_confirm.as_ref(), Message::DeleteWalletConfirmed { wallet_id } if wallet_id == "wallet"))
+        );
     }
 
     #[test]

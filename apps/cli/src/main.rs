@@ -94,8 +94,10 @@ struct OneShot {
     /// rejects the connection.
     #[arg(long)]
     room: Option<String>,
-    #[arg(long, default_value_t = 90)]
-    timeout: u64,
+    /// Wait limit in seconds. Default: 90; cold wallet create/session join
+    /// allow the native prime-preparation and ECDSA ceremony budget instead.
+    #[arg(long)]
+    timeout: Option<u64>,
     /// Ciphersuite: secp256k1 (default; Ethereum/Bitcoin), ed25519 (Solana), or
     /// "unified" (BOTH curves from one DKG → Ethereum + Solana in one wallet).
     /// ed25519 yields a standard RFC-8032 signature that ANY off-the-shelf
@@ -224,6 +226,16 @@ impl OneShot {
         Ok(())
     }
 
+    fn dkg_opts(&self) -> OneShotOpts {
+        let mut opts = self.init_and_opts();
+        opts.timeout_secs = self.timeout.unwrap_or(if self.curve == "ed25519" {
+            90
+        } else {
+            oneshot::COLD_DKG_TIMEOUT_SECS
+        });
+        opts
+    }
+
     fn init_and_opts(&self) -> OneShotOpts {
         if !self.log_level.is_empty() {
             let _ = tracing_subscriber::fmt()
@@ -239,7 +251,7 @@ impl OneShot {
             device_id: self.device_id.clone(),
             keystore_path: expand_tilde(&self.keystore),
             signal_url: with_room(&self.signal_server, self.room.as_deref()),
-            timeout_secs: self.timeout,
+            timeout_secs: self.timeout.unwrap_or(90),
             curve: self.curve.clone(),
             json: self.json,
         }
@@ -421,14 +433,8 @@ async fn run() -> anyhow::Result<()> {
                 common.validate_room()?;
                 let password = pw.resolve()?;
                 finish(
-                    oneshot::wallet_create(
-                        common.init_and_opts(),
-                        name,
-                        threshold,
-                        total,
-                        password,
-                    )
-                    .await,
+                    oneshot::wallet_create(common.dkg_opts(), name, threshold, total, password)
+                        .await,
                 )
             }
         },
@@ -440,7 +446,15 @@ async fn run() -> anyhow::Result<()> {
             } => {
                 common.validate_room()?;
                 let password = pw.resolve()?;
-                finish(oneshot::session_join(common.init_and_opts(), session_id, password).await)
+                finish(
+                    oneshot::session_join(
+                        common.init_and_opts(),
+                        session_id,
+                        password,
+                        common.timeout.is_none(),
+                    )
+                    .await,
+                )
             }
         },
         Command::Sign {
@@ -565,6 +579,31 @@ fn with_room(url: &str, room: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::{is_strong_room, with_room};
+
+    #[test]
+    fn cold_dkg_default_preserves_short_general_wait_and_explicit_override() {
+        use clap::Parser;
+        let parse = |flags: &[&str]| {
+            let mut args = vec!["starlab-cli", "wallet", "list"];
+            args.extend_from_slice(flags);
+            match super::Cli::try_parse_from(args).unwrap().command {
+                super::Command::Wallet {
+                    sub: super::WalletCmd::List { common },
+                } => common,
+                _ => unreachable!(),
+            }
+        };
+        let default = parse(&[]);
+        assert_eq!(default.init_and_opts().timeout_secs, 90);
+        assert_eq!(
+            default.dkg_opts().timeout_secs,
+            starlab_cli::oneshot::COLD_DKG_TIMEOUT_SECS
+        );
+        let explicit = parse(&["--timeout", "7"]);
+        assert_eq!(explicit.init_and_opts().timeout_secs, 7);
+        assert_eq!(explicit.dkg_opts().timeout_secs, 7);
+        assert_eq!(parse(&["--curve", "ed25519"]).dkg_opts().timeout_secs, 90);
+    }
 
     #[test]
     fn strong_room_requires_16_safe_chars() {

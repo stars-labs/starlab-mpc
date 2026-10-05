@@ -934,8 +934,8 @@ bun run test:integration    # just tests/integration
 bun run test:webrtc         # just tests/entrypoints/offscreen/webrtc.*
 ```
 
-No automated full-mesh E2E harness exists yet — see
-`docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md` for the open plan.
+Implemented full-mesh and cross-client harnesses are documented in
+[the end-to-end testing guide](testing/END_TO_END.md).
 
 #### Manual Testing
 

@@ -1070,6 +1070,7 @@ fn navigate_home_clears_last_completed_signature() {
         signed_hash: None,
         signature: vec![],
         verified: true,
+        verification: String::new(),
     });
     update(&mut model, Message::NavigateHome);
     assert!(model.wallet_state.last_completed_signature.is_none());
@@ -1425,15 +1426,21 @@ fn full_chain_failed_sign_then_fresh_dkg_does_not_misroute() {
     // --- Step 1: user tries to sign with an existing wallet, cold ---
     // Populate a wallet in the cache so SignSubmit has a target.
     use starlab_client::keystore::WalletMetadata;
-    model.wallet_state.wallets = vec![WalletMetadata::new(
-        "wallet-dkg_old".to_string(),
-        "mpc-1".to_string(),
-        "secp256k1".to_string(),
-        2,
-        3,
-        1,
-        "aabb".to_string(),
-    )];
+    // A secp256k1 wallet = Taproot key + ECDSA key (Ethereum signs with it).
+    model.wallet_state.wallets = ["secp256k1", "secp256k1-ecdsa"]
+        .into_iter()
+        .map(|curve| {
+            WalletMetadata::new(
+                "wallet-dkg_old".to_string(),
+                "mpc-1".to_string(),
+                curve.to_string(),
+                2,
+                3,
+                1,
+                "aabb".to_string(),
+            )
+        })
+        .collect();
     model.current_screen = Screen::SignTransaction {
         wallet_id: "wallet-dkg_old".to_string(),
     };
@@ -2687,15 +2694,21 @@ fn sign_submit_stages_modal_with_message_preview_and_hash() {
     model.wallet_state.curve_type = "secp256k1";
     model.wallet_state.wallet_unlocked_id = Some("wallet-preview".to_string());
     // Wallet metadata populates the threshold line in the preview body.
-    model.wallet_state.wallets = vec![WalletMetadata::new(
-        "wallet-preview".into(),
-        "d".into(),
-        "secp256k1".into(),
-        2,
-        3,
-        1,
-        "abcd".into(),
-    )];
+    // Taproot + ECDSA entries: the typed message signs as Ethereum.
+    model.wallet_state.wallets = ["secp256k1", "secp256k1-ecdsa"]
+        .into_iter()
+        .map(|curve| {
+            WalletMetadata::new(
+                "wallet-preview".into(),
+                "d".into(),
+                curve.into(),
+                2,
+                3,
+                1,
+                "abcd".into(),
+            )
+        })
+        .collect();
     for c in "pay bob 1 ETH".chars() {
         update(&mut model, Message::SignTypeChar(c));
     }

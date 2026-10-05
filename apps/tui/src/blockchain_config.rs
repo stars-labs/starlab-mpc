@@ -1,16 +1,14 @@
-//! Blockchain configuration and curve compatibility mapping
+//! Signing-key compatibility and blockchain address configuration.
 //!
-//! Different blockchains require different cryptographic curves:
-//! - Ethereum, Bitcoin, BSC, Polygon: secp256k1
-//! - Solana, Sui, Aptos: ed25519
-//!
-//! This module ensures we only generate addresses for compatible chains.
+//! EVM chains require the cggmp24 ECDSA key. The secp256k1 FROST
+//! BIP-340 key controls Bitcoin Taproot; ed25519 FROST controls ed25519 chains.
 
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CurveType {
     Secp256k1,
+    Ecdsa,
     Ed25519,
 }
 
@@ -18,6 +16,7 @@ impl CurveType {
     pub fn from_string(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "secp256k1" => Some(CurveType::Secp256k1),
+            starlab_core::accounts::ECDSA_CURVE => Some(CurveType::Ecdsa),
             "ed25519" => Some(CurveType::Ed25519),
             _ => None,
         }
@@ -27,6 +26,7 @@ impl CurveType {
         match self {
             CurveType::Secp256k1 => "secp256k1",
             CurveType::Ed25519 => "ed25519",
+            CurveType::Ecdsa => starlab_core::accounts::ECDSA_CURVE,
         }
     }
 }
@@ -43,12 +43,12 @@ pub struct BlockchainInfo {
 pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
     let mut config = HashMap::new();
 
-    // secp256k1 chains (Ethereum compatible)
+    // ECDSA chains (Ethereum-compatible EOAs)
     config.insert(
         "ethereum",
         BlockchainInfo {
             name: "Ethereum",
-            curve: CurveType::Secp256k1,
+            curve: CurveType::Ecdsa,
             symbol: "ETH",
             address_prefix: Some("0x"),
         },
@@ -68,7 +68,7 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
         "bsc",
         BlockchainInfo {
             name: "Binance Smart Chain",
-            curve: CurveType::Secp256k1,
+            curve: CurveType::Ecdsa,
             symbol: "BNB",
             address_prefix: Some("0x"),
         },
@@ -78,7 +78,7 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
         "polygon",
         BlockchainInfo {
             name: "Polygon",
-            curve: CurveType::Secp256k1,
+            curve: CurveType::Ecdsa,
             symbol: "MATIC",
             address_prefix: Some("0x"),
         },
@@ -88,7 +88,7 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
         "avalanche",
         BlockchainInfo {
             name: "Avalanche C-Chain",
-            curve: CurveType::Secp256k1,
+            curve: CurveType::Ecdsa,
             symbol: "AVAX",
             address_prefix: Some("0x"),
         },
@@ -138,31 +138,6 @@ pub fn get_blockchain_config() -> HashMap<&'static str, BlockchainInfo> {
     config
 }
 
-/// Signing-scheme compatibility caveat for a chain, if one applies.
-///
-/// FROST produces **Schnorr** signatures. Bitcoin Taproot and the ed25519
-/// chains verify those natively, but a standard Ethereum-family **EOA**
-/// transaction verifies with **ECDSA** and will reject a Schnorr signature —
-/// EVM use needs a smart-contract account (ERC-4337 / a Schnorr verifier).
-///
-/// This is the single source of truth for that warning so the TUI / native /
-/// CLI surface one consistent message (the extension mirrors it in TS). See
-/// `docs/SIGNATURE_CHAIN_COMPATIBILITY.md`.
-///
-/// Returns `None` when the chain verifies FROST signatures natively.
-pub fn signing_caveat(chain: &str) -> Option<&'static str> {
-    match chain {
-        "ethereum" | "bsc" | "polygon" | "avalanche" => Some(
-            "Threshold-Schnorr wallet: a standard Ethereum-family EOA \
-             transaction verifies with ECDSA and will not accept this \
-             signature. EVM use requires a smart-contract account (ERC-4337 / \
-             a Schnorr-verifier contract). Receiving is fine; spending via a \
-             normal EOA transaction is not supported.",
-        ),
-        _ => None,
-    }
-}
-
 /// Get compatible blockchains for a given curve
 pub fn get_compatible_chains(curve: &CurveType) -> Vec<(&'static str, BlockchainInfo)> {
     let config = get_blockchain_config();
@@ -202,7 +177,7 @@ pub fn generate_address_for_chain(
     if matches!(chain, "ethereum" | "bitcoin" | "solana" | "sui") {
         return starlab_core::accounts::address_for_chain(
             chain,
-            &curve.to_string(),
+            curve.to_string(),
             group_public_key,
         )
         .map_err(|e| e.to_string());
@@ -212,26 +187,14 @@ pub fn generate_address_for_chain(
     // this match (they early-return above), so only the non-canonical
     // encodings live here.
     match (chain, &curve) {
-        // Ethereum-compatible chains with secp256k1
-        ("bsc" | "polygon" | "avalanche", CurveType::Secp256k1) => {
-            // EVM addresses are keccak256(uncompressed pubkey X‖Y)[12..].
-            // FROST serializes the group verifying key COMPRESSED (33 bytes,
-            // 0x02/0x03 ‖ X), so we MUST decompress first: hashing the
-            // compressed bytes yields an address that does NOT correspond to
-            // the signing key. `from_sec1_bytes` accepts both compressed (33)
-            // and uncompressed (65) encodings, so this is robust to either
-            // input. Must stay byte-for-byte identical to
-            // `starlab_core::accounts::address_for_chain("ethereum", …)`.
-            use k256::elliptic_curve::sec1::ToSec1Point;
-            use sha3::{Digest, Keccak256};
-            let pk = k256::PublicKey::from_sec1_bytes(group_public_key)
-                .map_err(|e| format!("invalid secp256k1 public key: {e}"))?;
-            let point = pk.to_sec1_point(false); // 0x04 ‖ X ‖ Y
-            let xy = &point.as_bytes()[1..]; // X ‖ Y, 64 bytes
-            let mut hasher = Keccak256::new();
-            hasher.update(xy);
-            let hash = hasher.finalize();
-            Ok(format!("0x{}", hex::encode(&hash[12..32]))) // Last 20 bytes
+        // EVM chains share the canonical Ethereum ECDSA address encoding.
+        ("bsc" | "polygon" | "avalanche", CurveType::Ecdsa) => {
+            starlab_core::accounts::address_for_chain(
+                "ethereum",
+                curve.to_string(),
+                group_public_key,
+            )
+            .map_err(|e| e.to_string())
         }
 
         // Aptos with ed25519

@@ -5,15 +5,19 @@
 //! crypto, isolated per-node keystores. Self-contained for CI / LLM
 //! smoke-testing; also the shared orchestration the e2e tests use.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use starlab_client::elm::headless::{spawn_ed25519, spawn_secp256k1, spawn_secp256k1_with_primes};
+use starlab_client::elm::headless::{HeadlessRunner, spawn_secp256k1};
 use starlab_client::elm::model::{WalletConfig, WalletMode};
 use starlab_client::elm::{Message, Model};
 use starlab_client::protocal::ecdsa::PrimeSupply;
+use starlab_client::protocal::signing::SIGNING_TIMEOUT;
+use starlab_client::utils::appstate_compat::AppState;
 use starlab_core::ecdsa::Primes;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The user-facing label the simulated DKG creator gives its wallet. Chosen
@@ -96,6 +100,9 @@ enum Evt {
         group_key: String,
         ethereum_address: String,
     },
+    DkgFailed {
+        error: String,
+    },
     SignDone {
         signature: String,
         message: String,
@@ -143,6 +150,11 @@ fn watcher() -> (
                             .unwrap_or_default(),
                     });
                 }
+                Message::DKGFailed { error } => {
+                    let _ = tx.send(Evt::DkgFailed {
+                        error: error.clone(),
+                    });
+                }
                 Message::ReshareComplete {
                     group_public_key, ..
                 } => {
@@ -177,6 +189,7 @@ where
     tokio::time::timeout(Duration::from_secs(secs), async {
         loop {
             match rx.recv().await {
+                Some(Evt::DkgFailed { error }) => anyhow::bail!("DKG failed: {error}"),
                 Some(e) if pred(&e) => return Ok(e),
                 Some(_) => continue,
                 None => anyhow::bail!("event channel closed"),
@@ -191,6 +204,7 @@ where
 /// senders/receivers are retained) so callers can drive signing afterwards.
 struct Cluster {
     device_ids: Vec<String>,
+    node_states: Vec<NodeState>,
     senders: Vec<UnboundedSender<Message>>,
     receivers: Vec<UnboundedReceiver<Evt>>,
     // Keystores must outlive the runners.
@@ -201,6 +215,22 @@ struct Cluster {
     ethereum_address: String,
     agreed: bool,
     elapsed_ms: u128,
+}
+
+/// State handles let the timeout scenario scope its deliberately short budget
+/// to the failed ceremony, without changing production commands or defaults.
+enum NodeState {
+    Ed25519(Arc<Mutex<AppState<frost_ed25519::Ed25519Sha512>>>),
+    Secp256k1(Arc<Mutex<AppState<frost_secp256k1_tr::Secp256K1Sha256TR>>>),
+}
+
+impl NodeState {
+    async fn set_signing_timeout(&self, timeout: Duration) {
+        match self {
+            Self::Ed25519(state) => state.lock().await.signing_timeout = timeout,
+            Self::Secp256k1(state) => state.lock().await.signing_timeout = timeout,
+        }
+    }
 }
 
 /// A runner's per-message sync hook (see `HeadlessRunner`).
@@ -215,9 +245,18 @@ fn spawn_node(
     keystore_path: String,
     ws_url: String,
     cb: SyncCallback,
-) -> UnboundedSender<Message> {
+) -> (UnboundedSender<Message>, NodeState) {
     if opts.curve == "ed25519" {
-        return spawn_ed25519(device_id, keystore_path, ws_url, cb);
+        let state = Arc::new(Mutex::new(
+            AppState::<frost_ed25519::Ed25519Sha512>::with_device_id_and_server(
+                device_id.clone(),
+                ws_url,
+            ),
+        ));
+        let runner = HeadlessRunner::new(device_id, keystore_path, state.clone(), cb);
+        let tx = runner.sender();
+        tokio::spawn(runner.run());
+        return (tx, NodeState::Ed25519(state));
     }
     let primes = if opts.insecure_test_primes.is_empty() {
         PrimeSupply::background()
@@ -225,7 +264,17 @@ fn spawn_node(
         let set = &opts.insecure_test_primes[i % opts.insecure_test_primes.len()];
         PrimeSupply::insecure_test_fixed(set.clone())
     };
-    spawn_secp256k1_with_primes(device_id, keystore_path, ws_url, cb, primes)
+    let mut app_state =
+        AppState::<frost_secp256k1_tr::Secp256K1Sha256TR>::with_device_id_and_server(
+            device_id.clone(),
+            ws_url,
+        );
+    app_state.ecdsa.primes = primes;
+    let state = Arc::new(Mutex::new(app_state));
+    let runner = HeadlessRunner::new(device_id, keystore_path, state.clone(), cb);
+    let tx = runner.sender();
+    tokio::spawn(runner.run());
+    (tx, NodeState::Secp256k1(state))
 }
 
 /// Quit every runner and give the runtime a beat to reclaim their WebRTC/ICE
@@ -275,6 +324,7 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
     };
 
     let mut keystores = Vec::new();
+    let mut node_states = Vec::new();
     let mut senders = Vec::new();
     let mut receivers = Vec::new();
     let device_ids: Vec<String> = (0..opts.nodes).map(|i| format!("sim-node-{i}")).collect();
@@ -282,7 +332,8 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
         let ks = tempfile::TempDir::new()?;
         let (cb, rx) = watcher();
         let ks_path = ks.path().to_string_lossy().into_owned();
-        let tx = spawn_node(opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+        let (tx, state) = spawn_node(opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+        node_states.push(state);
         keystores.push(ks);
         senders.push(tx);
         receivers.push(rx);
@@ -356,6 +407,7 @@ async fn dkg_cluster(opts: &SimulateOpts) -> anyhow::Result<Cluster> {
 
     Ok(Cluster {
         device_ids,
+        node_states,
         senders,
         receivers,
         keystores,
@@ -793,9 +845,9 @@ impl SigningTimeoutRetryResult {
 /// nonces) — hence "fail, then a fresh retry" rather than "swap and
 /// continue".
 ///
-/// Needs `STARLAB_SIGNING_TIMEOUT_MS` set (by the caller, before any node is
-/// spawned) to something short — the real default is 120s, far too long for
-/// a test to sit through.
+/// Only the deliberately abandoned ceremony uses a 3s per-node budget; the
+/// retry restores the production budget, including unlock and mesh setup.
+/// This proves fresh nonce state without making retry a throughput deadline.
 pub async fn run_signing_timeout_then_retry_simulation(
     opts: SimulateOpts,
     message: &str,
@@ -806,6 +858,10 @@ pub async fn run_signing_timeout_then_retry_simulation(
         anyhow::bail!("DKG did not agree; aborting signing-timeout test");
     }
     let wallet_id = c.outcomes[0].wallet_id.clone();
+
+    c.node_states[0]
+        .set_signing_timeout(Duration::from_secs(3))
+        .await;
 
     // First ceremony: node 0 announces; nobody joins. Node 0 never
     // accumulates more than its own commitment, so it must time out on its
@@ -824,6 +880,13 @@ pub async fn run_signing_timeout_then_retry_simulation(
         Evt::SignFailed { error } => error,
         _ => unreachable!(),
     };
+
+    // The short budget proves failure/nonce cleanup, not unlock/mesh throughput.
+    // A fresh ceremony uses the production budget: co-signers decrypt and
+    // materialize account shares before joining, which can exceed 3s under load.
+    for state in &c.node_states {
+        state.set_signing_timeout(SIGNING_TIMEOUT).await;
+    }
 
     // Retry: a fresh ceremony, with a real co-signer, must succeed.
     let (signature, signed_message) = drive_signing(
@@ -987,7 +1050,8 @@ pub async fn run_reshare_e2e(
             for (i, device_id) in device_ids.iter().enumerate() {
                 let (cb, rx) = watcher();
                 let ks_path = keystores[i].path().to_string_lossy().into_owned();
-                let tx = spawn_node(&opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
+                let (tx, _state) =
+                    spawn_node(&opts, i, device_id.clone(), ks_path, ws_url.clone(), cb);
                 senders.push(tx);
                 receivers.push(rx);
             }
@@ -1481,15 +1545,38 @@ fn verify_ed25519(group_key_hex: &str, message_hex: &str, sig_hex: &str) -> anyh
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn dkg_failure_is_returned_immediately_instead_of_outer_timeout() {
+        let (callback, mut rx) = watcher();
+        callback(
+            &Model::new("device".into()),
+            Some(&Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            }),
+        );
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_for(&mut rx, 3600, |e| matches!(e, Evt::DkgDone { .. })),
+        )
+        .await
+        .expect("failure should not wait for DKG timeout")
+        .unwrap_err();
+        assert_eq!(error.to_string(), "DKG failed: aux-info proof rejected");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "real WebRTC/DKG over loopback; run with --ignored"]
     async fn simulate_2_of_2() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("starlab_client::protocal::ecdsa=info")
+            .with_test_writer()
+            .try_init();
         let result = run_simulation(SimulateOpts {
             nodes: 2,
             threshold: 2,
             curve: "secp256k1".into(),
             signal_url: None,
-            timeout_secs: 90,
+            timeout_secs: crate::oneshot::COLD_DKG_TIMEOUT_SECS,
             insecure_test_primes: Vec::new(),
         })
         .await

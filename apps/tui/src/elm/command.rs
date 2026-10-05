@@ -167,6 +167,10 @@ pub enum Command {
     CancelDKG {
         session_id: Option<String>,
     },
+    /// Retire a failed DKG without clearing unrelated signing state.
+    AbortDKG {
+        session_id: Option<String>,
+    },
     /// Encrypt the just-produced FROST key share with `password` and
     /// persist it to the keystore, then emit `Message::DKGFinalized`.
     /// Consumes the cleartext password — the update-layer handler that
@@ -754,7 +758,7 @@ fn signing_session(
         session_type: crate::protocal::signal::SessionType::Signing {
             wallet_name: wallet_id.to_string(),
             curve_type: chain.to_string(),
-            blockchain: chain.to_string(),
+            blockchain: announce_chain(wallet_id, metadata, chain),
             group_public_key: group_pubkey_hex.to_string(),
         },
         curve_type: chain.to_string(),
@@ -2767,11 +2771,76 @@ impl Command {
             Command::DeleteWallet { wallet_id } => {
                 info!("Deleting wallet: {}", wallet_id);
 
-                // TODO: Implement wallet deletion in keystore
-                // For now, just send an error message
-                let _ = tx.send(Message::Error {
-                    message: "Wallet deletion not yet implemented".to_string(),
-                });
+                let mut state = app_state.lock().await;
+                if state.signing_state.is_active()
+                    || state.ecdsa.signing.is_some()
+                    || state.reshare_in_progress
+                    || !matches!(
+                        state.dkg_state,
+                        crate::utils::state::DkgState::Idle
+                            | crate::utils::state::DkgState::Complete
+                            | crate::utils::state::DkgState::Failed(_)
+                    )
+                {
+                    let _ = tx.send(Message::Error {
+                        message: "Finish or cancel the active ceremony before deleting a wallet."
+                            .into(),
+                    });
+                    return Ok(());
+                }
+                let result = state
+                    .keystore
+                    .as_ref()
+                    .ok_or_else(|| "Keystore not initialized".to_string())
+                    .and_then(|current| {
+                        crate::keystore::Keystore::new(current.base_path(), current.device_id())
+                            .map_err(|e| e.to_string())
+                    })
+                    .and_then(|mut ks| {
+                        ks.delete_wallet(&wallet_id).map_err(|e| e.to_string())?;
+                        Ok(ks)
+                    });
+                match result {
+                    Ok(ks) => {
+                        state.keystore = Some(std::sync::Arc::new(ks));
+                        if state.current_wallet_id.as_deref().is_some_and(|id| {
+                            id == wallet_id
+                                || starlab_core::accounts::parse_child_wallet_id(id)
+                                    .is_some_and(|(parent, _, _)| parent == wallet_id)
+                        }) {
+                            state.current_wallet_id = None;
+                            state.key_package = None;
+                            state.public_key_package = None;
+                            state.group_public_key = None;
+                            state.blockchain_addresses.clear();
+                            state.solana_public_key = None;
+                            state.etherum_public_key = None;
+                            state.frost_nonces = None;
+                            state.frost_commitments.clear();
+                            state.frost_signature_shares.clear();
+                            state.identifier_map = None;
+                            state.signing_message = None;
+                            state.signer_set = None;
+                        }
+                        if state
+                            .ecdsa
+                            .key_share
+                            .as_ref()
+                            .is_some_and(|(id, _)| id == &wallet_id)
+                        {
+                            state.ecdsa.key_share = None;
+                        }
+                        drop(state);
+                        let _ = tx.send(Message::WalletDeletionCompleted { wallet_id });
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Message::Error {
+                            message: format!(
+                                "Could not delete wallet '{wallet_id}': {e}. Retry deletion."
+                            ),
+                        });
+                    }
+                }
             }
 
             Command::FinalizeWalletFromDkg {
@@ -3219,9 +3288,13 @@ impl Command {
                 // is reused either way.
                 let session_id = {
                     let mut state = app_state.lock().await;
-                    let session = signing_session(
+                    let mut session = signing_session(
                         &request.wallet_id,
-                        &request.chain,
+                        if is_ecdsa {
+                            starlab_core::ecdsa::ECDSA_CURVE
+                        } else {
+                            &request.chain
+                        },
                         &group_pubkey_hex,
                         &self_device_id,
                         state
@@ -3238,6 +3311,7 @@ impl Command {
                         session.total,
                         session.participants.len()
                     );
+                    session.signing_message_hex = Some(hex::encode(&request.transaction_data));
                     let sid = session.session_id.clone();
                     state.session = Some(session);
                     sid
@@ -3596,6 +3670,9 @@ impl Command {
                 let channels = ws_runtime::install_handles(app_state).await;
 
                 ws_runtime::send_register(&mut sink, &params.device_id).await;
+                if let Some(session_id) = &params.retired_signing_session_id {
+                    ws_runtime::send_retired_session(&mut sink, session_id).await;
+                }
                 if let Some(session) = &params.existing_session {
                     ws_runtime::send_reannounce(&mut sink, session, &tx).await;
                 }
@@ -3649,6 +3726,63 @@ impl Command {
                 info!("Application quit requested");
                 // Send quit message to trigger app shutdown
                 let _ = tx.send(Message::Quit);
+            }
+
+            Command::AbortDKG { session_id } => {
+                // Pre-announcement failures have no runtime session to retire.
+                // Never infer one: a newer ceremony may already have started.
+                let Some(session_id) = session_id else {
+                    return Ok(());
+                };
+                let (session_id, ws_tx) = {
+                    let mut state = app_state.lock().await;
+                    if state.session.as_ref().is_some_and(|s| {
+                        s.session_id == session_id
+                            && !matches!(s.session_type, crate::protocal::signal::SessionType::DKG)
+                    }) {
+                        return Ok(());
+                    }
+                    let current_dkg = state.session.as_ref().filter(|s| {
+                        matches!(s.session_type, crate::protocal::signal::SessionType::DKG)
+                    });
+                    let target = Some(session_id);
+                    let matches_current = current_dkg
+                        .is_some_and(|s| target.as_deref() == Some(s.session_id.as_str()));
+                    if matches_current {
+                        state.session = None;
+                        state.dkg_in_progress = false;
+                        state.dkg_state = crate::utils::state::DkgState::Idle;
+                        state.dkg_part1_public_package = None;
+                        state.dkg_part1_secret_package = None;
+                        state.dkg_part2_secret_package = None;
+                        state.pending_dkg_round1.clear();
+                        state.dkg_round1_packages.clear();
+                        state.dkg_round2_packages.clear();
+                        state.round2_secret_package = None;
+                        state.received_dkg_packages.clear();
+                        state.received_dkg_round2_packages.clear();
+                        state.unified_dkg = None;
+                        state.unified_finalize = None;
+                        state.pending_mesh_ready_signals.clear();
+                        state.own_mesh_ready_sent = false;
+                        state.ceremony_outbox.clear();
+                        if state.ecdsa.signing.is_none() {
+                            state.ecdsa.reset_for_new_dkg();
+                        }
+                    }
+                    (target, state.websocket_msg_tx.clone())
+                };
+                if let (Some(session_id), Some(ws_tx)) = (session_id, ws_tx) {
+                    let leave = starlab_signal_server::ClientMsg::LeaveSession { session_id };
+                    match serde_json::to_string(&leave) {
+                        Ok(json) => {
+                            if let Err(e) = ws_tx.send(json) {
+                                warn!("AbortDKG: outbound channel closed: {e}");
+                            }
+                        }
+                        Err(e) => error!("AbortDKG: failed to serialize withdrawal: {e}"),
+                    }
+                }
             }
 
             Command::CancelDKG { session_id } => {
@@ -4108,5 +4242,218 @@ mod account_wallet_tests {
         // No metadata (wallet only in memory): the live session's set.
         let from_live = signing_session(PARENT, "secp256k1", &group, "bob", None, Some(&dkg));
         assert_eq!(from_live.participants, dkg.participants);
+    }
+}
+
+#[cfg(test)]
+mod wallet_deletion_tests {
+    use super::*;
+    use frost_ed25519::Ed25519Sha512;
+
+    #[tokio::test]
+    async fn deletion_refuses_active_ceremony_without_removing_disk_or_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut ks = crate::keystore::Keystore::new(dir.path(), "device").unwrap();
+        ks.create_wallet_multi_chain(
+            "wallet",
+            "ed25519",
+            Vec::new(),
+            2,
+            3,
+            &"aa".repeat(33),
+            b"secret",
+            "password-12345",
+            Vec::new(),
+            None,
+            1,
+            vec!["device".into()],
+            None,
+        )
+        .unwrap();
+        let mut app = crate::utils::appstate_compat::AppState::<Ed25519Sha512>::new();
+        app.keystore = Some(std::sync::Arc::new(ks));
+        app.current_wallet_id = Some("wallet".into());
+        app.dkg_state = crate::utils::state::DkgState::Round1InProgress;
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(app));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), Message::Error { .. }));
+        assert!(rx.try_recv().is_err());
+        assert!(
+            state
+                .lock()
+                .await
+                .keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_some()
+        );
+        assert!(dir.path().join("device/ed25519/wallet.json").exists());
+        state.lock().await.dkg_state = crate::utils::state::DkgState::Idle;
+        let blocked = dir.path().join("device/secp256k1/wallet.json");
+        std::fs::create_dir(&blocked).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(matches!(rx.try_recv().unwrap(), Message::Error { .. }));
+        assert!(rx.try_recv().is_err());
+        assert_eq!(
+            state.lock().await.current_wallet_id.as_deref(),
+            Some("wallet")
+        );
+        assert!(
+            state
+                .lock()
+                .await
+                .keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_some()
+        );
+        assert!(dir.path().join("device/ed25519/wallet.json").exists());
+        std::fs::remove_dir(blocked).unwrap();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::DeleteWallet {
+            wallet_id: "wallet".into(),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(
+            matches!(rx.try_recv().unwrap(), Message::WalletDeletionCompleted { wallet_id } if wallet_id == "wallet")
+        );
+        let app = state.lock().await;
+        assert!(app.current_wallet_id.is_none());
+        assert!(
+            app.keystore
+                .as_ref()
+                .unwrap()
+                .get_wallet("wallet")
+                .is_none()
+        );
+        assert!(!dir.path().join("device/ed25519/wallet.json").exists());
+    }
+}
+
+#[cfg(test)]
+mod dkg_failure_retirement_tests {
+    use super::*;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use crate::utils::{appstate_compat::AppState, state::DkgState};
+    use frost_ed25519::Ed25519Sha512;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    async fn retire(
+        target: Option<&str>,
+        current: &str,
+        kind: SessionType,
+    ) -> (AppState<Ed25519Sha512>, Vec<String>) {
+        let mut app = AppState::new();
+        app.session = Some(SessionInfo {
+            session_id: current.into(),
+            proposer_id: "self".into(),
+            total: 2,
+            threshold: 2,
+            participants: vec!["self".into(), "peer".into()],
+            session_type: kind,
+            curve_type: "ed25519".into(),
+            coordination_type: "online".into(),
+            signing_message_hex: None,
+        });
+        app.dkg_in_progress = true;
+        app.dkg_state = DkgState::Round1InProgress;
+        app.signing_message = Some(b"unrelated signing draft".to_vec());
+        let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel();
+        app.websocket_msg_tx = Some(ws_tx);
+        let state = Arc::new(Mutex::new(app));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::AbortDKG {
+            session_id: target.map(str::to_owned),
+        }
+        .execute(tx, &state)
+        .await
+        .unwrap();
+        assert!(
+            rx.try_recv().is_err(),
+            "retirement must not replace the failure with cancellation"
+        );
+        let messages = std::iter::from_fn(|| ws_rx.try_recv().ok()).collect();
+        (Arc::try_unwrap(state).ok().unwrap().into_inner(), messages)
+    }
+
+    #[tokio::test]
+    async fn matching_failed_dkg_is_withdrawn_and_runtime_can_retry() {
+        let (app, messages) = retire(Some("failed"), "failed", SessionType::DKG).await;
+        assert!(app.session.is_none());
+        assert!(!app.dkg_in_progress);
+        assert!(matches!(app.dkg_state, DkgState::Idle));
+        assert_eq!(
+            app.signing_message.as_deref(),
+            Some(b"unrelated signing draft".as_slice())
+        );
+        assert_eq!(messages.len(), 1);
+        let message: serde_json::Value = serde_json::from_str(&messages[0]).unwrap();
+        assert_eq!(message["type"], "leave_session");
+        assert_eq!(message["session_id"], "failed");
+    }
+
+    #[tokio::test]
+    async fn queued_failure_does_not_abort_new_dkg_or_signing() {
+        for kind in [
+            SessionType::DKG,
+            SessionType::Signing {
+                wallet_name: "wallet".into(),
+                curve_type: "ecdsa".into(),
+                blockchain: "ethereum".into(),
+                group_public_key: "public".into(),
+            },
+        ] {
+            let (app, messages) = retire(Some("failed"), "new", kind).await;
+            assert_eq!(app.session.as_ref().unwrap().session_id, "new");
+            assert!(app.dkg_in_progress);
+            assert!(matches!(app.dkg_state, DkgState::Round1InProgress));
+            assert_eq!(messages.len(), 1);
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&messages[0]).unwrap()["session_id"],
+                "failed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn same_id_non_dkg_cannot_be_withdrawn() {
+        let (app, messages) = retire(
+            Some("sign"),
+            "sign",
+            SessionType::Signing {
+                wallet_name: "wallet".into(),
+                curve_type: "ecdsa".into(),
+                blockchain: "ethereum".into(),
+                group_public_key: "public".into(),
+            },
+        )
+        .await;
+        assert!(app.session.is_some());
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn failure_before_announcement_cannot_infer_a_new_runtime_session() {
+        let (app, messages) = retire(None, "new", SessionType::DKG).await;
+        assert_eq!(app.session.as_ref().unwrap().session_id, "new");
+        assert!(app.dkg_in_progress);
+        assert!(messages.is_empty());
     }
 }

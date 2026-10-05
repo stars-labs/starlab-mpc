@@ -1,101 +1,35 @@
-# Signature Scheme ↔ Chain Compatibility
+# Signing keys and chain compatibility
 
-**Status:** Authoritative caveat (matches shipped code)
-**Scope:** which chains can actually **verify** a FROST threshold signature, and the sharp exception for standard Ethereum-family EOAs.
-**Code:** `apps/tui/src/blockchain_config.rs` (chain↔curve table + `signing_caveat`), `packages/@starlab/blockchain/`
+Each wallet account uses the key and signing protocol required by its chain.
+A wallet created with all supported key types has separate ed25519 FROST,
+secp256k1 Taproot FROST and cggmp24 ECDSA shares. The two secp256k1 keys use
+different signing protocols and are not interchangeable.
 
----
+| Chain | Key tag | Signing protocol | Account path |
+|---|---|---|---|
+| Ethereum | `secp256k1-ecdsa` | cggmp24 threshold ECDSA, recoverable `r‖s‖v` | `m/44'/60'/0'/0/n` |
+| Bitcoin Taproot | `secp256k1` | FROST BIP-340 Schnorr, P2TR | `m/86'/0'/0'/0/n` |
+| Solana | `ed25519` | FROST Ed25519 | `m/44'/501'/n'/0'` |
+| Sui | `ed25519` | FROST Ed25519 | `m/44'/784'/n'/0'/0'` |
 
-## TL;DR
+Ethereum signatures support ordinary EOA verification: message signing hashes
+with EIP-191, and transaction signing signs the transaction's prehash. A
+Schnorr-verifying smart contract is not required. BSC, Polygon and Avalanche
+C-Chain use the same ECDSA address encoding; their presence in the TUI chain
+configuration does not imply a complete transaction workflow for each network.
+The Taproot key exposes Bitcoin addresses only and does not control an EVM EOA.
+Legacy Bitcoin and SegWit-v0 ECDSA spending are not supplied by the Taproot suite.
 
-FROST produces **Schnorr** signatures.
+Canonical chain-to-key selection, public account derivation, address encoding
+and signature verification live in
+[`accounts.rs`](../packages/@starlab/core/src/accounts.rs). The TUI's additional
+EVM address aliases delegate to the same Ethereum encoder. Aptos and NEAR
+entries in the TUI configuration are separate from the canonical account API;
+the configuration alone does not guarantee signing or transaction support.
 
-- **Bitcoin (Taproot / BIP-340)** and **ed25519 chains (Solana, Sui, Aptos, NEAR)**
-  verify them natively. ✅
-- A **standard Ethereum-family EOA** (Ethereum, BSC, Polygon, Avalanche C-Chain)
-  expects **ECDSA**. Our Schnorr signature will **not** be accepted by a plain
-  externally-owned-account transaction. ❌ — EVM usage needs a **smart-contract
-  account** (ERC-4337 or a Schnorr-verifying contract).
-
-A secp256k1 FROST wallet can *display* a correct-looking `0x…` address, but that
-does not mean a normal EVM transfer from it will verify. Do not imply otherwise
-in any UI.
-
----
-
-## 1. The compatibility table
-
-| Chain | Curve | Sig scheme the chain verifies | FROST signature accepted? |
-|---|---|---|:--:|
-| Bitcoin (Taproot / P2TR, BIP-340) | secp256k1 | Schnorr | ✅ native |
-| Bitcoin (legacy/SegWit-v0 spends) | secp256k1 | ECDSA | ❌ (key-path Taproot only) |
-| Solana | ed25519 | Ed25519 (Schnorr) | ✅ native |
-| Sui | ed25519 | Ed25519 | ✅ native |
-| Aptos | ed25519 | Ed25519 | ✅ native |
-| NEAR | ed25519 | Ed25519 | ✅ native |
-| Ethereum — **EOA** | secp256k1 | **ECDSA** (secp256k1) | ❌ |
-| BSC / Polygon / Avalanche C — **EOA** | secp256k1 | **ECDSA** | ❌ |
-| Ethereum-family — **contract account** | secp256k1 | whatever the contract verifies | ✅ *if* the contract verifies Schnorr |
-
-### Why the EVM EOA row is ❌
-
-FROST = threshold **Schnorr**. Ethereum's base protocol authenticates an EOA
-transaction with **ECDSA over secp256k1** (`ecrecover`). Same curve, **different
-signature algorithm** — an ECDSA verifier rejects a Schnorr signature. The
-address derivation is fine (`keccak(X‖Y)[12..]`, see code), so the *receive
-address* is real and can hold funds; what fails is **spending** via a normal EOA
-transaction, because the signature type doesn't match.
-
----
-
-## 2. The path that works on EVM: contract accounts
-
-To use a FROST secp256k1 wallet on an EVM chain, route through a **smart-contract
-account** rather than an EOA:
-
-- **ERC-4337 (account abstraction).** The account is a contract; a `UserOperation`
-  is validated by *your* `validateUserOp` logic, which can verify a Schnorr
-  signature (or a custom threshold scheme) instead of relying on `ecrecover`.
-- **A Schnorr-verifier contract / module.** A deployed verifier (e.g. a Safe
-  module or a bespoke contract) checks the BIP-340-style Schnorr signature on
-  chain and authorizes the action.
-
-In both cases the **funds and identity live at the contract address**, not at the
-EOA derived directly from the group key.
-
-### Status in this repo
-
-Address derivation for EVM chains is implemented and correct
-(`generate_address_for_chain`). An on-chain ERC-4337 / Schnorr-verifier
-integration is **not** shipped. Until it is, treat EVM-EOA spending as **out of
-scope**: the wallet can receive and display an EVM address, but signing a
-standard EOA transaction that the base protocol will accept is not supported.
-
----
-
-## 3. What the UI must communicate
-
-When a user selects an **EVM chain** (`ethereum` / `bsc` / `polygon` /
-`avalanche`) for a **secp256k1** wallet, surface the caveat at chain-selection
-and/or signing time:
-
-> ⚠️ This is a threshold-**Schnorr** wallet. A standard Ethereum-family EOA
-> transaction verifies with **ECDSA** and will not accept this signature. EVM use
-> requires a smart-contract account (ERC-4337 / a Schnorr-verifier contract).
-> Receiving to the displayed address is fine; spending via a normal EOA
-> transaction is not supported.
-
-A single source of truth for this string lives in code as
-`blockchain_config::signing_caveat(chain)` (Rust) so the TUI/native/CLI share one
-message; the extension mirrors it in its chain config. **No UI may claim a
-standard EVM EOA transfer is supported** for a FROST wallet.
-
----
-
-## 4. Cross-references
-
-- Chain↔curve table and the caveat helper: `apps/tui/src/blockchain_config.rs`.
-- Address derivation (correct for all listed chains): same file,
-  `generate_address_for_chain`.
-- Why a secp256k1 and an ed25519 wallet are different keys (not one key across
-  chains): [`MULTI_CURVE_DERIVATION.md`](MULTI_CURVE_DERIVATION.md).
+FROST share refresh can retain the group public key while changing the
+participating devices. ECDSA resharing is not implemented. The existing refresh
+flow changes only FROST shares; a mixed wallet’s ECDSA
+shares and Ethereum participants remain unchanged. Changing its ECDSA
+participants requires a new wallet and moving funds to its new address.
+See [`RECOVERY_AND_RESHARING.md`](RECOVERY_AND_RESHARING.md).

@@ -20,6 +20,14 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::bridge::Bridge;
 use crate::protocol::CliEvent;
 
+/// Cold native DKG can spend 15 minutes preparing primes, then 10 minutes in
+/// aux-info/keygen. Allow another two minutes for discovery and FROST setup.
+/// Explicit CLI --timeout always overrides this default.
+pub const COLD_DKG_TIMEOUT_SECS: u64 = starlab_client::protocal::ecdsa::worker::PRIMES_WAIT
+    .as_secs()
+    + starlab_client::protocal::ecdsa::dkg::DKG_TIMEOUT.as_secs()
+    + 120;
+
 /// Shared configuration for every one-shot command.
 pub struct OneShotOpts {
     pub device_id: String,
@@ -563,11 +571,27 @@ pub async fn wallet_create(
     Ok(true)
 }
 
+fn join_completion_timeout(
+    opts: &OneShotOpts,
+    discovered: &CliEvent,
+    use_cold_dkg_default: bool,
+) -> u64 {
+    if use_cold_dkg_default
+        && opts.curve != "ed25519"
+        && matches!(discovered, CliEvent::SessionAvailable { session } if session.session_type == "dkg")
+    {
+        COLD_DKG_TIMEOUT_SECS
+    } else {
+        opts.timeout_secs
+    }
+}
+
 /// `session join` — join a discovered DKG/signing session by id.
 pub async fn session_join(
     opts: OneShotOpts,
     session_id: String,
     password: String,
+    use_cold_dkg_default: bool,
 ) -> anyhow::Result<bool> {
     let (tx, mut rx, roster) = start(&opts);
     tx.send(Message::TriggerReconnect)?;
@@ -598,9 +622,26 @@ pub async fn session_join(
             }
         });
     }
-    let ev = wait_outcome(
+    // Discover first under the ordinary wait limit. A nonexistent session,
+    // signing request, or refresh must never inherit a cold-prime budget.
+    let discovered = wait_outcome(
         &mut rx,
         opts.timeout_secs,
+        "the requested session to be discovered",
+        " Check the session id, room, and whether its creator is still online.",
+        Some(&roster),
+        |event| match event {
+            CliEvent::SessionAvailable { session } => session.session_id == session_id,
+            CliEvent::SigningRequest { session_id: id, .. }
+            | CliEvent::ReshareRequest { session_id: id, .. } => id == &session_id,
+            _ => false,
+        },
+    )
+    .await?;
+    let completion_timeout = join_completion_timeout(&opts, &discovered, use_cold_dkg_default);
+    let ev = wait_outcome(
+        &mut rx,
+        completion_timeout,
         "the session to complete",
         "\n  → Is the session id correct and the creator still online in the SAME --room? \
          Everyone must share --room and --signal-server; the password must match this wallet.",
@@ -767,17 +808,11 @@ pub async fn wallet_accounts(
         for (display, key, curve, group) in &chains {
             let path_s = standard_path(key, i)
                 .ok_or_else(|| anyhow::anyhow!("no standard path for {key}"))?;
-            let path = starlab_core::DerivationPath::parse(&path_s)
-                .map_err(|e| anyhow::anyhow!("parse {path_s}: {e}"))?;
-            let child_pub = match curve.as_str() {
-                "ed25519" => starlab_core::derive_child_verifying_key_path::<
-                    frost_ed25519::Ed25519Sha512,
-                >(group, &path),
-                _ => starlab_core::derive_child_verifying_key_path::<
-                    frost_secp256k1_tr::Secp256K1Sha256TR,
-                >(group, &path),
-            }
-            .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
+            // accounts.rs is the single source of truth: the ECDSA key's
+            // Ethereum child has no Taproot finalize (a FROST-tr derivation
+            // here listed a different, unsignable Ethereum address).
+            let child_pub = starlab_core::accounts::account_verifying_key(key, curve, group, i)
+                .map_err(|e| anyhow::anyhow!("derive {path_s}: {e}"))?;
             let address = crate::bridge::derive_address(&hex::encode(&child_pub), curve, key);
             if !address.is_empty() {
                 addresses.push(crate::protocol::ChainAddress {
@@ -1039,6 +1074,152 @@ mod derive_tests {
 #[cfg(test)]
 mod output_tests {
     use super::*;
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "real WebRTC oneshot join discovery/completion; covered by cold-DKG CI shard"]
+    async fn session_join_discovers_and_completes_real_dkg() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let signal_url = format!("ws://127.0.0.1:{}", listener.local_addr().unwrap().port());
+        let server = tokio::spawn(starlab_signal_server::run(listener));
+        let creator_dir = tempfile::tempdir().unwrap();
+        let joiner_dir = tempfile::tempdir().unwrap();
+        let mut creator = timeout_opts();
+        creator.device_id = "oneshot-creator".into();
+        creator.keystore_path = creator_dir.path().to_string_lossy().into_owned();
+        creator.curve = "ed25519".into();
+        creator.signal_url = signal_url.clone();
+        let (tx, mut rx, roster) = start(&creator);
+        tx.send(Message::TriggerReconnect).unwrap();
+        wait_connected(&mut rx, &creator).await.unwrap();
+        tx.send(Message::HeadlessCreateWallet {
+            config: WalletConfig {
+                name: "join-flow".into(),
+                threshold: 2,
+                total_participants: 2,
+                mode: WalletMode::Online,
+            },
+            password: "join-regression-password".into(),
+            label: "join-flow".into(),
+        })
+        .unwrap();
+        let announced = wait_outcome(&mut rx, 20, "announcement", "", Some(&roster), |e| {
+            matches!(e, CliEvent::SessionAnnounced { .. })
+        })
+        .await
+        .unwrap();
+        let CliEvent::SessionAnnounced { session_id, .. } = announced else {
+            unreachable!()
+        };
+        let mut joiner = timeout_opts();
+        joiner.device_id = "oneshot-joiner".into();
+        joiner.keystore_path = joiner_dir.path().to_string_lossy().into_owned();
+        joiner.curve = "ed25519".into();
+        joiner.signal_url = signal_url;
+        assert!(
+            session_join(joiner, session_id, "join-regression-password".into(), true)
+                .await
+                .unwrap()
+        );
+        let completed = wait_outcome(&mut rx, 20, "creator completion", "", Some(&roster), |e| {
+            matches!(e, CliEvent::DkgComplete { .. })
+        })
+        .await
+        .unwrap();
+        let CliEvent::DkgComplete {
+            wallet_id,
+            group_public_key,
+            ..
+        } = completed
+        else {
+            unreachable!()
+        };
+        let saved =
+            starlab_client::keystore::Keystore::new(joiner_dir.path(), "oneshot-joiner").unwrap();
+        assert_eq!(
+            saved.get_wallet(&wallet_id).unwrap().group_public_key,
+            group_public_key
+        );
+        tx.send(Message::Quit).unwrap();
+        server.abort();
+    }
+
+    fn timeout_opts() -> OneShotOpts {
+        OneShotOpts {
+            device_id: "device".into(),
+            keystore_path: "unused".into(),
+            signal_url: "unused".into(),
+            timeout_secs: 90,
+            curve: "secp256k1".into(),
+            json: false,
+        }
+    }
+
+    #[test]
+    fn join_wait_promotes_only_discovered_cold_dkg_and_keeps_explicit_values() {
+        let mut opts = timeout_opts();
+        let dkg = CliEvent::SessionAvailable {
+            session: crate::protocol::SessionEntry {
+                session_id: "session".into(),
+                session_type: "dkg".into(),
+                threshold: 2,
+                total: 2,
+                proposer: "peer".into(),
+                participants: vec!["peer".into()],
+            },
+        };
+        let signing = CliEvent::SigningRequest {
+            session_id: "session".into(),
+            wallet: "wallet".into(),
+            threshold: 2,
+            total: 2,
+            proposer: "peer".into(),
+        };
+        let reshare = CliEvent::ReshareRequest {
+            session_id: "session".into(),
+            wallet: "wallet".into(),
+            threshold: 2,
+            total: 2,
+            proposer: "peer".into(),
+        };
+        assert_eq!(
+            join_completion_timeout(&opts, &dkg, true),
+            COLD_DKG_TIMEOUT_SECS
+        );
+        assert_eq!(join_completion_timeout(&opts, &signing, true), 90);
+        assert_eq!(join_completion_timeout(&opts, &reshare, true), 90);
+        opts.curve = "ed25519".into();
+        assert_eq!(join_completion_timeout(&opts, &dkg, true), 90);
+        opts.curve = "secp256k1".into();
+        for explicit in [7, COLD_DKG_TIMEOUT_SECS] {
+            opts.timeout_secs = explicit;
+            assert_eq!(join_completion_timeout(&opts, &dkg, false), explicit);
+            assert_eq!(join_completion_timeout(&opts, &signing, false), explicit);
+        }
+    }
+
+    #[tokio::test]
+    async fn dkg_failure_crosses_bridge_and_ends_oneshot_wait_immediately() {
+        let (tx, mut rx) = unbounded_channel();
+        let mut bridge = Bridge::new();
+        for event in bridge.on_sync(
+            &Model::new("device".into()),
+            Some(&Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            }),
+        ) {
+            tx.send(event).unwrap();
+        }
+        let error = tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_outcome(&mut rx, COLD_DKG_TIMEOUT_SECS, "DKG", "", None, |e| {
+                matches!(e, CliEvent::DkgComplete { .. })
+            }),
+        )
+        .await
+        .expect("terminal failure must not wait for outer timeout")
+        .unwrap_err();
+        assert_eq!(error.to_string(), "dkg_failed: aux-info proof rejected");
+    }
+
     use crate::protocol::WalletEntry;
 
     #[test]

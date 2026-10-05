@@ -158,6 +158,13 @@ impl Bridge {
                         }
                     }
                 }
+                Message::DKGFailed { error } => {
+                    events.push(CliEvent::Error {
+                        correlates: None,
+                        code: "dkg_failed".into(),
+                        message: error.clone(),
+                    });
+                }
                 Message::SigningComplete {
                     message, signature, ..
                 } => {
@@ -338,6 +345,17 @@ fn session_entry(s: &SessionInfo) -> SessionEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dkg_failure_emits_specific_terminal_error() {
+        let mut bridge = Bridge::new();
+        let events = bridge.on_sync(
+            &Model::new("device".into()),
+            Some(&Message::DKGFailed {
+                error: "aux-info proof rejected".into(),
+            }),
+        );
+        assert!(events.iter().any(|event| matches!(event, CliEvent::Error { code, message, .. } if code == "dkg_failed" && message == "aux-info proof rejected")));
+    }
 
     fn sample_session(id: &str) -> SessionInfo {
         SessionInfo {

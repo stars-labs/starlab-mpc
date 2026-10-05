@@ -98,7 +98,7 @@ impl ModeSelectionComponent {
                     "• Instant participant coordination",
                 ],
                 pros: vec![
-                    "✅ Instant key generation (< 30 seconds)",
+                    "✅ Background key setup with live progress",
                     "✅ Real-time participant discovery",
                     "✅ Automatic session synchronization",
                     "✅ Live status updates",

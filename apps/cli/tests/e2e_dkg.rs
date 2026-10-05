@@ -170,7 +170,7 @@ async fn frost_sign_2_of_3_all_three_online_agree_on_one_signature() {
 /// never responds (down, or never approves the request) must not wedge the
 /// ceremony forever — node 0 announces, nobody joins, so it never gathers
 /// `threshold`-many commitments and must fail cleanly on its own once the
-/// (shortened, via `STARLAB_SIGNING_TIMEOUT_MS`) timeout elapses. A retry —
+/// shortened per-node timeout elapses. A retry —
 /// a fresh ceremony with a real co-signer — must then succeed and verify,
 /// proving the timeout wiped the ceremony state cleanly enough to start
 /// over (automatic re-picking of a different signer INSIDE the same
@@ -180,26 +180,14 @@ async fn frost_sign_2_of_3_all_three_online_agree_on_one_signature() {
 async fn signing_times_out_when_nobody_joins_then_retry_succeeds() {
     init_logs();
 
-    // Restores the env var on drop (even on panic) so this test's shortened
-    // timeout can't leak into a later test sharing the process — tests run
-    // with `--test-threads=1`, but still inside the same binary.
-    struct EnvGuard;
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: `--test-threads=1` serializes test bodies in this
-            // binary, so no other test reads/writes this var concurrently.
-            unsafe { std::env::remove_var("STARLAB_SIGNING_TIMEOUT_MS") };
-        }
-    }
-    // SAFETY: see `EnvGuard::drop` above.
-    unsafe { std::env::set_var("STARLAB_SIGNING_TIMEOUT_MS", "3000") };
-    let _env_guard = EnvGuard;
-
     let result = run_signing_timeout_then_retry_simulation(
         SimulateOpts {
             nodes: 3,
             threshold: 2,
-            curve: "secp256k1".into(),
+            // This regression exercises FROST nonce/state cleanup.
+            // The secp256k1 simulator also provisions ECDSA and selects
+            // Ethereum; its Paillier worker cannot use this 3s FROST budget.
+            curve: "ed25519".into(),
             signal_url: None,
             timeout_secs: 60,
             insecure_test_primes: support::test_primes(),
