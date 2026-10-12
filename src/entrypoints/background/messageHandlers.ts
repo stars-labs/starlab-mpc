@@ -20,6 +20,7 @@ import { OffscreenManager } from "./offscreenManager";
 import { WebSocketManager } from "./webSocketManager";
 import { SessionManager } from "./sessionManager";
 import { RpcHandler, UIRequestHandler } from "./rpcHandler";
+import { match } from "ts-pattern";
 
 /**
  * Handles messages from popup interface
@@ -103,110 +104,101 @@ export class PopupMessageHandler {
         console.log("└─────────────────────────────────────────────────────────────────");
 
         try {
-            switch (message.type) {
-                case MESSAGE_TYPES.GET_STATE:
+            const result = match(message.type)
+                .with(MESSAGE_TYPES.GET_STATE, () => {
                     console.log("📊 [PopupMessageHandler] GET_STATE: Returning current application state");
                     const state = this.stateManager.getState();
                     console.log("📊 [PopupMessageHandler] State keys:", Object.keys(state));
                     sendResponse(state);
-                    break;
-
-                case MESSAGE_TYPES.GET_WEBRTC_STATE:
+                    return Promise.resolve();
+                })
+                .with(MESSAGE_TYPES.GET_WEBRTC_STATE, () => {
                     console.log("📡 [PopupMessageHandler] GET_WEBRTC_STATE: Returning WebRTC connections");
                     const webrtcConnections = this.stateManager.getWebRTCConnections();
                     console.log("📡 [PopupMessageHandler] WebRTC connections:", webrtcConnections);
                     sendResponse({ webrtcConnections });
-                    break;
-
-                case MESSAGE_TYPES.LIST_DEVICES:
+                    return Promise.resolve();
+                })
+                .with(MESSAGE_TYPES.LIST_DEVICES, () => {
                     console.log("📋 [PopupMessageHandler] LIST_DEVICES: Requesting peer discovery");
-                    await this.handleListDevicesRequest(sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.RELAY:
+                    return this.handleListDevicesRequest(sendResponse);
+                })
+                .with(MESSAGE_TYPES.RELAY, () => {
                     console.log("🔄 [PopupMessageHandler] RELAY: Forwarding message via WebSocket");
-                    await this.handleRelayRequest(message, sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.CREATE_OFFSCREEN:
+                    return this.handleRelayRequest(message, sendResponse);
+                })
+                .with(MESSAGE_TYPES.CREATE_OFFSCREEN, () => {
                     console.log("📄 [PopupMessageHandler] CREATE_OFFSCREEN: Creating offscreen document");
-                    await this.handleCreateOffscreenRequest(sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.GET_OFFSCREEN_STATUS:
+                    return this.handleCreateOffscreenRequest(sendResponse);
+                })
+                .with(MESSAGE_TYPES.GET_OFFSCREEN_STATUS, () => {
                     console.log("📄 [PopupMessageHandler] GET_OFFSCREEN_STATUS: Checking offscreen status");
-                    await this.handleGetOffscreenStatusRequest(sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.FROM_OFFSCREEN:
+                    return this.handleGetOffscreenStatusRequest(sendResponse);
+                })
+                .with(MESSAGE_TYPES.FROM_OFFSCREEN, () => {
                     console.log("📤 [PopupMessageHandler] FROM_OFFSCREEN: Processing offscreen message");
-                    await this.handleFromOffscreenMessage(message, sendResponse);
-                    break;
-
-                case "requestInit":
+                    return this.handleFromOffscreenMessage(message, sendResponse);
+                })
+                .with("requestInit", () => {
                     console.log("🔧 [PopupMessageHandler] REQUEST_INIT: Handling initialization request");
-                    await this.handleRequestInitMessage(sendResponse);
-                    break;
-
-                case "requestSessionRestore":
+                    return this.handleRequestInitMessage(sendResponse);
+                })
+                .with("requestSessionRestore", () => {
                     console.log("🔄 [PopupMessageHandler] REQUEST_SESSION_RESTORE: Restoring session state");
-                    await this.handleSessionRestoreRequest(sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.PROPOSE_SESSION:
+                    return this.handleSessionRestoreRequest(sendResponse);
+                })
+                .with(MESSAGE_TYPES.PROPOSE_SESSION, () => {
                     console.log("🔐 [PopupMessageHandler] PROPOSE_SESSION: Creating new MPC session");
-                    await this.handleProposeSessionRequest(message, sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.ACCEPT_SESSION:
+                    return this.handleProposeSessionRequest(message, sendResponse);
+                })
+                .with(MESSAGE_TYPES.ACCEPT_SESSION, () => {
                     console.log("🔐 [PopupMessageHandler] ACCEPT_SESSION: Accepting MPC session invite");
-                    await this.handleAcceptSessionRequest(message, sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.SEND_DIRECT_MESSAGE:
+                    return this.handleAcceptSessionRequest(message, sendResponse);
+                })
+                .with(MESSAGE_TYPES.SEND_DIRECT_MESSAGE, () => {
                     console.log("💬 [PopupMessageHandler] SEND_DIRECT_MESSAGE: Sending direct peer message");
-                    await this.handleSendDirectMessageRequest(message, sendResponse);
-                    break;
-
-                case MESSAGE_TYPES.GET_WEBRTC_STATUS:
+                    return this.handleSendDirectMessageRequest(message, sendResponse);
+                })
+                .with(MESSAGE_TYPES.GET_WEBRTC_STATUS, () => {
                     console.log("📡 [PopupMessageHandler] GET_WEBRTC_STATUS: Getting WebRTC status");
-                    await this.handleGetWebRTCStatusRequest(sendResponse);
-                    break;
-
-                case "setBlockchain":
+                    return this.handleGetWebRTCStatusRequest(sendResponse);
+                })
+                .with("setBlockchain", () => {
                     console.log("🔗 [PopupMessageHandler] SET_BLOCKCHAIN: Setting blockchain preference");
                     this.handleSetBlockchainRequest(message, sendResponse);
-                    break;
-
-                case "getEthereumAddress":
+                    return Promise.resolve();
+                })
+                .with("getEthereumAddress", () => {
                     console.log("🏠 [PopupMessageHandler] GET_ETHEREUM_ADDRESS: Requesting Ethereum address");
-                    await this.handleGetEthereumAddressRequest(sendResponse);
-                    break;
-
-                case "getSolanaAddress":
+                    return this.handleGetEthereumAddressRequest(sendResponse);
+                })
+                .with("getSolanaAddress", () => {
                     console.log("🏠 [PopupMessageHandler] GET_SOLANA_ADDRESS: Requesting Solana address");
-                    await this.handleGetSolanaAddressRequest(sendResponse);
-                    break;
-
-                default:
+                    return this.handleGetSolanaAddressRequest(sendResponse);
+                })
+                .otherwise(() => {
                     if (isRpcMessage(message)) {
                         console.log("🔗 [PopupMessageHandler] RPC_MESSAGE: Processing JSON-RPC request");
-                        await this.handleRpcMessage(message, sendResponse);
+                        return this.handleRpcMessage(message, sendResponse);
                     } else if (isAccountManagement(message)) {
                         console.log("👤 [PopupMessageHandler] ACCOUNT_MANAGEMENT: Not implemented");
                         sendResponse({ success: false, error: "Account management not implemented" });
+                        return Promise.resolve();
                     } else if (isNetworkManagement(message)) {
                         console.log("🌐 [PopupMessageHandler] NETWORK_MANAGEMENT: Not implemented");
                         sendResponse({ success: false, error: "Network management not implemented" });
+                        return Promise.resolve();
                     } else if (isUIRequest(message)) {
                         console.log("🖼️ [PopupMessageHandler] UI_REQUEST: Processing UI request");
-                        await this.handleUIRequestMessage(message, sendResponse);
+                        return this.handleUIRequestMessage(message, sendResponse);
                     } else {
                         console.warn("❓ [PopupMessageHandler] UNKNOWN_MESSAGE_TYPE:", message.type);
                         sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
+                        return Promise.resolve();
                     }
-                    break;
-            }
+                })
+
+            await result;
         } catch (error) {
             const duration = Date.now() - startTime;
             const errorDetails = (error as Error).message;
@@ -576,27 +568,46 @@ export class OffscreenMessageHandler {
     async handleOffscreenMessage(payload: OffscreenToBackgroundMessage): Promise<void> {
         console.log("[OffscreenMessageHandler] Handling offscreen message:", payload);
 
-        switch (payload.type) {
-            case "relayViaWs":
-                await this.handleRelayViaWebSocket(payload);
-                break;
-
-            default:
+        await match(payload.type)
+            .with("relayViaWs", () => this.handleRelayViaWebSocket(payload))
+            .otherwise(() => {
                 // Forward to state manager for state updates
                 this.stateManager.handleOffscreenStateUpdate(payload);
-                break;
-        }
+                return Promise.resolve();
+            });
     }
 
     private async handleRelayViaWebSocket(payload: any): Promise<void> {
-        if ('to' in payload && 'data' in payload && this.webSocketManager.isReady()) {
-            try {
-                await this.webSocketManager.relayMessage(payload.to as string, payload.data);
-            } catch (error) {
-                console.error("[OffscreenMessageHandler] Error relaying via WebSocket:", error);
+        console.log(`🔄 [OffscreenMessageHandler] *** HANDLING RELAY VIA WEBSOCKET ***`);
+        console.log(`📦 [OffscreenMessageHandler] Received relay payload:`, payload);
+
+        if ('to' in payload && 'data' in payload) {
+            console.log(`✅ [OffscreenMessageHandler] Payload has 'to' and 'data' fields`);
+            console.log(`🎯 [OffscreenMessageHandler] Target device: ${payload.to}`);
+            console.log(`📋 [OffscreenMessageHandler] Data type: ${payload.data?.websocket_msg_type || 'unknown'}`);
+
+            if (payload.data?.websocket_msg_type === 'WebRTCSignal') {
+                console.log(`📡 [OffscreenMessageHandler] This is a WebRTC signal!`);
+                if (payload.data.Offer) {
+                    console.log(`📤 [OffscreenMessageHandler] WebRTC OFFER - SDP length: ${payload.data.Offer?.sdp?.length || 0}`);
+                }
+            }
+
+            if (this.webSocketManager.isReady()) {
+                console.log(`✅ [OffscreenMessageHandler] WebSocket is ready, relaying message`);
+                try {
+                    await this.webSocketManager.relayMessage(payload.to as string, payload.data);
+                    console.log(`✅ [OffscreenMessageHandler] *** MESSAGE RELAYED SUCCESSFULLY TO ${payload.to} ***`);
+                } catch (error) {
+                    console.error(`❌ [OffscreenMessageHandler] Error relaying via WebSocket:`, error);
+                }
+            } else {
+                console.warn(`❌ [OffscreenMessageHandler] WebSocket not ready! Cannot relay message`);
+                console.warn(`🔍 [OffscreenMessageHandler] WebSocket status:`, this.webSocketManager.isReady());
             }
         } else {
-            console.warn("[OffscreenMessageHandler] Cannot relay message, WebSocket not connected or invalid payload");
+            console.warn(`❌ [OffscreenMessageHandler] Cannot relay message - missing 'to' or 'data' fields`);
+            console.warn(`🔍 [OffscreenMessageHandler] Payload keys:`, Object.keys(payload));
         }
     }
 }

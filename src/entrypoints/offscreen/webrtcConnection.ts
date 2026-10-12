@@ -15,6 +15,7 @@
 // ===================================================================
 
 import { WebSocketMessagePayload, WebRTCSignal } from '../../types/websocket';
+import { match } from "ts-pattern";
 
 /**
  * Configuration for WebRTC connections
@@ -156,19 +157,20 @@ export class WebRTCConnectionManager {
         }
 
         try {
-            switch (signal.signal_type) {
-                case 'offer':
+            await match(signal.signal_type)
+                .with('offer', async () => {
                     await this.handleOffer(fromPeerId, peerConnection, signal.offer);
-                    break;
-                case 'answer':
+                })
+                .with('answer', async () => {
                     await this.handleAnswer(fromPeerId, peerConnection, signal.answer);
-                    break;
-                case 'candidate':
+                })
+                .with('candidate', async () => {
                     await this.handleIceCandidate(fromPeerId, peerConnection, signal.candidate);
-                    break;
-                default:
+                })
+                .otherwise(() => {
                     console.warn(`⚠️ [WebRTCConnection] Unknown signal type: ${signal.signal_type}`);
-            }
+                    return Promise.resolve();
+                });
         } catch (error) {
             console.error(`❌ [WebRTCConnection] Error handling signal from ${fromPeerId}:`, error);
         }

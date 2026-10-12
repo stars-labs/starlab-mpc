@@ -13,6 +13,7 @@
 import { MeshStatus, MeshStatusType } from "../../types/mesh";
 import { SessionInfo } from "../../types/session";
 import type { WebRTCAppMessage } from "../../types/webrtc";
+import { match } from "ts-pattern";
 
 /**
  * Callback interface for mesh events
@@ -135,14 +136,14 @@ export class MeshManager {
         this._log(`Handling mesh message from ${fromPeerId}: ${message.webrtc_msg_type}`);
 
         try {
-            switch (message.webrtc_msg_type) {
-                case 'MeshReady':
+            await match(message.webrtc_msg_type)
+                .with('MeshReady', async () => {
                     await this.handleMeshReady(fromPeerId, message);
-                    break;
-
-                default:
+                })
+                .otherwise(() => {
                     this._log(`Unhandled mesh message type: ${message.webrtc_msg_type}`);
-            }
+                    return Promise.resolve();
+                });
         } catch (error) {
             this._log(`Error handling mesh message: ${error}`);
         }

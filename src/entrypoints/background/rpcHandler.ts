@@ -14,6 +14,7 @@ import WalletClientService from '../../services/walletClient';
 import WalletController from "../../services/walletController";
 import { toHex } from 'viem';
 import type { JsonRpcRequest } from "../../types/messages";
+import { match } from "ts-pattern";
 
 /**
  * Handles JSON-RPC requests from web applications
@@ -36,39 +37,21 @@ export class RpcHandler {
         try {
             console.log(`[RpcHandler] Processing RPC request: ${request.method}`);
 
-            switch (request.method) {
-                case 'eth_accounts':
-                case 'eth_requestAccounts':
-                    return await this.handleAccountsRequest(request.method);
-
-                case 'eth_chainId':
-                    return await this.handleChainIdRequest();
-
-                case 'net_version':
-                    return await this.handleNetVersionRequest();
-
-                case 'eth_getBalance':
-                    return await this.handleGetBalanceRequest(request.params as unknown[]);
-
-                case 'eth_sendTransaction':
-                    return await this.handleSendTransactionRequest(request.params as unknown[]);
-
-                case 'eth_signMessage':
-                case 'personal_sign':
-                    return await this.handleSignMessageRequest(request.params as unknown[]);
-
-                case 'eth_getTransactionCount':
-                    return await this.handleGetTransactionCountRequest(request.params as unknown[]);
-
-                case 'eth_gasPrice':
-                    return await this.handleGasPriceRequest();
-
-                case 'eth_estimateGas':
-                    return await this.handleEstimateGasRequest(request.params as unknown[]);
-
-                default:
+            return await match(request.method)
+                .with('eth_accounts', async () => await this.handleAccountsRequest(request.method))
+                .with('eth_requestAccounts', async () => await this.handleAccountsRequest(request.method))
+                .with('eth_chainId', async () => await this.handleChainIdRequest())
+                .with('net_version', async () => await this.handleNetVersionRequest())
+                .with('eth_getBalance', async () => await this.handleGetBalanceRequest(request.params as unknown[]))
+                .with('eth_sendTransaction', async () => await this.handleSendTransactionRequest(request.params as unknown[]))
+                .with('eth_signMessage', async () => await this.handleSignMessageRequest(request.params as unknown[]))
+                .with('personal_sign', async () => await this.handleSignMessageRequest(request.params as unknown[]))
+                .with('eth_getTransactionCount', async () => await this.handleGetTransactionCountRequest(request.params as unknown[]))
+                .with('eth_gasPrice', async () => await this.handleGasPriceRequest())
+                .with('eth_estimateGas', async () => await this.handleEstimateGasRequest(request.params as unknown[]))
+                .otherwise(() => {
                     throw new Error(`Unsupported method: ${request.method}`);
-            }
+                });
         } catch (error) {
             console.error(`[RpcHandler] RPC request failed: ${request.method}`, error);
             throw error;

@@ -25,7 +25,13 @@ import WalletController from "../../services/walletController";
 import { WebSocketClient } from "./websocket";
 
 // Import modular components
-import { SessionPersistenceManager, SessionManager } from './sessionManager';
+import { SessionManager } from './sessionManager';
+
+// Temporary stub for removed SessionPersistenceManager - KISS principle
+class SessionPersistenceManager {
+    static async loadSessionState() { return null; }
+    static async clearSessionState() { return; }
+}
 import { RpcHandler, UIRequestHandler } from './rpcHandler';
 import { OffscreenManager } from './offscreenManager';
 import { WebSocketManager } from './webSocketManager';

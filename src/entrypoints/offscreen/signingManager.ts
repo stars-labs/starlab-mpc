@@ -12,6 +12,7 @@
 
 import type { WebRTCAppMessage } from "../../types/webrtc";
 import type { SessionInfo } from "../../types/session";
+import { match } from "ts-pattern";
 
 // Signing state enumeration to track signing process
 export enum SigningState {
@@ -155,26 +156,23 @@ export class SigningManager {
         this._log(`Handling signing message from ${fromPeerId}: ${message.webrtc_msg_type}`);
 
         try {
-            switch (message.webrtc_msg_type) {
-                case 'SigningRequest':
+            await match(message.webrtc_msg_type)
+                .with('SigningRequest', async () => {
                     await this.handleSigningRequest(fromPeerId, message);
-                    break;
-
-                case 'SigningAcceptance':
+                })
+                .with('SigningAcceptance', async () => {
                     await this.handleSigningAcceptance(fromPeerId, message);
-                    break;
-
-                case 'SigningCommitment':
+                })
+                .with('SigningCommitment', async () => {
                     await this.handleSigningCommitment(fromPeerId, message);
-                    break;
-
-                case 'SignatureShare':
+                })
+                .with('SignatureShare', async () => {
                     await this.handleSigningShare(fromPeerId, message);
-                    break;
-
-                default:
+                })
+                .otherwise(() => {
                     this._log(`Unhandled signing message type: ${message.webrtc_msg_type}`);
-            }
+                    return Promise.resolve();
+                });
         } catch (error) {
             this._log(`Error handling signing message: ${error}`);
         }

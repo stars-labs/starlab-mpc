@@ -89,11 +89,19 @@ export class WebSocketClient {
         });
     }
 
-    public relayMessage(to: string, data: any): void {
-        this.sendMessage({
-            type: "relay",
-            to,
-            data
+    public relayMessage(to: string, data: any): Promise<void> {
+        return new Promise((resolve, reject) => {
+            try {
+                this.sendMessage({
+                    type: "relay",
+                    to,
+                    data
+                });
+                // Resolve immediately after successful send since WebSocket is fire-and-forget
+                resolve();
+            } catch (error) {
+                reject(error);
+            }
         });
     }
 

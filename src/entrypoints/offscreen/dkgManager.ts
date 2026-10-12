@@ -13,6 +13,7 @@
 import { DkgState } from "../../types/dkg";
 import type { WebRTCAppMessage } from "../../types/webrtc";
 import type { SessionInfo } from "../../types/session";
+import { match } from "ts-pattern";
 
 export { DkgState };
 
@@ -492,22 +493,21 @@ export class DkgManager {
         this._log(`Handling DKG message from ${fromPeerId}: ${message.webrtc_msg_type}`);
 
         try {
-            switch (message.webrtc_msg_type) {
-                case 'DkgRound1Package':
+            await match(message.webrtc_msg_type)
+                .with('DkgRound1Package', async () => {
                     if ('packageData' in message) {
                         this.handleDkgRound1Package(fromPeerId, (message as any).packageData);
                     }
-                    break;
-
-                case 'DkgRound2Package':
+                })
+                .with('DkgRound2Package', async () => {
                     if ('packageData' in message) {
                         this.handleDkgRound2Package(fromPeerId, (message as any).packageData);
                     }
-                    break;
-
-                default:
+                })
+                .otherwise(() => {
                     this._log(`Unhandled DKG message type: ${message.webrtc_msg_type}`);
-            }
+                    return Promise.resolve();
+                });
         } catch (error) {
             this._log(`Error handling DKG message: ${error}`);
         }

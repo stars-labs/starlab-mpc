@@ -1961,6 +1961,7 @@ export class WebRTCManager {
 
   // Add the missing initiatePeerConnection method that offscreen/index.ts calls
   public async initiatePeerConnection(peerId: string): Promise<void> {
+    console.log(`🚀 [WebRTCManager] *** INITIATING PEER CONNECTION TO ${peerId} ***`);
     this._log(`Initiating peer connection to ${peerId}`);
 
     try {
@@ -1968,22 +1969,32 @@ export class WebRTCManager {
       const pc = await this._getOrCreatePeerConnection(peerId);
       if (!pc) {
         this._log(`Failed to create peer connection for ${peerId}`);
+        console.error(`❌ [WebRTCManager] Failed to create peer connection for ${peerId}`);
         return;
       }
+
+      console.log(`✅ [WebRTCManager] Peer connection created for ${peerId}`);
 
       // Create data channel if we are the initiator (following politeness rule)
       if (this.localPeerId < peerId) {
         this._log(`Creating data channel for ${peerId} (we are initiator)`);
+        console.log(`📺 [WebRTCManager] Creating data channel for ${peerId} (we are initiator: ${this.localPeerId} < ${peerId})`);
         const dataChannel = pc.createDataChannel('frost-dkg', {
           ordered: true
         });
         this._setupDataChannel(dataChannel, peerId);
+      } else {
+        console.log(`⏳ [WebRTCManager] Waiting for data channel from ${peerId} (they are initiator: ${peerId} < ${this.localPeerId})`);
       }
 
       // Create and send offer
       this._log(`Creating offer for ${peerId}`);
+      console.log(`📤 [WebRTCManager] Creating WebRTC offer for ${peerId}...`);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+
+      console.log(`✅ [WebRTCManager] WebRTC offer created successfully for ${peerId}`);
+      console.log(`📋 [WebRTCManager] Offer SDP length: ${offer.sdp?.length || 0} characters`);
 
       // Send offer via WebSocket relay
       const wsMsgPayload = {
@@ -1991,15 +2002,27 @@ export class WebRTCManager {
         Offer: { sdp: offer.sdp! }  // Direct at root level, matching Rust enum structure
       };
 
+      console.log(`🔄 [WebRTCManager] Preparing to send WebRTC offer to ${peerId} via background relay`);
+      console.log(`📦 [WebRTCManager] WebSocket payload structure:`, {
+        websocket_msg_type: wsMsgPayload.websocket_msg_type,
+        Offer: { sdp_length: wsMsgPayload.Offer.sdp.length }
+      });
+
       if (this.sendPayloadToBackgroundForRelay) {
+        console.log(`📡 [WebRTCManager] Calling sendPayloadToBackgroundForRelay for ${peerId}...`);
         this.sendPayloadToBackgroundForRelay(peerId, wsMsgPayload as any);
         this._log(`Sent Offer to ${peerId} via background`);
+        console.log(`✅ [WebRTCManager] WebRTC offer sent to ${peerId} via background relay`);
       } else {
         this._log(`Cannot send Offer to ${peerId}: no relay callback available`);
+        console.error(`❌ [WebRTCManager] Cannot send offer to ${peerId}: sendPayloadToBackgroundForRelay callback is null!`);
       }
+
+      console.log(`🎯 [WebRTCManager] *** PEER CONNECTION INITIATION COMPLETED FOR ${peerId} ***`);
 
     } catch (error) {
       this._log(`Error initiating peer connection to ${peerId}: ${this._getErrorMessage(error)}`);
+      console.error(`💥 [WebRTCManager] Error initiating peer connection to ${peerId}:`, error);
     }
   }
 
@@ -2079,5 +2102,34 @@ export class WebRTCManager {
 
     this._log(`Auto-trigger check: No conditions met yet`);
     return false;
+  }
+
+  // Additional methods needed by offscreen/index.ts
+  public sendDirectMessage(toPeerId: string, message: any): boolean {
+    this._log(`Sending direct message to ${toPeerId}: ${JSON.stringify(message)}`);
+    try {
+      this.sendWebRTCAppMessage(toPeerId, message);
+      return true;
+    } catch (error) {
+      this._log(`Failed to send direct message to ${toPeerId}: ${this._getErrorMessage(error)}`);
+      return false;
+    }
+  }
+
+  public getConnecteddevices(): string[] {
+    // Alias for getConnectedPeers to match the API expected by offscreen/index.ts
+    return this.getConnectedPeers();
+  }
+
+  public getGroupPublicKey(): string | null {
+    return this.groupPublicKey;
+  }
+
+  public getSolanaAddress(): string | null {
+    return this.solanaAddress;
+  }
+
+  public getEthereumAddress(): string | null {
+    return this.ethereumAddress;
   }
 }

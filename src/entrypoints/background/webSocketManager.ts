@@ -19,6 +19,7 @@ import type {
     OffscreenMessage
 } from "../../types/messages";
 import { ServerMsg, WebSocketMessagePayload } from '../../types/websocket';
+import { match } from "ts-pattern";
 
 /**
  * Manages WebSocket connections and message handling for MPC coordination
@@ -65,7 +66,7 @@ export class WebSocketManager {
 
         } catch (error) {
             console.error("[WebSocketManager] Failed to initialize WebSocket:", error);
-            
+
             // Use StateManager to update and persist WebSocket status
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, error instanceof Error ? error.message : "Unknown error");
@@ -78,13 +79,6 @@ export class WebSocketManager {
                 error: error instanceof Error ? error.message : "Unknown error"
             } as any);
             this.broadcastToPopup({ type: "wsStatus", connected: false });
-
-            // Also broadcast updated state
-            const initErrorState: InitialStateMessage = {
-                type: "initialState",
-                ...this.appState
-            };
-            this.broadcastToPopup(initErrorState as any);
         }
     }
 
@@ -106,7 +100,7 @@ export class WebSocketManager {
         // Handle connection open
         this.wsClient.onOpen(() => {
             console.log("[WebSocketManager] WebSocket onOpen event triggered - connection established");
-            
+
             // Use StateManager to update and persist WebSocket status
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(true);
@@ -117,14 +111,6 @@ export class WebSocketManager {
             // Broadcast connection status immediately to any connected popups
             console.log("[WebSocketManager] Broadcasting wsConnected=true to popups");
             this.broadcastToPopup({ type: "wsStatus", connected: true });
-
-            // Also broadcast updated full state
-            const stateUpdate: InitialStateMessage = {
-                type: "initialState",
-                ...this.appState
-            };
-            console.log("[WebSocketManager] Broadcasting full state update:", stateUpdate);
-            this.broadcastToPopup(stateUpdate as any);
 
             // Register with server
             console.log("[WebSocketManager] Registering with server as peer:", this.appState.deviceId);
@@ -150,7 +136,7 @@ export class WebSocketManager {
         // Handle connection close
         this.wsClient.onClose((event) => {
             console.log("[WebSocketManager] WebSocket onClose event triggered, event:", event);
-            
+
             // Use StateManager to update and persist WebSocket status
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, `Connection closed: ${event.code} ${event.reason}`);
@@ -161,19 +147,12 @@ export class WebSocketManager {
             // Broadcast disconnection status
             console.log("[WebSocketManager] Broadcasting wsConnected=false to popups");
             this.broadcastToPopup({ type: "wsStatus", connected: false });
-
-            // Also broadcast updated state
-            const disconnectedState: InitialStateMessage = {
-                type: "initialState",
-                ...this.appState
-            };
-            this.broadcastToPopup(disconnectedState as any);
         });
 
         // Handle connection errors
         this.wsClient.onError((error) => {
             console.error("[WebSocketManager] WebSocket onError event triggered, error:", error);
-            
+
             // Use StateManager to update and persist WebSocket status
             if (this.stateManager) {
                 this.stateManager.updateWebSocketStatus(false, error.toString());
@@ -187,13 +166,6 @@ export class WebSocketManager {
                 error: error.toString()
             } as any);
             this.broadcastToPopup({ type: "wsStatus", connected: false });
-
-            // Also broadcast updated state
-            const errorState: InitialStateMessage = {
-                type: "initialState",
-                ...this.appState
-            };
-            this.broadcastToPopup(errorState as any);
         });
 
         // Set up the message handler
@@ -213,23 +185,21 @@ export class WebSocketManager {
         this.broadcastToPopup({ type: "wsMessage", message: serverMessage });
 
         // Handle specific message types with proper null checks
-        switch (serverMessage.type) {
-            case "devices": // Handle lowercase "devices" messages from server
+        match(serverMessage.type)
+            .with("devices", () => {
+                // Handle lowercase "devices" messages from server
                 this.handleDeviceListMessage(serverMessage as ServerMsg & { type: "devices" }, serverMessage.type);
-                break;
-
-            case "relay": // Handle lowercase "relay" messages from server
+            })
+            .with("relay", () => {
+                // Handle lowercase "relay" messages from server
                 this.handleRelayMessage(serverMessage as ServerMsg & { type: "relay" }, serverMessage.type);
-                break;
-
-            case "error":
+            })
+            .with("error", () => {
                 this.handleErrorMessage(serverMessage as ServerMsg & { type: "error" });
-                break;
-
-            default:
+            })
+            .otherwise(() => {
                 console.log("[WebSocketManager] Unhandled WebSocket message type:", (serverMessage as any).type);
-                break;
-        }
+            });
     }
 
     /**
@@ -238,29 +208,23 @@ export class WebSocketManager {
     private handleDeviceListMessage(msg: ServerMsg & { type: "devices" | "DEVICES" }, messageType: string): void {
         const deviceList = msg.devices || [];
         this.devices = deviceList;
-        
+
         // Exclude current peer from connected devices list
         const connectedDevices = deviceList.filter((deviceId: string) => deviceId !== this.appState.deviceId);
-        
+
         // Use StateManager to update and persist connected devices
         if (this.stateManager) {
             this.stateManager.updateConnectedDevices(deviceList);
         } else {
             this.appState.connecteddevices = connectedDevices;
         }
-        
+
         console.log(`[WebSocketManager] Updated peer list from server (${messageType}):`, deviceList);
         console.log(`[WebSocketManager] Connected devices (excluding self):`, connectedDevices);
 
-        // Broadcast peer list update (excluding self)
-        this.broadcastToPopup({ type: "deviceList", devices: connectedDevices });
-
-        // Also broadcast updated state
-        const deviceListState: InitialStateMessage = {
-            type: "initialState",
-            ...this.appState
-        };
-        this.broadcastToPopup(deviceListState as any);
+        // Broadcast device list update only (StateManager already broadcasts this)
+        // Removed redundant "initialState" broadcast that was causing UI state reset
+        console.log(`[WebSocketManager] Device list update handled via StateManager`);
     }
 
     /**
@@ -275,8 +239,8 @@ export class WebSocketManager {
             return;
         }
 
-        switch (data.websocket_msg_type) {
-            case "WebRTCSignal":
+        match(data.websocket_msg_type)
+            .with("WebRTCSignal", () => {
                 console.log("[WebSocketManager] WebRTC signal received:", data);
                 // Forward WebRTC signal to offscreen
                 const relayViaWs: OffscreenMessage = {
@@ -290,23 +254,31 @@ export class WebSocketManager {
                         console.warn("[WebSocketManager] Failed to relay WebRTC signal to offscreen:", result.error);
                     }
                 });
-                break;
-
-            case "SessionProposal":
+            })
+            .with("SessionProposal", () => {
                 console.log("[WebSocketManager] Session proposal received:", data);
+                console.log("[WebSocketManager] SessionProposal details:", {
+                    session_id: (data as any).session_id,
+                    from: msg.from,
+                    total: (data as any).total,
+                    threshold: (data as any).threshold,
+                    participants: (data as any).participants
+                });
                 // Handle session proposal
                 this.sessionManager.handleSessionProposal(msg.from, data);
-                break;
-
-            case "SessionResponse":
+            })
+            .with("SessionResponse", () => {
                 console.log("[WebSocketManager] Session response received:", data);
+                console.log("[WebSocketManager] SessionResponse details:", {
+                    session_id: (data as any).session_id,
+                    from: msg.from,
+                    accepted: (data as any).accepted
+                });
                 this.sessionManager.handleSessionResponse(msg.from, data);
-                break;
-
-            default:
+            })
+            .otherwise(() => {
                 console.warn("[WebSocketManager] Unknown relay message type:", (data as any).websocket_msg_type);
-                break;
-        }
+            });
     }
 
     /**

@@ -19,6 +19,7 @@ import type {
     InitialStateMessage,
     OffscreenToBackgroundMessage
 } from "../../types/messages";
+import { match } from "ts-pattern";
 
 /**
  * Manages central application state and popup communication
@@ -26,94 +27,27 @@ import type {
 export class StateManager {
     private appState: AppState;
     private popupPorts = new Set<chrome.runtime.Port>();
-    private static readonly STATE_STORAGE_KEY = 'mpc_wallet_background_state';
-    private isStateLoaded = false;
-    private pendingPopupPorts: chrome.runtime.Port[] = [];
 
     constructor(initialState?: Partial<AppState>) {
         this.appState = {
             ...INITIAL_APP_STATE,
             ...initialState
         };
-        // Load persisted state asynchronously
-        this.loadPersistedState();
     }
 
     /**
-     * Load persisted state asynchronously from Chrome storage
-     */
-    private async loadPersistedState(): Promise<void> {
-        try {
-            const result = await chrome.storage.local.get(StateManager.STATE_STORAGE_KEY);
-            if (result[StateManager.STATE_STORAGE_KEY]) {
-                const persistedState = result[StateManager.STATE_STORAGE_KEY];
-                console.log("[StateManager] Loading persisted state:", persistedState);
-                
-                // Merge persisted state with current state, preserving important runtime values
-                this.appState = {
-                    ...this.appState,
-                    ...persistedState,
-                    // Reset transient connection states that shouldn't persist
-                    wsConnected: false,
-                    meshStatus: { type: MeshStatusType.Incomplete },
-                    webrtcConnections: {},
-                };
-                console.log("[StateManager] State restored from persistence");
-            } else {
-                console.log("[StateManager] No persisted state found, using initial state");
-            }
-        } catch (error) {
-            console.warn("[StateManager] Failed to load persisted state:", error);
-        } finally {
-            // Mark state as loaded and process any pending popup connections
-            this.isStateLoaded = true;
-            this.processPendingPopupPorts();
-        }
-    }
-
-    /**
-     * Process any popup ports that connected before state was loaded
-     */
-    private processPendingPopupPorts(): void {
-        console.log(`[StateManager] Processing ${this.pendingPopupPorts.length} pending popup ports`);
-        this.pendingPopupPorts.forEach(port => {
-            this.addPopupPortInternal(port);
-        });
-        this.pendingPopupPorts = [];
-    }
-
-    /**
-     * Persist state to Chrome storage
-     */
-    private async persistState(): Promise<void> {
-        try {
-            // Only persist important state, not transient connection states
-            const stateToPersist = {
-                deviceId: this.appState.deviceId,
-                chain: this.appState.chain,
-                curve: this.appState.curve,
-                dkgAddress: this.appState.dkgAddress,
-                dkgState: this.appState.dkgState,
-                sessionInfo: this.appState.sessionInfo,
-                threshold: this.appState.threshold,
-                totalParticipants: this.appState.totalParticipants,
-                // Don't persist: wsConnected, meshStatus, webrtcConnections, connecteddevices
-            };
-
-            await chrome.storage.local.set({
-                [StateManager.STATE_STORAGE_KEY]: stateToPersist
-            });
-            console.log("[StateManager] State persisted to storage");
-        } catch (error) {
-            console.warn("[StateManager] Failed to persist state:", error);
-        }
-    }
-
-    /**
-     * Get current application state
+     * Get current application state (returns a copy for external use)
      */
     getState(): AppState {
         return { ...this.appState };
+    }
+
+    /**
+     * Get reference to application state (for internal components that need shared state)
+     * WARNING: Only use this for components that need to share state references!
+     */
+    getStateReference(): AppState {
+        return this.appState;
     }
 
     /**
@@ -125,8 +59,6 @@ export class StateManager {
             ...this.appState,
             ...updates
         };
-        // Persist state changes
-        this.persistState();
     }
 
     /**
@@ -135,37 +67,27 @@ export class StateManager {
     updateStateProperty<K extends keyof AppState>(key: K, value: AppState[K]): void {
         console.log(`[StateManager] Updating state property ${String(key)}:`, value);
         this.appState[key] = value;
-        // Persist state changes
-        this.persistState();
     }
 
     /**
-     * Update WebSocket connection status and persist it
+     * Update WebSocket connection status
      */
     updateWebSocketStatus(connected: boolean, error?: string): void {
         console.log(`[StateManager] Updating WebSocket status: connected=${connected}, error=${error || 'none'}`);
         this.appState.wsConnected = connected;
-        if (error) {
-            this.appState.wsError = error;
-        } else {
-            this.appState.wsError = "";
-        }
-        
+
         // Broadcast status update
         this.broadcastToPopupPorts({ type: "wsStatus", connected });
-        
-        // Persist the WebSocket status update
-        this.persistState();
     }
 
     /**
-     * Update connected devices list and persist it
+     * Update connected devices list
      */
     updateConnectedDevices(devices: string[]): void {
         console.log(`[StateManager] Updating connected devices:`, devices);
         // Exclude current device from connected devices list
         this.appState.connecteddevices = devices.filter(deviceId => deviceId !== this.appState.deviceId);
-        
+
         console.log(`[StateManager] Updated connected devices:`, this.appState.connecteddevices);
 
         // Broadcast device list update
@@ -173,32 +95,13 @@ export class StateManager {
             type: "deviceList",
             devices: this.appState.connecteddevices
         });
-
-        // Persist the devices update
-        this.persistState();
     }
 
     /**
      * Add a popup port connection
      */
     addPopupPort(port: chrome.runtime.Port): void {
-        console.log("[StateManager] Adding popup port, state loaded:", this.isStateLoaded);
-        
-        if (!this.isStateLoaded) {
-            // State not loaded yet, queue the port for later
-            console.log("[StateManager] State not loaded yet, queuing popup port");
-            this.pendingPopupPorts.push(port);
-            return;
-        }
-
-        this.addPopupPortInternal(port);
-    }
-
-    /**
-     * Internal method to add popup port once state is loaded
-     */
-    private addPopupPortInternal(port: chrome.runtime.Port): void {
-        console.log("[StateManager] Adding popup port (internal)");
+        console.log("[StateManager] Adding popup port");
         this.popupPorts.add(port);
 
         // Send current state to newly connected popup
@@ -211,8 +114,7 @@ export class StateManager {
             wsConnected: this.appState.wsConnected,
             connecteddevices: this.appState.connecteddevices?.length || 0,
             sessionInfo: !!this.appState.sessionInfo,
-            dkgState: this.appState.dkgState,
-            dkgAddress: this.appState.dkgAddress
+            dkgState: this.appState.dkgState
         });
         port.postMessage(initialStateMessage);
 
@@ -255,8 +157,8 @@ export class StateManager {
     handleOffscreenStateUpdate(payload: OffscreenToBackgroundMessage): void {
         console.log("[StateManager] Handling offscreen state update:", payload);
 
-        switch (payload.type) {
-            case "webrtcConnectionUpdate":
+        match(payload.type)
+            .with("webrtcConnectionUpdate", () => {
                 if ('deviceId' in payload && 'connected' in payload) {
                     console.log("[StateManager] Received WebRTC connection update:", {
                         deviceId: payload.deviceId,
@@ -279,9 +181,9 @@ export class StateManager {
                 } else {
                     console.warn("[StateManager] Invalid WebRTC connection update payload:", payload);
                 }
-                break;
-
-            case "meshStatusUpdate":
+                return true;
+            })
+            .with("meshStatusUpdate", () => {
                 console.log("[StateManager] Received mesh status update from offscreen:", payload);
                 this.appState.meshStatus = payload.status || { type: MeshStatusType.Incomplete };
 
@@ -290,26 +192,20 @@ export class StateManager {
                     type: "meshStatusUpdate",
                     status: this.appState.meshStatus
                 } as any);
-                break;
-
-            case "dkgStateUpdate":
+                return true;
+            })
+            .with("dkgStateUpdate", () => {
                 console.log("[StateManager] Received DKG state update from offscreen:", payload);
                 this.appState.dkgState = payload.state || DkgState.Idle;
-
-                // Auto-fetch DKG address when DKG completes (business logic moved from popup)
-                if (this.appState.dkgState === DkgState.Complete && this.appState.sessionInfo) {
-                    console.log("[StateManager] DKG completed, auto-fetching DKG address");
-                    this.fetchAndUpdateDkgAddress();
-                }
 
                 // Broadcast DKG state update directly to popup
                 this.broadcastToPopupPorts({
                     type: "dkgStateUpdate",
                     state: this.appState.dkgState
                 } as any);
-                break;
-
-            case "sessionUpdate":
+                return true;
+            })
+            .with("sessionUpdate", () => {
                 if ('sessionInfo' in payload && 'invites' in payload) {
                     console.log("[StateManager] Received session update from offscreen:", payload);
 
@@ -323,9 +219,9 @@ export class StateManager {
                         invites: this.appState.invites
                     } as any);
                 }
-                break;
-
-            case "webrtcStatusUpdate":
+                return true;
+            })
+            .with("webrtcStatusUpdate", () => {
                 if ('deviceId' in payload && 'status' in payload) {
                     console.log(`[StateManager] WebRTC status update for ${payload.deviceId}: ${payload.status}`);
                     // Forward to popup if needed
@@ -335,28 +231,28 @@ export class StateManager {
                         status: payload.status
                     } as any);
                 }
-                break;
-
-            case "peerConnectionStatusUpdate":
+                return true;
+            })
+            .with("peerConnectionStatusUpdate", () => {
                 if ('deviceId' in payload && 'connectionState' in payload) {
                     console.log(`[StateManager] Peer connection status update for ${payload.deviceId}: ${payload.connectionState}`);
                 }
-                break;
-
-            case "dataChannelStatusUpdate":
+                return true;
+            })
+            .with("dataChannelStatusUpdate", () => {
                 if ('deviceId' in payload && 'channelName' in payload && 'state' in payload) {
                     console.log(`[StateManager] Data channel ${payload.channelName} for ${payload.deviceId}: ${payload.state}`);
                 }
-                break;
-
-            default:
+                return true;
+            })
+            .otherwise(() => {
                 console.log("[StateManager] Forwarding unknown message to popup:", payload);
                 this.broadcastToPopupPorts({
                     type: "fromOffscreen",
                     payload
                 } as any);
-                break;
-        }
+                return true;
+            });
     }
 
     /**
@@ -400,13 +296,6 @@ export class StateManager {
     }
 
     /**
-     * Get popup ports count for debugging
-     */
-    getPopupPortsCount(): number {
-        return this.popupPorts.size;
-    }
-
-    /**
      * Set device ID
      */
     setDeviceId(deviceId: string): void {
@@ -415,20 +304,12 @@ export class StateManager {
     }
 
     /**
-     * Set blockchain selection (maintains blockchain field for backward compatibility)
+     * Set blockchain selection
      */
     setBlockchain(blockchain: "ethereum" | "solana"): void {
-        // Convert blockchain to curve for new state model
-        this.appState.curve = blockchain === "ethereum" ? "secp256k1" : "ed25519";
-        console.log("[StateManager] Set blockchain:", blockchain, "-> curve:", this.appState.curve);
-    }
-
-    /**
-     * Set curve selection
-     */
-    setCurve(curve: "ed25519" | "secp256k1"): void {
-        this.appState.curve = curve;
-        console.log("[StateManager] Set curve:", curve);
+        this.appState.blockchain = blockchain;
+        this.appState.chain = blockchain; // For compatibility
+        console.log("[StateManager] Set blockchain:", blockchain);
     }
 
     /**
@@ -442,66 +323,8 @@ export class StateManager {
     isWebSocketConnected(): boolean { return this.appState.wsConnected; }
     getMeshStatus() { return this.appState.meshStatus; }
     getDkgState() { return this.appState.dkgState; }
-    getCurve() { return this.appState.curve; }
     getBlockchain() {
-        // Convert curve back to blockchain for backward compatibility
-        return this.appState.curve === "secp256k1" ? "ethereum" : "solana";
+        return this.appState.blockchain || this.appState.chain || "ethereum";
     }
 
-    /**
-     * Auto-fetch DKG address when DKG completes (moved from popup)
-     * This handles the business logic that was previously in the popup reactive statement
-     */
-    private async fetchAndUpdateDkgAddress(): Promise<void> {
-        try {
-            const blockchain = this.getBlockchain();
-            const command = blockchain === "ethereum" ? "getEthereumAddress" : "getSolanaAddress";
-            
-            console.log("[StateManager] Auto-fetching DKG address for blockchain:", blockchain);
-            
-            // Send message to offscreen document to get DKG address
-            const response = await chrome.runtime.sendMessage({
-                type: command,
-                payload: {},
-            });
-
-            if (response && response.success) {
-                const addressKey = blockchain === "ethereum" ? "ethereumAddress" : "solanaAddress";
-                const dkgAddress = response.data[addressKey] || "";
-
-                if (dkgAddress) {
-                    console.log("[StateManager] Successfully fetched DKG address:", dkgAddress);
-                    
-                    // Update app state
-                    this.appState.dkgAddress = dkgAddress;
-                    this.appState.dkgError = "";
-                    
-                    // Broadcast DKG address update to popup
-                    this.broadcastToPopupPorts({
-                        type: "dkgAddressUpdate",
-                        address: dkgAddress,
-                        blockchain: blockchain
-                    } as any);
-                } else {
-                    const error = `No DKG ${blockchain} address available. Please complete DKG first.`;
-                    console.warn("[StateManager]", error);
-                    this.appState.dkgError = error;
-                    this.appState.dkgAddress = "";
-                }
-            } else {
-                const error = response?.error || `Failed to get DKG ${blockchain} address`;
-                console.error("[StateManager] DKG address fetch failed:", error);
-                this.appState.dkgError = error;
-                this.appState.dkgAddress = "";
-            }
-        } catch (error: any) {
-            const errorMessage = `Error fetching DKG address: ${error.message || error}`;
-            console.error("[StateManager]", errorMessage);
-            this.appState.dkgError = errorMessage;
-            this.appState.dkgAddress = "";
-        }
-
-        // Broadcast current state to ensure popup is updated
-        this.broadcastCurrentState();
-    }
 }

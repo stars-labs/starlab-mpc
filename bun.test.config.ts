@@ -11,7 +11,8 @@ export default {
       // Exclude Rust build artifacts
       'target/**',
       'target/**/*',
-      // Exclude test utilities  
+      // Exclude test files and test utilities  
+      'tests/**',
       '**/test-utils.ts',
       'src/**/test-utils.ts',
       'src/entrypoints/offscreen/test-utils.ts',

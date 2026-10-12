@@ -18,6 +18,7 @@ import type { DkgState } from "../../types/dkg";
 import type { MeshStatus, MeshStatusType } from "../../types/mesh";
 import type { WebRTCAppMessage } from "../../types/webrtc";
 import type { WebSocketMessagePayload } from '../../types/websocket';
+import { match } from "ts-pattern";
 
 // Import our modular components
 import { WebRTCConnectionManager } from './webrtcConnection';
@@ -69,6 +70,9 @@ export class WebRTCManager {
         };
         this.webrtcConnection.onDataChannelOpen = (peerId: string) => {
             this._log(`Data channel opened with ${peerId}`);
+        };
+        this.webrtcConnection.onSignalNeeded = (toPeerId: string, signal: any) => {
+            this._sendWebRTCSignal(toPeerId, signal);
         };
 
         // Initialize DKG manager
@@ -199,8 +203,8 @@ export class WebRTCManager {
         this._log(`Received WebSocketMessage from ${fromPeerId}: ${msg.websocket_msg_type}`);
         this._log(`Full message payload: ${JSON.stringify(msg)}`);
 
-        switch (msg.websocket_msg_type) {
-            case 'WebRTCSignal':
+        match(msg.websocket_msg_type)
+            .with('WebRTCSignal', () => {
                 this._log(`WebRTCSignal data: ${JSON.stringify(msg)}`);
 
                 // Accept WebRTC signals from any peer - no session requirement
@@ -228,13 +232,11 @@ export class WebRTCManager {
                 } else {
                     this._log(`WebRTCSignal from ${fromPeerId} missing data - full msg: ${JSON.stringify(msg)}`);
                 }
-                break;
-
-            default:
+            })
+            .otherwise(() => {
                 // Handle unknown message types with proper logging
                 this._log(`Unknown WebSocketMessage type from ${fromPeerId}: ${(msg as any).websocket_msg_type}. Full payload: ${JSON.stringify(msg)}`);
-                break;
-        }
+            });
     }
 
     // ===================================================================
@@ -357,7 +359,9 @@ export class WebRTCManager {
      */
     async cleanup(): Promise<void> {
         this._log("Cleaning up WebRTCManager");
-        this.webrtcConnection.cleanup();
+        await this.webrtcConnection.cleanup();
         await this.dkgManager.cleanup();
+        await this.signingManager.cleanup();
+        await this.meshManager.cleanup();
     }
 }

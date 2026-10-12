@@ -14,6 +14,7 @@ import type {
     OffscreenMessage
 } from "../../types/messages";
 import { AppState } from "../../types/appstate";
+import { match } from "ts-pattern";
 
 /**
  * Simplified offscreen document manager with enhanced logging
@@ -26,6 +27,10 @@ export class OffscreenManager {
     constructor(appState: AppState) {
         this.appState = appState;
         console.log("🖥️ [OffscreenManager] Initialized with simple create-and-wait strategy");
+        console.log("🖥️ [OffscreenManager] Constructor received appState:", appState);
+        console.log("🖥️ [OffscreenManager] Constructor appState.deviceId:", appState.deviceId);
+        console.log("🖥️ [OffscreenManager] Constructor appState reference type:", typeof appState);
+        console.log("🖥️ [OffscreenManager] Constructor appState keys:", Object.keys(appState));
     }
 
     /**
@@ -33,22 +38,21 @@ export class OffscreenManager {
      */
     private getMessageCategory(message: OffscreenMessage): string {
         const type = message.type;
-        switch (type) {
-            case 'init': return '🔧 Init';
-            case 'getState': return '📊 Get State';
-            case 'sendDirectMessage': return '📨 Direct Message';
-            case 'getWebRTCStatus': return '📡 WebRTC Status';
-            case 'relayViaWs': return '🔄 WS Relay';
-            case 'sessionAccepted': return '✅ Session Accepted';
-            case 'sessionAllAccepted': return '🎉 All Sessions Accepted';
-            case 'sessionResponseUpdate': return '🔄 Session Update';
-            case 'getEthereumAddress': return '💰 ETH Address';
-            case 'getSolanaAddress': return '🔮 SOL Address';
-            case 'getDkgStatus': return '🔐 DKG Status';
-            case 'getGroupPublicKey': return '🔑 Group Key';
-            case 'setBlockchain': return '⛓️ Set Blockchain';
-            default: return '📝 Message';
-        }
+        return match(type)
+            .with('init', () => '🔧 Init')
+            .with('getState', () => '📊 Get State')
+            .with('sendDirectMessage', () => '📨 Direct Message')
+            .with('getWebRTCStatus', () => '📡 WebRTC Status')
+            .with('relayViaWs', () => '🔄 WS Relay')
+            .with('sessionAccepted', () => '✅ Session Accepted')
+            .with('sessionAllAccepted', () => '🎉 All Sessions Accepted')
+            .with('sessionResponseUpdate', () => '🔄 Session Update')
+            .with('getEthereumAddress', () => '💰 ETH Address')
+            .with('getSolanaAddress', () => '🔮 SOL Address')
+            .with('getDkgStatus', () => '🔐 DKG Status')
+            .with('getGroupPublicKey', () => '🔑 Group Key')
+            .with('setBlockchain', () => '⛓️ Set Blockchain')
+            .otherwise(() => '📝 Message');
     }
 
     /**
@@ -151,12 +155,20 @@ export class OffscreenManager {
      */
     async handleInitRequest(): Promise<{ success: boolean; message?: string; error?: string }> {
         console.log("🔧 [OffscreenManager] Processing init request from offscreen");
+        
+        // Enhanced debugging for device ID state
+        console.log("🔍 [OffscreenManager] Current appState reference:", this.appState);
+        console.log("🔍 [OffscreenManager] AppState deviceId:", this.appState.deviceId);
+        console.log("🔍 [OffscreenManager] AppState type:", typeof this.appState);
+        console.log("🔍 [OffscreenManager] AppState keys:", Object.keys(this.appState));
 
         if (!this.appState.deviceId) {
             console.warn("⚠️ [OffscreenManager] Init request failed: no device ID");
+            console.warn("⚠️ [OffscreenManager] Complete state object:", JSON.stringify(this.appState, null, 2));
             return { success: false, error: "No device ID available" };
         }
 
+        console.log("✅ [OffscreenManager] Device ID found, proceeding with initialization");
         const result = await this.sendInitData(this.appState.deviceId);
         return result.success
             ? { success: true, message: "Init data sent" }

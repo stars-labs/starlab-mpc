@@ -84,6 +84,7 @@ export type BackgroundToOffscreenMessage = BaseMessage & (
     | { type: 'init'; deviceId: string; wsUrl: string }
     | { type: 'relayViaWs'; to: string; data: any }
     | { type: 'sessionAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: "ethereum" | "solana" }
+    | { type: 'sessionRestore'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: "ethereum" | "solana" } // ADDED: For session restoration without auto-acceptance
     | { type: 'sessionAllAccepted'; sessionInfo: SessionInfo; currentdeviceId: string; blockchain?: "ethereum" | "solana" }
     | { type: 'sessionResponseUpdate'; sessionInfo: SessionInfo; currentdeviceId: string }
     | { type: 'getEthereumAddress' }
