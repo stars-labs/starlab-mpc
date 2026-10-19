@@ -892,6 +892,17 @@ fn begin_new_dkg<C: frost_core::Ciphersuite>(
     state.ecdsa.reset_for_new_dkg();
 }
 
+/// `Some((joined, total))` while the active session still waits for
+/// participants. A DKG or reshare runs only with every participant: each
+/// round-1 package goes to the participants listed when the round starts.
+fn incomplete_cohort<C: frost_core::Ciphersuite>(
+    state: &crate::utils::appstate_compat::AppState<C>,
+) -> Option<(usize, usize)> {
+    let session = state.session.as_ref()?;
+    let (joined, total) = (session.participants.len(), session.total as usize);
+    (joined < total).then_some((joined, total))
+}
+
 /// Load an existing wallet's OLD share + metadata from the keystore and seed the
 /// reshare context on `AppState` (keys, ORIGINAL participant set, persist creds,
 /// `reshare_in_progress`). Shared by the reshare initiator (`StartReshare`) and
@@ -1652,6 +1663,24 @@ impl Command {
                     let mut state = app_state.lock().await;
                     state.dkg_state = crate::utils::state::DkgState::Idle;
                     return Ok(());
+                }
+                // Round 1 is addressed to the session's participants, so it must
+                // not start before the whole cohort has joined. The mesh-ready
+                // triggers count connections, not the cohort: a poll spawned for
+                // the previous ceremony (or a re-initiation over a partial roster)
+                // can fire while a reshare is still waiting for its last joiner,
+                // and the late joiner would never get our round-1 package. The
+                // cohort's own mesh-ready edge re-fires once everyone joined.
+                {
+                    let mut state = app_state.lock().await;
+                    if let Some((joined, total)) = incomplete_cohort(&state) {
+                        info!(
+                            "StartFrostProtocol: only {joined}/{total} participants joined — \
+                             waiting for the full cohort"
+                        );
+                        state.dkg_state = crate::utils::state::DkgState::Idle;
+                        return Ok(());
+                    }
                 }
 
                 // Reshare fork: the mesh-ready path is identical for DKG and
@@ -4455,5 +4484,65 @@ mod dkg_failure_retirement_tests {
         assert_eq!(app.session.as_ref().unwrap().session_id, "new");
         assert!(app.dkg_in_progress);
         assert!(messages.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod frost_start_cohort_tests {
+    use super::*;
+    use crate::protocal::signal::{SessionInfo, SessionType};
+    use crate::utils::{appstate_compat::AppState, state::DkgState};
+    use frost_ed25519::Ed25519Sha512;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    /// A reshare joiner (`cli`) whose session lists `participants`; the
+    /// wallet's cohort is {cli, creator, ext}.
+    async fn start_reshare(participants: &[&str]) -> AppState<Ed25519Sha512> {
+        let mut app = AppState::new();
+        app.device_id = "cli".into();
+        app.session = Some(SessionInfo {
+            session_id: "reshare_1".into(),
+            proposer_id: "creator".into(),
+            total: 3,
+            threshold: 2,
+            participants: participants.iter().map(|p| p.to_string()).collect(),
+            session_type: SessionType::Reshare {
+                wallet_name: "wallet".into(),
+                curve_type: "ed25519".into(),
+                group_public_key: "public".into(),
+            },
+            curve_type: "ed25519".into(),
+            coordination_type: "Network".into(),
+            signing_message_hex: None,
+        });
+        app.reshare_in_progress = true;
+        app.reshare_original_participants = vec!["cli".into(), "creator".into(), "ext".into()];
+        let state = Arc::new(Mutex::new(app));
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::StartFrostProtocol
+            .execute(tx, &state)
+            .await
+            .unwrap();
+        Arc::try_unwrap(state).ok().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    async fn reshare_waits_for_the_last_joiner() {
+        // A mesh-ready edge from the previous ceremony fires before `ext`
+        // joined: round 1 would never reach it.
+        let app = start_reshare(&["creator", "cli"]).await;
+        assert!(app.reshare_round1_secret.is_none());
+        assert!(matches!(app.dkg_state, DkgState::Idle));
+        assert!(
+            app.reshare_in_progress,
+            "the reshare stays armed for the real trigger"
+        );
+    }
+
+    #[tokio::test]
+    async fn reshare_starts_once_the_cohort_is_complete() {
+        let app = start_reshare(&["creator", "cli", "ext"]).await;
+        assert!(app.reshare_round1_secret.is_some());
     }
 }
