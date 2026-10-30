@@ -1,6 +1,6 @@
 # Finish the threshold-ECDSA implementation
 
-Goal: finish the five stages in IMPLEMENTATION_PLAN.md across starlab-mpc,
+Goal: finish the five stages of the threshold-ECDSA plan (now summarized in AGENTS.md) across starlab-mpc,
 starlab-desktop and starlab-wallet, using the existing feature work.
 
 Scope: integrate the engine/TUI/WASM branches; finish extension ECDSA DKG,

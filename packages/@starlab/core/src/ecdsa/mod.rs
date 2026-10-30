@@ -23,7 +23,7 @@
 //! execution id from [`execution_id`].
 //!
 //! Known limitation: cggmp24 has no key refresh, so an ECDSA key can't be
-//! reshared (see `IMPLEMENTATION_PLAN.md`).
+//! reshared (see the threshold-ECDSA section of `AGENTS.md`).
 
 pub mod driver;
 pub mod hd;
