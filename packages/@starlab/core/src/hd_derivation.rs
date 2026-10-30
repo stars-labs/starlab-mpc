@@ -168,7 +168,11 @@ impl fmt::Display for DerivationPath {
 /// Compute HMAC-SHA512 for child key derivation.
 ///
 /// Returns (scalar_seed_32_bytes, child_chaincode_32_bytes).
-fn hmac_derive(chaincode: &[u8; 32], pubkey_bytes: &[u8], index: u32) -> ([u8; 32], [u8; 32]) {
+pub(crate) fn hmac_derive(
+    chaincode: &[u8; 32],
+    pubkey_bytes: &[u8],
+    index: u32,
+) -> ([u8; 32], [u8; 32]) {
     let mut mac = HmacSha512::new_from_slice(chaincode).expect("HMAC accepts any key size");
     mac.update(pubkey_bytes);
     mac.update(&index.to_be_bytes());
@@ -186,7 +190,7 @@ fn hmac_derive(chaincode: &[u8; 32], pubkey_bytes: &[u8], index: u32) -> ([u8; 3
 ///
 /// If direct deserialization fails (e.g., value >= curve order for ed25519),
 /// iteratively hashes with a counter until a valid scalar is found.
-fn scalar_from_seed<C: Ciphersuite>(
+pub(crate) fn scalar_from_seed<C: Ciphersuite>(
     seed: &[u8; 32],
 ) -> Result<<<C::Group as frost_core::Group>::Field as frost_core::Field>::Scalar> {
     // Try direct deserialization
@@ -445,6 +449,22 @@ pub fn derive_child_verifying_key_path<C: AccountKeyFinalize>(
     group_verifying_key_bytes: &[u8],
     path: &DerivationPath,
 ) -> Result<Vec<u8>> {
+    C::finalize_verifying_key(derive_child_public_key_raw::<C>(
+        group_verifying_key_bytes,
+        path,
+    )?)
+}
+
+/// [`derive_child_verifying_key_path`] WITHOUT the per-curve account finalize
+/// (no BIP-86 tweak): the plain additive-offset child of the group key.
+///
+/// This is the derivation the threshold-ECDSA key uses (instantiated with the
+/// secp256k1 group, see [`crate::ecdsa::hd`]) — ECDSA accounts sign with the
+/// derived child itself, there is no Taproot output key.
+pub fn derive_child_public_key_raw<C: Ciphersuite>(
+    group_verifying_key_bytes: &[u8],
+    path: &DerivationPath,
+) -> Result<Vec<u8>> {
     use frost_core::Group;
 
     let deserialize = |bytes: &[u8]| -> Result<<C::Group as Group>::Element> {
@@ -470,7 +490,7 @@ pub fn derive_child_verifying_key_path<C: AccountKeyFinalize>(
         current = current + generator * offset;
         chain_code = ChainCode(child_cc);
     }
-    C::finalize_verifying_key(serialize(&current)?)
+    serialize(&current)
 }
 
 #[cfg(test)]

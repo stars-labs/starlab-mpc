@@ -15,7 +15,7 @@
 //! obtain handles by cloning from `AppState` after connection completes.
 
 use crate::elm::message::Message;
-use crate::protocal::signal::SessionInfo;
+use crate::protocal::signal::{SessionInfo, SessionType};
 use crate::utils::appstate_compat::AppState;
 use frost_core::{Ciphersuite, Field, Group};
 use futures_util::stream::{SplitSink, SplitStream};
@@ -39,6 +39,7 @@ pub(crate) struct ConnectParams {
     pub url: String,
     pub device_id: String,
     pub existing_session: Option<SessionInfo>,
+    pub retired_signing_session_id: Option<String>,
 }
 
 pub(crate) async fn read_connect_params<C>(app_state: &Arc<Mutex<AppState<C>>>) -> ConnectParams
@@ -54,7 +55,11 @@ where
     ConnectParams {
         url: state.signal_server_url.clone(),
         device_id: state.device_id.clone(),
-        existing_session: state.session.clone(),
+        retired_signing_session_id: state.retired_signing_session_id.clone(),
+        existing_session: state.session.clone().filter(|session| {
+            session.proposer_id == state.device_id
+                && state.retired_signing_session_id.as_deref() != Some(session.session_id.as_str())
+        }),
     }
 }
 
@@ -133,6 +138,22 @@ pub(crate) async fn send_request_active_sessions(sink: &mut WsSink) {
     }
 }
 
+/// Repeat a completed invite's withdrawal after reconnect in case its first
+/// leave was lost with the previous socket. Sent before requesting replay.
+pub(crate) async fn send_retired_session(sink: &mut WsSink, session_id: &str) {
+    let leave = starlab_signal_server::ClientMsg::LeaveSession {
+        session_id: session_id.to_string(),
+    };
+    match serde_json::to_string(&leave) {
+        Ok(json) => {
+            if let Err(e) = sink.send(WsMessage::text(json)).await {
+                error!("Failed to retire completed session after reconnect: {e}");
+            }
+        }
+        Err(e) => error!("Failed to serialize completed-session withdrawal: {e}"),
+    }
+}
+
 /// Re-broadcast our own session after a reconnect so peers that missed the
 /// initial `AnnounceSession` can still discover us. No-op for joiners (their
 /// session's `proposer_id` is someone else — server broadcasts already cover
@@ -142,7 +163,7 @@ pub(crate) async fn send_reannounce(
     session: &SessionInfo,
     tx: &mpsc::UnboundedSender<Message>,
 ) {
-    let session_info = serde_json::json!({
+    let mut session_info = serde_json::json!({
         "session_id": session.session_id,
         "total": session.total,
         "threshold": session.threshold,
@@ -152,6 +173,30 @@ pub(crate) async fn send_reannounce(
         "curve_type": session.curve_type,
         "coordination_type": session.coordination_type,
     });
+    match &session.session_type {
+        SessionType::DKG => {}
+        SessionType::Signing {
+            wallet_name,
+            blockchain,
+            group_public_key,
+            ..
+        } => {
+            session_info["session_type"] = serde_json::json!("signing");
+            session_info["wallet_name"] = serde_json::json!(wallet_name);
+            session_info["blockchain"] = serde_json::json!(blockchain);
+            session_info["group_public_key"] = serde_json::json!(group_public_key);
+            session_info["signing_message_hex"] = serde_json::json!(session.signing_message_hex);
+        }
+        SessionType::Reshare {
+            wallet_name,
+            group_public_key,
+            ..
+        } => {
+            session_info["session_type"] = serde_json::json!("reshare");
+            session_info["wallet_name"] = serde_json::json!(wallet_name);
+            session_info["group_public_key"] = serde_json::json!(group_public_key);
+        }
+    }
     let announce = starlab_signal_server::ClientMsg::AnnounceSession { session_info };
     let json = match serde_json::to_string(&announce) {
         Ok(j) => j,

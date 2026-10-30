@@ -98,3 +98,54 @@ async fn joiner_leaving_is_dropped_from_participants() {
         json!(["creator"])
     );
 }
+
+/// Completing an invite must stop restart replay without interrupting the
+/// transport used by slower signers, or the next ceremony on the same mesh.
+#[tokio::test]
+async fn completed_invite_is_not_replayed_and_peers_can_keep_relaying() {
+    let url = start_server().await;
+    let (mut creator, mut joiner) = announce_and_join(&url).await;
+    let mut outsider = client(&url, "outsider").await;
+    wait_for(&mut creator, |v| {
+        v["type"] == "devices"
+            && v["devices"]
+                .as_array()
+                .is_some_and(|ds| ds.iter().any(|d| d == "outsider"))
+    })
+    .await;
+    send(
+        &mut creator,
+        json!({"type": "leave_session", "session_id": "s1"}),
+    )
+    .await;
+    wait_for(&mut joiner, |v| v["type"] == "session_removed").await;
+    wait_for(&mut outsider, |v| v["type"] == "session_removed").await;
+    send(&mut joiner, json!({"type": "query_my_active_sessions"})).await;
+    let replay = wait_for(&mut joiner, |v| v["type"] == "sessions_for_device").await;
+    assert_eq!(replay["sessions"], json!([]));
+    // A late final-signature delivery to an outsider is still routable.
+    send(
+        &mut creator,
+        json!({"type": "relay", "to": "outsider", "data": {"final_signature": "verified"}}),
+    )
+    .await;
+    let delivered = wait_for(&mut outsider, |v| {
+        v["data"]["final_signature"] == "verified"
+    })
+    .await;
+    assert_eq!(delivered["from"], "creator");
+    send(
+        &mut creator,
+        json!({"type": "announce_session", "session_info": {
+            "session_id": "s2", "proposer_id": "creator", "participants": ["creator", "joiner"],
+            "total": 3, "threshold": 2, "session_type": "signing"
+        }}),
+    )
+    .await;
+    let next = wait_for(&mut joiner, |v| v["type"] == "session_available").await;
+    assert_eq!(next["session_info"]["session_id"], "s2");
+    send(&mut joiner, json!({"type": "query_my_active_sessions"})).await;
+    let replay = wait_for(&mut joiner, |v| v["type"] == "sessions_for_device").await;
+    assert_eq!(replay["sessions"].as_array().unwrap().len(), 1);
+    assert_eq!(replay["sessions"][0]["session_id"], "s2");
+}

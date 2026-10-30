@@ -44,6 +44,9 @@ pub struct ElmApp<C: frost_core::Ciphersuite> {
 
     /// Whether the app should quit
     should_quit: bool,
+
+    /// Last time the idle loop polled the safe-prime generator.
+    last_primes_poll: std::time::Instant,
 }
 
 impl<C: frost_core::Ciphersuite + Send + Sync + 'static> ElmApp<C>
@@ -90,6 +93,7 @@ where
             message_rx,
             app_state,
             should_quit: false,
+            last_primes_poll: std::time::Instant::now(),
         };
 
         // Mount initial components
@@ -121,8 +125,9 @@ where
         match self.model.current_screen {
             Screen::Welcome | Screen::MainMenu => {
                 // Create main menu with actual wallet count
-                let wallet_count = self.model.wallet_state.wallets.len();
+                let wallet_count = self.model.wallet_state.wallet_groups().len();
                 let mut main_menu = MainMenu::with_wallet_count(wallet_count);
+                main_menu.set_ecdsa_setup(self.model.wallet_state.ecdsa_setup);
 
                 // Set the selected index from the model
                 let selected = self.model.ui_state.selected_indices
@@ -142,7 +147,7 @@ where
             }
             Screen::ManageWallets => {
                 let mut wallet_list = WalletList::new();
-                wallet_list.set_wallets(self.model.wallet_state.wallets.clone());
+                wallet_list.set_wallets(self.model.wallet_state.wallet_groups());
                 // Re-apply the row selection from model state so
                 // ScrollUp/ScrollDown mutations (which update
                 // `selected_indices[WalletList]`) are reflected after
@@ -168,14 +173,12 @@ where
                 // Hand over every curve entry for this wallet id — the
                 // unified DKG stores the same id once per curve and the
                 // accounts table must cover both curves' chains.
-                let entries: Vec<_> = self
+                let entries = self
                     .model
                     .wallet_state
-                    .wallets
-                    .iter()
-                    .filter(|w| &w.session_id == wallet_id)
-                    .cloned()
-                    .collect();
+                    .wallet_group(wallet_id)
+                    .map(|g| g.entries().to_vec())
+                    .unwrap_or_default();
                 detail.set_wallet(wallet_id.clone(), entries);
                 detail.set_accounts_shown(self.model.ui_state.accounts_shown);
                 // remount, not mount: '+'/'-' trigger a component update
@@ -368,6 +371,10 @@ where
 
                 // Update WebSocket connection status
                 dkg_progress.set_websocket_connected(self.model.network_state.connected);
+                dkg_progress.set_ecdsa(
+                    self.model.wallet_state.ecdsa_dkg_phase,
+                    self.model.wallet_state.ecdsa_setup,
+                );
 
                 // Add participants from active session if available (excluding self)
                 if let Some(ref session) = self.model.active_session {
@@ -539,16 +546,24 @@ where
                 // running curve type. Either way we surface
                 // *something* — "no chain shown" was the visible
                 // half of this bug report.
+                // The account being signed for names the chain exactly
+                // (`{root}-{chain}-{n}`); the announce's `blockchain` is the
+                // joiner's fallback until it has unlocked.
                 let chain = self
                     .model
-                    .active_session
-                    .as_ref()
-                    .and_then(|s| match &s.session_type {
-                        crate::protocal::signal::SessionType::Signing {
-                            blockchain,
-                            ..
-                        } => Some(blockchain.clone()),
-                        _ => None,
+                    .wallet_state
+                    .signing_wallet_id
+                    .as_deref()
+                    .and_then(starlab_core::accounts::parse_child_wallet_id)
+                    .map(|(_, chain, _)| chain.to_string())
+                    .or_else(|| {
+                        self.model.active_session.as_ref().and_then(|s| match &s.session_type {
+                            crate::protocal::signal::SessionType::Signing {
+                                blockchain,
+                                ..
+                            } => Some(blockchain.clone()),
+                            _ => None,
+                        })
                     })
                     .or_else(|| {
                         let c = self.model.wallet_state.curve_type;
@@ -625,10 +640,12 @@ where
             }
             _ => {
                 // Default to main menu for unimplemented screens
-                let wallet_count = self.model.wallet_state.wallets.len();
+                let wallet_count = self.model.wallet_state.wallet_groups().len();
+                let mut main_menu = MainMenu::with_wallet_count(wallet_count);
+                main_menu.set_ecdsa_setup(self.model.wallet_state.ecdsa_setup);
                 self.app.mount(
                     Id::MainMenu,
-                    Box::new(MainMenu::with_wallet_count(wallet_count)),
+                    Box::new(main_menu),
                     vec![]
                 )?;
                 self.app.active(&Id::MainMenu)?;
@@ -695,6 +712,10 @@ where
                 // The main menu's items and Manage Wallets' rows come from
                 // the wallet list (e.g. a wallet just imported).
                 | Message::WalletsLoaded { .. }
+                // ECDSA setup line (main menu) and the DKG screen's
+                // Ethereum-key status.
+                | Message::EcdsaSetupStatus { .. }
+                | Message::EcdsaDkgProgress { .. }
                 // WalletDetail's accounts table derives from
                 // `ui_state.accounts_shown`, read at mount time.
                 | Message::AccountsShowMore
@@ -850,6 +871,7 @@ where
                     if self.model.ui_state.prune_expired(std::time::Instant::now()) {
                         self.render()?;
                     }
+                    self.poll_prime_status().await;
                     // Check for crossterm events with a proper timeout
                     if crossterm::event::poll(Duration::from_millis(10))? {
                         match crossterm::event::read() {
@@ -876,6 +898,42 @@ where
         }
 
         Ok(())
+    }
+
+    /// Once a second, pick up the safe-prime generator's state ("ECDSA
+    /// setup"). The elapsed time only matters on the screens that show it
+    /// (main menu, DKG progress); elsewhere only a change of state (e.g.
+    /// preparing → ready) is sent, so the loop doesn't remount every second.
+    async fn poll_prime_status(&mut self) {
+        use crate::protocal::ecdsa::PrimeStatus;
+        if self.last_primes_poll.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.last_primes_poll = std::time::Instant::now();
+        let Ok(state) = self.app_state.try_lock() else {
+            return; // busy — next second
+        };
+        let status = state.ecdsa.primes.status();
+        drop(state);
+        let current = self.model.wallet_state.ecdsa_setup;
+        if status == current {
+            return;
+        }
+        let shown = matches!(
+            self.model.current_screen,
+            Screen::MainMenu | Screen::Welcome | Screen::DKGProgress { .. }
+        );
+        let same_kind = matches!(
+            (status, current),
+            (PrimeStatus::Generating { .. }, PrimeStatus::Generating { .. })
+        );
+        if shown || !same_kind {
+            self.process_message(Message::EcdsaSetupStatus { status })
+                .await;
+            if let Err(e) = self.render() {
+                error!("Failed to render after ECDSA status update: {}", e);
+            }
+        }
     }
 
     /// Handle terminal events
@@ -1134,10 +1192,9 @@ where
                     return self
                         .model
                         .wallet_state
-                        .wallets
-                        .get(selected)
+                        .wallet_group_at(selected)
                         .map(|w| Message::ExportWallet {
-                            wallet_id: w.session_id.clone(),
+                            wallet_id: w.id().to_string(),
                         });
                 }
                 KeyCode::Char('i') => return Some(Message::ImportWallet),

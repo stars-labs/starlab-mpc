@@ -14,7 +14,11 @@
 //! `#[ignore]` by default (spawns processes + real WebRTC over loopback):
 //!   cargo test -p starlab-cli --test l3_serve_process -- --ignored --nocapture
 
+mod support;
+
 use std::process::Stdio;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -22,6 +26,21 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpListener;
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::time::{Instant, timeout};
+
+/// `--insecure-test-primes` files (fixture primes; written once per test
+/// binary). Consecutive spawns rotate through the sets, so the two nodes of
+/// a DKG get different primes.
+fn next_primes_file() -> String {
+    static FILES: OnceLock<(tempfile::TempDir, Vec<std::path::PathBuf>)> = OnceLock::new();
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let (_, files) = FILES.get_or_init(|| {
+        let dir = tempfile::TempDir::new().expect("primes dir");
+        let files = support::write_test_primes_files(dir.path());
+        (dir, files)
+    });
+    let i = NEXT.fetch_add(1, Ordering::Relaxed) % files.len();
+    files[i].to_string_lossy().into_owned()
+}
 
 /// A running `serve` child with line-buffered JSONL I/O.
 struct ServeProc {
@@ -46,6 +65,7 @@ impl ServeProc {
             .args(["--device-id", device_id])
             .args(["--keystore", keystore])
             .args(["--signal-server", ws_url])
+            .args(["--insecure-test-primes", &next_primes_file()])
             .args(extra)
             .args([
                 "--log-level",
@@ -163,9 +183,13 @@ async fn spawn_connected(
 }
 
 /// Run a 2-of-2 DKG between two connected processes (a = creator, b = joiner).
-/// Returns the creator's reported (wallet_id, group_public_key). Also asserts
-/// the creator's `session_announced` id matches the joiner's discovered id.
-async fn dkg_2of2(a: &mut ServeProc, b: &mut ServeProc) -> anyhow::Result<(String, String)> {
+/// Returns the creator's reported (wallet_id, group_public_key, account-0
+/// Ethereum address). Also asserts the creator's `session_announced` id
+/// matches the joiner's discovered id.
+async fn dkg_2of2(
+    a: &mut ServeProc,
+    b: &mut ServeProc,
+) -> anyhow::Result<(String, String, String)> {
     a.send(
         json!({"id": 1, "cmd": "create_wallet", "threshold": 2, "total": 2, "password": "pw-a"}),
     )
@@ -180,45 +204,51 @@ async fn dkg_2of2(a: &mut ServeProc, b: &mut ServeProc) -> anyhow::Result<(Strin
     );
     b.send(json!({"id": 2, "cmd": "join_session", "session_id": id_b, "password": "pw-b"}))
         .await?;
-    let done_a = a.wait_for("dkg_complete", 90).await?;
-    let _done_b = b.wait_for("dkg_complete", 90).await?;
+    let done_a = a.wait_for("dkg_complete", 180).await?;
+    let done_b = b.wait_for("dkg_complete", 180).await?;
+    anyhow::ensure!(
+        done_a["address"] == done_b["address"],
+        "nodes disagree on the Ethereum address: {done_a} vs {done_b}"
+    );
     Ok((
         done_a["wallet_id"].as_str().unwrap().to_string(),
         done_a["group_public_key"].as_str().unwrap().to_string(),
+        done_a["address"].as_str().unwrap().to_string(),
     ))
 }
 
-/// Verify a FROST(secp256k1) signature made with a root wallet id. Signing
-/// never uses the root key: a root id signs as account 0 (`…-ethereum-0`), so
-/// verify against that child, derived publicly from the root group key.
-/// Inputs are hex (the `signature_complete` event 0x-prefixes both; group key
-/// is bare).
-fn verify_secp256k1(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
-    use frost_secp256k1_tr::{Signature, VerifyingKey};
+/// Verify a signature made with a root wallet id: a root id signs as account
+/// 0 of its primary chain — Ethereum, threshold ECDSA — so the 65-byte
+/// `r ‖ s ‖ v` signature must `ecrecover` to the account's address. Inputs
+/// are hex (the `signature_complete` event 0x-prefixes both).
+fn verify_ethereum(address: &str, msg_hex: &str, sig_hex: &str) -> bool {
     let strip = |s: &str| s.trim_start_matches("0x").to_string();
-    let (Ok(group), Ok(msg), Ok(sigb)) = (
+    let (Ok(msg), Ok(sig)) = (hex::decode(strip(msg_hex)), hex::decode(strip(sig_hex))) else {
+        return false;
+    };
+    address.starts_with("0x")
+        && starlab_core::accounts::recover_ethereum_address(&msg, &sig).is_ok_and(|a| a == address)
+}
+
+/// Verify a BIP-340 signature of the Bitcoin account 0 against its P2TR
+/// address (derived publicly from the FROST secp256k1 group key).
+fn verify_bitcoin(group_hex: &str, msg_hex: &str, sig_hex: &str) -> bool {
+    let strip = |s: &str| s.trim_start_matches("0x").to_string();
+    let (Ok(group), Ok(msg), Ok(sig)) = (
         hex::decode(strip(group_hex)),
         hex::decode(strip(msg_hex)),
         hex::decode(strip(sig_hex)),
     ) else {
         return false;
     };
-    let path = starlab_core::DerivationPath::parse(
-        &starlab_core::accounts::standard_path("ethereum", 0).expect("ethereum path"),
-    )
-    .expect("valid path");
-    let Ok(vkb) = starlab_core::derive_child_verifying_key_path::<
-        frost_secp256k1_tr::Secp256K1Sha256TR,
-    >(&group, &path) else {
+    let Some(address) = starlab_core::accounts::account_addresses("secp256k1", &group, 0)
+        .ok()
+        .and_then(|a| a.into_iter().find(|(c, _, _)| c == "Bitcoin"))
+        .map(|(_, _, a)| a)
+    else {
         return false;
     };
-    match (
-        VerifyingKey::deserialize(&vkb),
-        Signature::deserialize(&sigb),
-    ) {
-        (Ok(vk), Ok(sig)) => vk.verify(&msg, &sig).is_ok(),
-        _ => false,
-    }
+    starlab_core::accounts::verify_taproot_signature(&address, &msg, &sig).unwrap_or(false)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
@@ -240,7 +270,7 @@ async fn dkg_2_of_2_across_serve_processes() {
         .await
         .expect("b connected");
 
-    let (_wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+    let (_wallet_id, group_key, _eth) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
     assert!(!group_key.is_empty(), "empty group key");
     eprintln!("✅ 2-of-2 DKG across serve processes; group={group_key}");
 
@@ -268,8 +298,8 @@ async fn second_dkg_in_the_same_serve_processes_creates_a_new_wallet() {
         .await
         .expect("b connected");
 
-    let (wallet_1, group_1) = dkg_2of2(&mut a, &mut b).await.expect("first dkg");
-    let (wallet_2, group_2) = dkg_2of2(&mut a, &mut b).await.expect("second dkg");
+    let (wallet_1, group_1, _) = dkg_2of2(&mut a, &mut b).await.expect("first dkg");
+    let (wallet_2, group_2, _) = dkg_2of2(&mut a, &mut b).await.expect("second dkg");
     assert_ne!(wallet_1, wallet_2, "second DKG reused the first session");
     assert_ne!(group_1, group_2, "second DKG reused the first key");
 
@@ -315,7 +345,7 @@ async fn auto_approve_co_signer_signs_without_manual_approval() {
     b.wait_connected(15).await.expect("b connected");
 
     // DKG (b joins manually — auto-approve only governs SIGNING).
-    let (wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+    let (wallet_id, group_key, eth_address) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
     assert!(!group_key.is_empty());
 
     // a initiates signing. b should auto-approve with NO manual command.
@@ -332,8 +362,8 @@ async fn auto_approve_co_signer_signs_without_manual_approval() {
         .await
         .expect("signature_complete");
     assert!(
-        verify_secp256k1(
-            &group_key,
+        verify_ethereum(
+            &eth_address,
             sc["message_hash"].as_str().unwrap(),
             sc["signature"].as_str().unwrap()
         ),
@@ -378,7 +408,7 @@ async fn consecutive_signings_get_fresh_session_ids_and_both_verify() {
     b.send(json!({"cmd": "connect"})).await.unwrap();
     b.wait_connected(15).await.expect("b connected");
 
-    let (wallet_id, group_key) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
+    let (wallet_id, _group_key, eth_address) = dkg_2of2(&mut a, &mut b).await.expect("dkg");
 
     let mut session_ids = Vec::new();
     for (id, message) in [(10, "first"), (11, "second")] {
@@ -398,8 +428,8 @@ async fn consecutive_signings_get_fresh_session_ids_and_both_verify() {
             .await
             .unwrap_or_else(|e| panic!("{message}: no signature: {e}"));
         assert!(
-            verify_secp256k1(
-                &group_key,
+            verify_ethereum(
+                &eth_address,
                 sc["message_hash"].as_str().unwrap(),
                 sc["signature"].as_str().unwrap()
             ),
@@ -518,7 +548,7 @@ async fn sign_after_process_restart_verifies() {
     let pb = ks_b.path().to_string_lossy().to_string();
 
     // --- Phase 1: DKG, then kill both processes. ---
-    let (wallet_id, group_key) = {
+    let (wallet_id, group_key, eth_address) = {
         let mut a = spawn_connected("restart-a", &pa, &ws_url).await.expect("a");
         let mut b = spawn_connected("restart-b", &pb, &ws_url).await.expect("b");
         let r = dkg_2of2(&mut a, &mut b).await.expect("dkg");
@@ -564,7 +594,7 @@ async fn sign_after_process_restart_verifies() {
     let sig = sc["signature"].as_str().unwrap();
     let msg = sc["message_hash"].as_str().unwrap();
     assert!(
-        verify_secp256k1(&group_key, msg, sig),
+        verify_ethereum(&eth_address, msg, sig),
         "post-restart signature failed to verify: sig={sig} msg={msg} group={group_key}"
     );
     eprintln!("✅ LIFE-2: signed after real process restart; signature verified");
@@ -597,7 +627,7 @@ async fn reshare_then_sign_across_serve_processes() {
     let pb = ks_b.path().to_string_lossy().to_string();
 
     // --- Phase 1: DKG, then kill both processes (shares persist to disk). ---
-    let (wallet_id, group_key) = {
+    let (wallet_id, group_key, _eth_address) = {
         let mut a = spawn_connected("reshare-a", &pa, &ws_url).await.expect("a");
         let mut b = spawn_connected("reshare-b", &pb, &ws_url).await.expect("b");
         let r = dkg_2of2(&mut a, &mut b).await.expect("dkg");
@@ -648,10 +678,12 @@ async fn reshare_then_sign_across_serve_processes() {
         "group key changed across reshare"
     );
 
-    // --- Phase 3: sign with the REFRESHED shares; must verify. ---
+    // --- Phase 3: sign with the REFRESHED shares; must verify. The reshare
+    // refreshes the FROST keys, so sign with the Bitcoin (BIP-340) account;
+    // Ethereum is the ECDSA key, which a reshare doesn't touch. ---
     a.send(json!({
-        "id": 30, "cmd": "sign", "wallet_id": wallet_id,
-        "message": "signed after a networked reshare", "encoding": "utf8", "password": "pw-a"
+        "id": 30, "cmd": "sign", "wallet_id": format!("{wallet_id}-bitcoin-0"),
+        "message": "5c".repeat(32), "encoding": "hex", "password": "pw-a"
     }))
     .await
     .unwrap();
@@ -670,7 +702,7 @@ async fn reshare_then_sign_across_serve_processes() {
     let sig = sc["signature"].as_str().unwrap();
     let msg = sc["message_hash"].as_str().unwrap();
     assert!(
-        verify_secp256k1(&group_key, msg, sig),
+        verify_bitcoin(&group_key, msg, sig),
         "post-reshare signature failed to verify: sig={sig} msg={msg} group={group_key}"
     );
     eprintln!("✅ RESHARE-L3: reshared across processes, group preserved, refreshed shares signed");

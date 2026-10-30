@@ -144,6 +144,13 @@ where
             }
         }
 
+        // A secp256k1 wallet gets a threshold-ECDSA (Ethereum) key, whose
+        // DKG needs Paillier safe primes: start generating them now so they
+        // are ready long before a DKG (~1.5 min, off the async runtime).
+        if <C as crate::utils::curve_traits::CurveIdentifier>::curve_type() == "secp256k1" {
+            self.app_state.lock().await.ecdsa.primes.start();
+        }
+
         // Load any existing wallets into the model immediately.
         let _ = self.tx.send(Message::ListWallets);
 
@@ -192,13 +199,35 @@ pub fn spawn_secp256k1<F>(
 where
     F: Fn(&Model, Option<&Message>) + Send + 'static,
 {
+    spawn_secp256k1_with_primes(
+        device_id,
+        keystore_path,
+        signal_server_url,
+        on_sync,
+        crate::protocal::ecdsa::PrimeSupply::background(),
+    )
+}
+
+/// [`spawn_secp256k1`] with an explicit source of ECDSA safe primes — the
+/// hook tests use to inject precomputed primes
+/// ([`PrimeSupply::insecure_test_fixed`](crate::protocal::ecdsa::PrimeSupply::insecure_test_fixed)).
+pub fn spawn_secp256k1_with_primes<F>(
+    device_id: String,
+    keystore_path: String,
+    signal_server_url: String,
+    on_sync: F,
+    primes: crate::protocal::ecdsa::PrimeSupply,
+) -> UnboundedSender<Message>
+where
+    F: Fn(&Model, Option<&Message>) + Send + 'static,
+{
     use frost_secp256k1_tr::Secp256K1Sha256TR;
-    let app_state = Arc::new(Mutex::new(
-        AppState::<Secp256K1Sha256TR>::with_device_id_and_server(
-            device_id.clone(),
-            signal_server_url,
-        ),
-    ));
+    let mut state = AppState::<Secp256K1Sha256TR>::with_device_id_and_server(
+        device_id.clone(),
+        signal_server_url,
+    );
+    state.ecdsa.primes = primes;
+    let app_state = Arc::new(Mutex::new(state));
     let runner = HeadlessRunner::<Secp256K1Sha256TR>::new(
         device_id,
         keystore_path,

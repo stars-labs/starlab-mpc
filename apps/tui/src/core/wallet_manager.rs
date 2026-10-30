@@ -173,16 +173,35 @@ impl WalletManager {
             return Ok(());
         }
 
+        if *self.state.dkg_active.lock().await
+            || !matches!(
+                *self.state.signing_state.lock().await,
+                super::SigningState::Idle
+                    | super::SigningState::Complete
+                    | super::SigningState::Failed(_)
+            )
+        {
+            return Err(CoreError::Wallet(
+                "Finish or cancel the active ceremony before deleting a wallet".into(),
+            ));
+        }
+
         // Remove wallet
         let mut wallets = self.state.wallets.lock().await;
         if wallet_index >= wallets.len() {
             return Err(CoreError::Wallet("Invalid wallet index".to_string()));
         }
 
+        self.open_keystore()?
+            .delete_wallet(&wallets[wallet_index].id)
+            .map_err(|e| CoreError::Wallet(format!("cannot delete wallet: {e}")))?;
         wallets.remove(wallet_index);
 
         // Update active index if needed
         let mut active_index = self.state.active_wallet_index.lock().await;
+        if wallet_index < *active_index {
+            *active_index -= 1;
+        }
         if *active_index >= wallets.len() && !wallets.is_empty() {
             *active_index = wallets.len() - 1;
         } else if wallets.is_empty() {

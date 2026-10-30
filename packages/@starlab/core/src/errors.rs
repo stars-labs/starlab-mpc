@@ -26,6 +26,9 @@ pub enum FrostError {
     #[error("Derivation error: {0}")]
     DerivationError(String),
 
+    #[error("ECDSA error: {0}")]
+    EcdsaError(String),
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }

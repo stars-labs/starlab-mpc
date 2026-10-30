@@ -1,0 +1,59 @@
+{
+  "walletId": "eb1fb71c-3154-4fc0-b375-5cb84fc98d0e",
+  "cohort": [
+    "desktop",
+    "ext-93c2c516",
+    "stage5-tui"
+  ],
+  "threshold": 2,
+  "fixture": false,
+  "realPrimeWallet": true,
+  "signingSession": "sign_612e3fdeb560783cb2773139",
+  "signers": [
+    "ext-93c2c516",
+    "desktop"
+  ],
+  "tuiApproved": false,
+  "transaction": {
+    "hash": "0xe83cfdfba02c82fb067e7bdc195b8f729abe32ffaa247be9a2950805d1e4ff54",
+    "chainId": 11155111,
+    "network": "Sepolia",
+    "type": "eip1559",
+    "from": "0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548",
+    "to": "0x2fb6ae33558e46ec6baa39c9c98cd00f4b0f7548",
+    "valueWei": "10000000000000",
+    "nonce": 1,
+    "status": "0x1",
+    "blockNumber": 11841485,
+    "blockHash": "0xad9af3fdf3eb822a836dc09105c6ca405330da9b157eb9a83eba83b35b5b62ce",
+    "gasUsed": 21000,
+    "rawTransaction": "0x02f87283aa36a701830f4240844453ab21826270942fb6ae33558e46ec6baa39c9c98cd00f4b0f75488609184e72a00080c001a01cf4229b2795634622c432555e896737203e65e86f9942085b8d4cf028697673a07a5d11d225969e6a64a86d83ee5afc9a41e3c68ca7658617e1d0eaac623a5b56"
+  },
+  "signature": {
+    "digest": "0x28ba905868260bc34ebf40ad47362e9d7fb653cc3182c123931928796c9892f6",
+    "recovered": "0x2fb6AE33558E46EC6bAA39c9C98cd00f4b0F7548",
+    "rawTransactionHashMatches": true,
+    "desktopApprovalDigestMatches": true
+  },
+  "validation": {
+    "rpc": "https://ethereum-sepolia-rpc.publicnode.com",
+    "explorer": "https://eth-sepolia.blockscout.com/api/v2/transactions/0xe83cfdfba02c82fb067e7bdc195b8f729abe32ffaa247be9a2950805d1e4ff54",
+    "explorerAgreement": true,
+    "tuiPromptBeforeWithdrawal": true,
+    "tuiPromptAfterWithdrawal": false,
+    "noManualTuiDismissal": true,
+    "extensionActivity": "confirmed",
+    "fiatUnavailableRenderedAsDash": true,
+    "signatureBadge": "Ethereum · threshold ECDSA"
+  },
+  "sources": {
+    "engine": "fab8e16634ce4c03d71b00ff9f92bcb058ecc9d4",
+    "extensionPresentation": "e18da4c",
+    "extensionHead": "1954ed34f946c6f8350e69d66bb0402bc69c457c",
+    "desktop": "ae34bc6",
+    "desktopReleaseSha256": "d668b407ab273db91426a8c2f12b1cd2f4f6bc4122f5c3b9ef4d045a3e672d7d",
+    "tuiReleaseSha256": "f55a9504ae3d764f83f914446afeac6b1a00fe15d43df75345a2777c4331b268",
+    "wasmSha256": "7dd20b0da9c6a09236b53fd7441d84c82c18566a510a98b8f2101cff19b3d389"
+  },
+  "verifiedAt": "2026-10-04T10:04:47.962Z"
+}

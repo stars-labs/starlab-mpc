@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod curve_registry;
+pub mod ecdsa;
 pub mod ed25519;
 pub mod errors;
 pub mod hd_derivation;

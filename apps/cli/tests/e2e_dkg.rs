@@ -5,6 +5,8 @@
 //! `#[ignore]` by default (real UDP/ICE on loopback, ~seconds). Run with:
 //!   cargo test -p starlab-cli --test e2e_dkg -- --ignored --nocapture
 
+mod support;
+
 use starlab_cli::simulate::{
     SimulateOpts, run_signing_simulation, run_signing_simulation_all_signers_online,
     run_signing_timeout_then_retry_simulation, run_simulation,
@@ -31,6 +33,7 @@ async fn dkg_2_of_2_completes_and_persists() {
         curve: "secp256k1".into(),
         signal_url: None,
         timeout_secs: 90,
+        insecure_test_primes: support::test_primes(),
     })
     .await
     .expect("simulation ran");
@@ -58,6 +61,7 @@ async fn dkg_2_of_3_completes() {
         curve: "secp256k1".into(),
         signal_url: None,
         timeout_secs: 120,
+        insecure_test_primes: support::test_primes(),
     })
     .await
     .expect("simulation ran");
@@ -81,6 +85,7 @@ async fn dkg_then_sign_2_of_2_verifies() {
             curve: "secp256k1".into(),
             signal_url: None,
             timeout_secs: 120,
+            insecure_test_primes: support::test_primes(),
         },
         "hello from the e2e signing test",
     )
@@ -121,7 +126,7 @@ async fn dkg_then_sign_2_of_2_verifies() {
 /// `l3_serve_process` don't exercise 3-online signing either.
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 #[ignore = "real WebRTC/DKG+signing over loopback; run with --ignored"]
-async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
+async fn frost_sign_2_of_3_all_three_online_agree_on_one_signature() {
     init_logs();
     let result = run_signing_simulation_all_signers_online(
         SimulateOpts {
@@ -130,8 +135,11 @@ async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
             curve: "secp256k1".into(),
             signal_url: None,
             timeout_secs: 120,
+            insecure_test_primes: support::test_primes(),
         },
-        "ext + 2 CLI, all 3 online, 2-of-3",
+        // Bitcoin account: the FROST BIP-340 signer set (#121).
+        &"5b".repeat(32),
+        true,
     )
     .await
     .expect("all-signers-online signing simulation ran");
@@ -162,7 +170,7 @@ async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
 /// never responds (down, or never approves the request) must not wedge the
 /// ceremony forever — node 0 announces, nobody joins, so it never gathers
 /// `threshold`-many commitments and must fail cleanly on its own once the
-/// (shortened, via `STARLAB_SIGNING_TIMEOUT_MS`) timeout elapses. A retry —
+/// shortened per-node timeout elapses. A retry —
 /// a fresh ceremony with a real co-signer — must then succeed and verify,
 /// proving the timeout wiped the ceremony state cleanly enough to start
 /// over (automatic re-picking of a different signer INSIDE the same
@@ -172,28 +180,17 @@ async fn dkg_then_sign_2_of_3_all_three_online_agree_on_one_signature() {
 async fn signing_times_out_when_nobody_joins_then_retry_succeeds() {
     init_logs();
 
-    // Restores the env var on drop (even on panic) so this test's shortened
-    // timeout can't leak into a later test sharing the process — tests run
-    // with `--test-threads=1`, but still inside the same binary.
-    struct EnvGuard;
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: `--test-threads=1` serializes test bodies in this
-            // binary, so no other test reads/writes this var concurrently.
-            unsafe { std::env::remove_var("STARLAB_SIGNING_TIMEOUT_MS") };
-        }
-    }
-    // SAFETY: see `EnvGuard::drop` above.
-    unsafe { std::env::set_var("STARLAB_SIGNING_TIMEOUT_MS", "3000") };
-    let _env_guard = EnvGuard;
-
     let result = run_signing_timeout_then_retry_simulation(
         SimulateOpts {
             nodes: 3,
             threshold: 2,
-            curve: "secp256k1".into(),
+            // This regression exercises FROST nonce/state cleanup.
+            // The secp256k1 simulator also provisions ECDSA and selects
+            // Ethereum; its Paillier worker cannot use this 3s FROST budget.
+            curve: "ed25519".into(),
             signal_url: None,
             timeout_secs: 60,
+            insecure_test_primes: support::test_primes(),
         },
         "picked signer never responds; ceremony must time out, then retry",
     )
@@ -233,6 +230,7 @@ async fn bitcoin_account_signs_a_sighash_valid_for_its_p2tr_address() {
             curve: "secp256k1".into(),
             signal_url: None,
             timeout_secs: 120,
+            insecure_test_primes: support::test_primes(),
         },
         &sighash,
     )
@@ -266,6 +264,7 @@ async fn reshare_then_sign_2_of_3(runners: starlab_cli::simulate::ReshareRunners
             curve: "secp256k1".into(),
             signal_url: None,
             timeout_secs: 120,
+            insecure_test_primes: support::test_primes(),
         },
         "reshared then signed",
         runners,
@@ -302,4 +301,89 @@ async fn reshare_on_the_nodes_that_ran_the_dkg() {
     // A long-lived `serve` node reshares after its own DKG: the finished DKG
     // must not block the reshare's round 1 as "FROST already running".
     reshare_then_sign_2_of_3(starlab_cli::simulate::ReshareRunners::Reused).await;
+}
+
+fn ecdsa_opts(threshold: u16) -> SimulateOpts {
+    SimulateOpts {
+        nodes: 3,
+        threshold,
+        curve: "secp256k1".into(),
+        signal_url: None,
+        timeout_secs: 180,
+        insecure_test_primes: support::test_primes(),
+    }
+}
+
+/// ECDSA counterpart of the all-online test: 2-of-3 Ethereum signing with
+/// all 3 joined. The proposer fixes the set (`ECDSA_SIGN_SET`), the two
+/// signers run cggmp24, and the node left out gets the signature from the
+/// proposer (`ECDSA_SIGN_DONE`) — all 3 report the same one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+ECDSA signing over loopback; run with --ignored"]
+async fn ecdsa_sign_2_of_3_all_three_online_agree_on_one_signature() {
+    init_logs();
+    let result =
+        run_signing_simulation_all_signers_online(ecdsa_opts(2), "ecdsa, all 3 online", false)
+            .await
+            .expect("all-online ECDSA signing ran");
+    assert_eq!(result.signatures.len(), 3);
+    assert!(result.all_agreed, "{:?}", result.signatures);
+    assert!(result.verified, "must ecrecover to the account: {result:?}");
+    eprintln!(
+        "✅ ECDSA 2-of-3 all online agreed in {}ms",
+        result.elapsed_ms
+    );
+}
+
+/// Threshold ECDSA over the real network: 2-of-3 DKG (FROST + ECDSA aux
+/// info + keygen), then EIP-191 signings by every signer pair — consecutive
+/// signings on one cluster, each pair with a different initiator — plus a
+/// raw 32-byte prehash signing (a transaction-sighash stand-in). Every
+/// signature must `ecrecover` to account 0's Ethereum address from
+/// accounts.rs, identically on both signers.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+ECDSA over loopback; run with --ignored"]
+async fn ecdsa_2_of_3_every_signer_pair_recovers_the_account_address() {
+    init_logs();
+    let prehash = "a1".repeat(32);
+    let r = starlab_cli::simulate::run_ecdsa_e2e(
+        ecdsa_opts(2),
+        &[
+            (0, vec![1], "hello from signers 0+1", "utf8"),
+            (0, vec![2], "hello from signers 0+2", "utf8"),
+            (1, vec![2], "hello from signers 1+2", "utf8"),
+            (2, vec![0], &prehash, "prehash"),
+        ],
+    )
+    .await
+    .expect("ECDSA e2e ran");
+    eprintln!("{}", serde_json::to_string_pretty(&r).unwrap());
+    assert!(r.ok(), "{r:?}");
+    assert_eq!(r.signings[3].signed_hash, prehash, "prehash signed as-is");
+    eprintln!(
+        "✅ ECDSA 2-of-3: DKG {}ms, signings {:?}ms",
+        r.dkg_ms,
+        r.signings.iter().map(|s| s.elapsed_ms).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+#[ignore = "real WebRTC/DKG+ECDSA over loopback; run with --ignored"]
+async fn ecdsa_3_of_3_signs_twice() {
+    init_logs();
+    let r = starlab_cli::simulate::run_ecdsa_e2e(
+        ecdsa_opts(3),
+        &[
+            (0, vec![1, 2], "3-of-3 first", "utf8"),
+            (2, vec![0, 1], "3-of-3 second", "utf8"),
+        ],
+    )
+    .await
+    .expect("ECDSA 3-of-3 e2e ran");
+    assert!(r.ok(), "{r:?}");
+    eprintln!(
+        "✅ ECDSA 3-of-3: DKG {}ms, signings {:?}ms",
+        r.dkg_ms,
+        r.signings.iter().map(|s| s.elapsed_ms).collect::<Vec<_>>()
+    );
 }

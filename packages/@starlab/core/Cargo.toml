@@ -45,6 +45,22 @@ pbkdf2 = "0.13"
 hmac = "0.13"
 password-hash = "0.6"
 
+# Threshold ECDSA (CGGMP24) for EVM accounts — see `src/ecdsa/`. Default
+# `backend-num-bigint` (pure Rust, builds for wasm32). `round-based`,
+# `hd-wallet` and `generic-ec` are used through cggmp24's re-exports so their
+# versions always match the ones cggmp24 was built against.
+cggmp24 = { version = "=0.7.0-alpha.3", features = ["curve-secp256k1", "hd-wallet", "state-machine"] }
+# PIN-ONLY (not imported): cggmp24 0.7.0-alpha.3 asks for `^0.7.0-alpha.3` of
+# these, which resolves to alpha.4 — and alpha.4 moved to generic-ec 0.5 /
+# key-share 0.7, so cggmp24 alpha.3 no longer compiles against it. Pinning in
+# the manifest (not just Cargo.lock) keeps downstream lockfiles (starlab-desktop)
+# resolving the same working set. Drop when bumping cggmp24.
+cggmp24-keygen = "=0.7.0-alpha.3"
+paillier-zk = { version = "=0.7.0-alpha.3", default-features = false }
+# Wire encoding of the ECDSA protocol messages (RFC 8949 CBOR): compact,
+# standardized, self-describing (safe for every serde impl cggmp24 uses).
+ciborium = "0.2"
+
 # Other
 bs58 = "0.5"
 bech32 = "0.12"

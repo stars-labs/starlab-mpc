@@ -107,8 +107,6 @@ cd apps/extension && bun run check    # in starlab-wallet
 
 ## Live signal-server smoke tests
 
-No automated harness exercises the full FROST + WebRTC pairing against
-a real signal server — that needs three browser instances driving the
-extension. See `apps/extension/tests/README.md` (in starlab-wallet) for
-the current status and `docs/testing/E2E_TEST_IMPLEMENTATION_PLAN.md` for
-the open plan to harness it.
+Real WebRTC/native/browser harnesses are implemented. See
+[END_TO_END.md](END_TO_END.md) for their coverage, execution commands, and
+production-prime evidence boundaries.

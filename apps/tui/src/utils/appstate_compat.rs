@@ -13,6 +13,8 @@ pub struct AppState<C: Ciphersuite> {
     pub device_id: String,
     pub signal_server_url: String,
     pub session: Option<SessionInfo>,
+    /// A completed invite retained locally for late mesh traffic, never re-announced.
+    pub retired_signing_session_id: Option<String>,
     pub keystore: Option<Arc<crate::keystore::Keystore>>,
     // Legacy fields for compatibility - adding comprehensive set
     pub blockchain_addresses: Vec<crate::keystore::BlockchainInfo>,
@@ -209,6 +211,10 @@ pub struct AppState<C: Ciphersuite> {
     /// the unified ceremony is triggered, so the round-2 completion can persist
     /// without re-threading these through every message.
     pub unified_finalize: Option<(String, String, Option<String>)>,
+
+    /// Threshold-ECDSA engine state (Ethereum key): primes, the running
+    /// ceremony worker, the unlocked ECDSA share, the running signing.
+    pub ecdsa: crate::protocal::ecdsa::EcdsaState,
 }
 
 impl<C: Ciphersuite + Send + Sync + 'static> Default for AppState<C>
@@ -251,6 +257,7 @@ where
             device_id: String::new(),
             signal_server_url: String::new(),
             session: None,
+            retired_signing_session_id: None,
             keystore: None,
             blockchain_addresses: Vec::new(),
             solana_public_key: None,
@@ -331,6 +338,7 @@ where
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
+            ecdsa: Default::default(),
         }
     }
 
@@ -343,6 +351,7 @@ where
             device_id,
             signal_server_url,
             session: None,
+            retired_signing_session_id: None,
             keystore: None,
             blockchain_addresses: Vec::new(),
             solana_public_key: None,
@@ -423,6 +432,7 @@ where
             unified_mode: false,
             unified_dkg: None,
             unified_finalize: None,
+            ecdsa: Default::default(),
         }
     }
 

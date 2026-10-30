@@ -7,6 +7,8 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use starlab_core::ecdsa::{ECDSA_CURVE, EcdsaKeyShare};
+
 use super::{
     KeystoreError, Result,
     encryption::decrypt_data,
@@ -43,6 +45,7 @@ impl Keystore {
         fs::create_dir_all(&device_wallet_dir)?;
         fs::create_dir_all(device_wallet_dir.join("ed25519"))?;
         fs::create_dir_all(device_wallet_dir.join("secp256k1"))?;
+        fs::create_dir_all(device_wallet_dir.join(ECDSA_CURVE))?;
 
         let mut keystore = Self {
             base_path,
@@ -66,8 +69,9 @@ impl Keystore {
 
         let device_dir = self.base_path.join(&self.device_id);
 
-        // Scan both curve directories
-        for curve_type in &["ed25519", "secp256k1"] {
+        // Scan every curve directory. The ECDSA share (Ethereum) comes last
+        // so `get_wallet(id)` keeps returning a wallet's FROST entry first.
+        for curve_type in &["ed25519", "secp256k1", ECDSA_CURVE] {
             let curve_dir = device_dir.join(curve_type);
             if !curve_dir.exists() {
                 continue;
@@ -105,6 +109,62 @@ impl Keystore {
     /// Gets wallet metadata by ID
     pub fn get_wallet(&self, wallet_id: &str) -> Option<&WalletMetadata> {
         self.wallet_cache.iter().find(|w| w.session_id == wallet_id)
+    }
+
+    /// Remove all curve shares belonging to this exact wallet ID on this device.
+    /// Missing files are tolerated so an interrupted deletion can be retried.
+    pub fn delete_wallet(&mut self, wallet_id: &str) -> Result<()> {
+        check_wallet_id(wallet_id)?;
+        let ids: std::collections::BTreeSet<String> = self
+            .wallet_cache
+            .iter()
+            .filter(|w| {
+                w.session_id == wallet_id
+                    || starlab_core::accounts::parse_child_wallet_id(&w.session_id)
+                        .is_some_and(|(parent, _, _)| parent == wallet_id)
+            })
+            .map(|w| w.session_id.clone())
+            .collect();
+        if ids.is_empty() {
+            return Err(KeystoreError::WalletNotFound(wallet_id.to_owned()));
+        }
+        // Detect invalid targets before removing any share, so failures remain retryable.
+        for id in &ids {
+            for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+                let path = self
+                    .base_path
+                    .join(&self.device_id)
+                    .join(curve)
+                    .join(format!("{id}.json"));
+                match fs::symlink_metadata(&path) {
+                    Ok(meta) if !meta.file_type().is_file() => {
+                        return Err(KeystoreError::General(format!(
+                            "Wallet share is not a regular file: {}",
+                            path.display()
+                        )));
+                    }
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        for id in &ids {
+            for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+                let path = self
+                    .base_path
+                    .join(&self.device_id)
+                    .join(curve)
+                    .join(format!("{id}.json"));
+                match fs::remove_file(path) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        self.wallet_cache.retain(|w| !ids.contains(&w.session_id));
+        Ok(())
     }
 
     /// Gets this device's info (for compatibility)
@@ -232,6 +292,47 @@ impl Keystore {
         }
 
         Ok(wallet_id)
+    }
+
+    /// Persist a wallet's threshold-ECDSA share (its Ethereum key) as the
+    /// curve file `secp256k1-ecdsa/<wallet_id>.json` next to the wallet's
+    /// FROST files: same encrypted v2 format, same password. Threshold,
+    /// participants and our index come from the share itself.
+    pub fn save_ecdsa_share(
+        &mut self,
+        wallet_id: &str,
+        share: &EcdsaKeyShare,
+        password: &str,
+        label: Option<String>,
+    ) -> Result<()> {
+        check_wallet_id(wallet_id)?;
+        let mut metadata = WalletMetadata::with_participants(
+            wallet_id.to_string(),
+            self.device_id.clone(),
+            ECDSA_CURVE.to_string(),
+            share.threshold(),
+            share.n(),
+            share.index() + 1,
+            hex::encode(share.group_public_key()),
+            share.participants().to_vec(),
+        );
+        metadata.label = label
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let plaintext = serde_json::to_vec(share)
+            .map_err(|e| KeystoreError::SerializationError(e.to_string()))?;
+        self.save_wallet_file_atomic(wallet_id, &plaintext, password, &metadata)?;
+        self.wallet_cache
+            .retain(|w| !(w.session_id == wallet_id && w.curve_type == ECDSA_CURVE));
+        self.wallet_cache.push(metadata);
+        Ok(())
+    }
+
+    /// Decrypt a wallet's ECDSA share (see [`Self::save_ecdsa_share`]).
+    pub fn load_ecdsa_share(&self, wallet_id: &str, password: &str) -> Result<EcdsaKeyShare> {
+        let blob = self.load_wallet_file_for_curve(wallet_id, ECDSA_CURVE, password)?;
+        serde_json::from_slice(&blob)
+            .map_err(|e| KeystoreError::General(format!("Not a valid ECDSA key share: {e}")))
     }
 
     /// Overwrite an existing wallet's key share + the refresh-affected metadata
@@ -855,9 +956,14 @@ fn validate_share(metadata: &WalletMetadata, blob: &[u8]) -> Result<()> {
             share_group_key::<frost_secp256k1_tr::Secp256K1Sha256TR>(blob)?
         }
         "ed25519" => share_group_key::<frost_ed25519::Ed25519Sha512>(blob)?,
+        ECDSA_CURVE => {
+            let share: EcdsaKeyShare = serde_json::from_slice(blob)
+                .map_err(|e| KeystoreError::General(format!("Not a valid ECDSA key share: {e}")))?;
+            hex::encode(share.group_public_key())
+        }
         other => {
             return Err(KeystoreError::General(format!(
-                "Unsupported curve {other:?} (expected secp256k1 or ed25519)"
+                "Unsupported curve {other:?} (expected secp256k1, ed25519 or {ECDSA_CURVE})"
             )));
         }
     };
@@ -893,6 +999,103 @@ fn share_group_key<C: frost_core::Ciphersuite>(blob: &[u8]) -> Result<String> {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn delete_wallet_removes_encrypted_shares_and_preserves_other_wallets() {
+        let tmp = TempDir::new().unwrap();
+        let mut ks = Keystore::new(tmp.path(), "device").unwrap();
+        for id in ["wallet", "wallet-bitcoin-1", "wallet-other"] {
+            ks.create_wallet_multi_chain(
+                id,
+                "ed25519",
+                Vec::new(),
+                2,
+                3,
+                &"aa".repeat(33),
+                b"secret-share",
+                "password-12345",
+                Vec::new(),
+                None,
+                1,
+                vec!["device".into()],
+                None,
+            )
+            .unwrap();
+        }
+        for curve in ["secp256k1", ECDSA_CURVE] {
+            let mut metadata = ks.get_wallet("wallet").unwrap().clone();
+            metadata.curve_type = curve.into();
+            ks.save_wallet_file_atomic("wallet", b"secret-share", "password-12345", &metadata)
+                .unwrap();
+        }
+        let other_device = tmp.path().join("other-device/ed25519");
+        fs::create_dir_all(&other_device).unwrap();
+        fs::copy(
+            tmp.path().join("device/ed25519/wallet.json"),
+            other_device.join("wallet.json"),
+        )
+        .unwrap();
+        ks.delete_wallet("wallet").unwrap();
+        assert!(other_device.join("wallet.json").exists());
+        for curve in ["ed25519", "secp256k1", ECDSA_CURVE] {
+            assert!(
+                !tmp.path()
+                    .join("device")
+                    .join(curve)
+                    .join("wallet.json")
+                    .exists()
+            );
+        }
+        assert!(
+            !tmp.path()
+                .join("device/ed25519/wallet-bitcoin-1.json")
+                .exists()
+        );
+        let reopened = Keystore::new(tmp.path(), "device").unwrap();
+        assert!(reopened.get_wallet("wallet").is_none());
+        assert_eq!(
+            reopened
+                .load_wallet_file("wallet-other", "password-12345")
+                .unwrap(),
+            b"secret-share"
+        );
+        assert!(ks.delete_wallet("../wallet-other").is_err());
+    }
+
+    #[test]
+    fn delete_wallet_io_failure_keeps_metadata_and_can_retry() {
+        let tmp = TempDir::new().unwrap();
+        let mut ks = Keystore::new(tmp.path(), "device").unwrap();
+        ks.create_wallet_multi_chain(
+            "wallet",
+            "ed25519",
+            Vec::new(),
+            2,
+            3,
+            &"aa".repeat(33),
+            b"secret",
+            "password-12345",
+            Vec::new(),
+            None,
+            1,
+            vec!["device".into()],
+            None,
+        )
+        .unwrap();
+        let blocked = tmp.path().join("device/secp256k1/wallet.json");
+        fs::create_dir(&blocked).unwrap();
+        assert!(ks.delete_wallet("wallet").is_err());
+        assert!(ks.get_wallet("wallet").is_some());
+        fs::remove_dir(blocked).unwrap();
+        ks.delete_wallet("wallet").unwrap();
+        assert!(ks.get_wallet("wallet").is_none());
+        assert!(
+            Keystore::new(tmp.path(), "device")
+                .unwrap()
+                .get_wallet("wallet")
+                .is_none()
+        );
+    }
 
     #[test]
     fn wallet_metadata_round_trips_participants_field() {

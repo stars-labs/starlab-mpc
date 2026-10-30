@@ -9,7 +9,12 @@ mod tests {
         // Test secp256k1 compatibility
         let secp_chains = get_compatible_chains(&CurveType::Secp256k1);
         assert!(!secp_chains.is_empty());
-        assert!(secp_chains.iter().any(|(id, _)| *id == "ethereum"));
+        assert_eq!(secp_chains.len(), 1);
+        let ecdsa_chains = get_compatible_chains(&CurveType::Ecdsa);
+        assert_eq!(ecdsa_chains.len(), 4);
+        for chain in ["ethereum", "bsc", "polygon", "avalanche"] {
+            assert!(ecdsa_chains.iter().any(|(id, _)| *id == chain));
+        }
         assert!(secp_chains.iter().any(|(id, _)| *id == "bitcoin"));
 
         // Test ed25519 compatibility
@@ -31,7 +36,11 @@ mod tests {
         let ed25519_key = vec![0u8; 32]; // Dummy ed25519 key
         let result = generate_address_for_chain(&ed25519_key, "ed25519", "ethereum");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("requires secp256k1 curve"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("requires secp256k1-ecdsa curve")
+        );
 
         // Test that secp256k1 cannot generate Solana address
         let secp256k1_key = vec![0x02; 33]; // Dummy secp256k1 key (compressed)
@@ -41,20 +50,33 @@ mod tests {
     }
 
     #[test]
-    fn test_signing_caveat() {
-        // EVM EOAs verify with ECDSA → FROST Schnorr needs a contract account.
-        for evm in ["ethereum", "bsc", "polygon", "avalanche"] {
-            let c = signing_caveat(evm).expect("EVM chains must carry a caveat");
-            assert!(c.contains("ECDSA"));
-            assert!(c.contains("smart-contract account"));
-        }
-        // Chains that verify Schnorr/Ed25519 natively carry no caveat.
-        for native in ["bitcoin", "solana", "sui", "aptos", "near"] {
-            assert!(
-                signing_caveat(native).is_none(),
-                "{native} should be native"
+    fn evm_addresses_use_the_ecdsa_key_and_shared_canonical_encoding() {
+        let key = hex::decode("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+            .unwrap();
+        let expected = starlab_core::accounts::address_for_chain(
+            "ethereum",
+            starlab_core::accounts::ECDSA_CURVE,
+            &key,
+        )
+        .unwrap();
+        assert_eq!(expected, "0x7e5f4552091a69125d5dfcb7b8c2659029395bdf");
+        for chain in ["ethereum", "bsc", "polygon", "avalanche"] {
+            assert_eq!(
+                generate_address_for_chain(&key, starlab_core::accounts::ECDSA_CURVE, chain)
+                    .unwrap(),
+                expected
             );
+            assert!(generate_address_for_chain(&key, "secp256k1", chain).is_err());
         }
+        assert!(
+            generate_address_for_chain(&key, starlab_core::accounts::ECDSA_CURVE, "bitcoin")
+                .is_err()
+        );
+        assert!(
+            generate_address_for_chain(&key, "secp256k1", "bitcoin")
+                .unwrap()
+                .starts_with("bc1p")
+        );
     }
 
     #[test]
@@ -69,6 +91,14 @@ mod tests {
             Some(CurveType::Secp256k1)
         ); // Case insensitive
         assert_eq!(CurveType::from_string("ED25519"), Some(CurveType::Ed25519));
+        assert_eq!(
+            CurveType::from_string("SECP256K1-ECDSA"),
+            Some(CurveType::Ecdsa)
+        );
+        assert_eq!(
+            CurveType::Ecdsa.to_string(),
+            starlab_core::accounts::ECDSA_CURVE
+        );
         assert_eq!(CurveType::from_string("unknown"), None);
     }
 }

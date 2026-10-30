@@ -44,7 +44,6 @@ export {
     isKnownChain,
     isSupportedChain,
     normalizeDerivedAddressChain,
-    signingCaveat,
 } from './appstate';
 // Note: Constants are exported for components that need them
 
