@@ -31,12 +31,14 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
+#[cfg(test)]
+mod tests;
+
 /// One participant's round-2 packages, addressed to their recipients.
 ///
 /// Round 2 in FROST is targeted: participant A produces a distinct package for
-/// each other participant. We serialize the whole per-recipient map once and let
-/// each receiver pick out the entry keyed by *their* 1-based participant index.
-/// (Simpler over the mesh than crafting N separate frames, and tiny.)
+/// each other participant. A wire message contains only the destination's entry
+/// in each map; another participant must never receive those private packages.
 #[derive(Serialize, Deserialize)]
 pub struct UnifiedRound2Message {
     /// 1-based participant index of the sender (canonical-sorted order).
@@ -45,6 +47,17 @@ pub struct UnifiedRound2Message {
     pub ed25519: std::collections::BTreeMap<u16, String>,
     /// secp256k1: recipient_index → hex-encoded round-2 package.
     pub secp256k1: std::collections::BTreeMap<u16, String>,
+}
+
+impl UnifiedRound2Message {
+    /// Preserve the wire shape while disclosing only this recipient's packages.
+    pub fn for_recipient(&self, recipient: u16) -> Option<Self> {
+        Some(Self {
+            from_index: self.from_index,
+            ed25519: [(recipient, self.ed25519.get(&recipient)?.clone())].into(),
+            secp256k1: [(recipient, self.secp256k1.get(&recipient)?.clone())].into(),
+        })
+    }
 }
 
 /// Result of a finished unified ceremony — both group keys + canonical addresses.
@@ -200,7 +213,11 @@ where
 
 /// Fold in a peer's round-2 message (we pick out the entry addressed to us).
 /// Returns `true` when DKG can be finalized.
-pub async fn ingest_round2<C>(state: Arc<Mutex<AppState<C>>>, msg: UnifiedRound2Message) -> bool
+pub async fn ingest_round2<C>(
+    state: Arc<Mutex<AppState<C>>>,
+    from_device_id: String,
+    msg: UnifiedRound2Message,
+) -> bool
 where
     C: Ciphersuite + Send + Sync + 'static,
 {
@@ -212,6 +229,22 @@ where
             return false;
         }
     };
+
+    let sender_index = guard
+        .session
+        .as_ref()
+        .and_then(|session| canonical_index(&session.participants, &from_device_id));
+    if sender_index != Some(msg.from_index) || msg.from_index == my_index {
+        warn!(
+            "unified DKG: rejecting round2 sender/index mismatch from {}",
+            from_device_id
+        );
+        return false;
+    }
+    if msg.ed25519.len() != 1 || msg.secp256k1.len() != 1 {
+        warn!("unified DKG: rejecting round2 with non-targeted recipient maps");
+        return false;
+    }
 
     // Pick out the package addressed to us from the sender's per-recipient maps.
     let ed_hex = match msg.ed25519.get(&my_index) {

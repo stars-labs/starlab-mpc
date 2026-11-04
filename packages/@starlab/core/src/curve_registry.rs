@@ -113,7 +113,7 @@ fn ident<C: Ciphersuite>(index: u16) -> Result<Identifier<C>> {
 
 fn to_hex<T: serde::Serialize>(v: &T) -> Result<String> {
     serde_json::to_string(v)
-        .map(|s| hex::encode(s))
+        .map(hex::encode)
         .map_err(|e| FrostError::SerializationError(e.to_string()))
 }
 

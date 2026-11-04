@@ -48,6 +48,9 @@ fn group_key_hex<C: Ciphersuite>(p: &PublicKeyPackage<C>) -> Result<String> {
         .map_err(|e| FrostError::SerializationError(e.to_string()))
 }
 
+/// Participant key packages paired with their shared public key package.
+pub type CurveKeyPackages<C> = (BTreeMap<u16, KeyPackage<C>>, PublicKeyPackage<C>);
+
 /// Run a fresh dealerless DKG for `total`/`threshold` (deterministic per seed).
 /// Returns each participant's key package + the shared public key package.
 /// Used as the *starting state* a refresh operates on.
@@ -55,7 +58,7 @@ pub fn dkg_keypackages<C: Ciphersuite>(
     total: u16,
     threshold: u16,
     seed_base: u8,
-) -> Result<(BTreeMap<u16, KeyPackage<C>>, PublicKeyPackage<C>)> {
+) -> Result<CurveKeyPackages<C>> {
     let ids: Vec<u16> = (1..=total).collect();
 
     // round 1
@@ -112,7 +115,7 @@ pub fn refresh<C: Ciphersuite>(
     new_ids: &[u16],
     threshold: u16,
     seed_base: u8,
-) -> Result<(BTreeMap<u16, KeyPackage<C>>, PublicKeyPackage<C>)> {
+) -> Result<CurveKeyPackages<C>> {
     let total = new_ids.len() as u16;
     for id in new_ids {
         if !old_kps.contains_key(id) {
@@ -219,13 +222,13 @@ impl<C: Ciphersuite, P: Clone> Round2Routing<C, P> for BTreeMap<u16, BTreeMap<Id
     fn entry_by_recipient(&mut self, recipient: Identifier<C>, sender: u16, pkg: P, ids: &[u16]) {
         // Map the recipient Identifier back to its u16 index.
         for &cand in ids {
-            if let Ok(id) = ident::<C>(cand) {
-                if id == recipient {
-                    self.entry(cand)
-                        .or_default()
-                        .insert(ident::<C>(sender).unwrap(), pkg);
-                    return;
-                }
+            if let Ok(id) = ident::<C>(cand)
+                && id == recipient
+            {
+                self.entry(cand)
+                    .or_default()
+                    .insert(ident::<C>(sender).unwrap(), pkg);
+                return;
             }
         }
     }
@@ -530,7 +533,7 @@ mod tests {
         new_ids: &[u16],
         threshold: u16,
         seed: u8,
-    ) -> Result<(BTreeMap<u16, KeyPackage<C>>, PublicKeyPackage<C>)> {
+    ) -> Result<CurveKeyPackages<C>> {
         let mut sessions: BTreeMap<u16, ReshareSession<C>> = BTreeMap::new();
         for &i in new_ids {
             sessions.insert(
