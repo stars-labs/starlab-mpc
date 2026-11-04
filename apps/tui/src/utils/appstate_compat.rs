@@ -207,6 +207,8 @@ pub struct AppState<C: Ciphersuite> {
     /// The concrete unified-DKG driver state (both curves). Lives here because
     /// it is NOT generic over `C`; the unified path ignores `C` entirely.
     pub unified_dkg: Option<starlab_core::unified_dkg::UnifiedDkg>,
+    /// Authenticated early frames, bounded to one per sender/round and active session.
+    pub pending_unified: crate::protocal::unified_dkg::PendingUnifiedFrames,
     /// Finalize context (password, keystore_path, optional label) captured when
     /// the unified ceremony is triggered, so the round-2 completion can persist
     /// without re-threading these through every message.
@@ -337,6 +339,7 @@ where
             server_msg_broadcast_tx: None,
             unified_mode: false,
             unified_dkg: None,
+            pending_unified: Default::default(),
             unified_finalize: None,
             ecdsa: Default::default(),
         }
@@ -431,6 +434,7 @@ where
             server_msg_broadcast_tx: None,
             unified_mode: false,
             unified_dkg: None,
+            pending_unified: Default::default(),
             unified_finalize: None,
             ecdsa: Default::default(),
         }

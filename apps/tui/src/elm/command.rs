@@ -533,9 +533,7 @@ async fn broadcast_unified_round1<C>(
     C: frost_core::Ciphersuite + Send + Sync + 'static,
 {
     let participants = {
-        let mut state = app_state.lock().await;
-        // A new ceremony: forget the frames of the last one.
-        state.ceremony_outbox.clear();
+        let state = app_state.lock().await;
         state
             .session
             .as_ref()
@@ -624,6 +622,22 @@ async fn send_unified_round2<C>(
             Ok(()) => info!("✅ sent unified round2 to {}", device_id),
             Err(e) => warn!("❌ unified round2 to {} failed: {}", device_id, e),
         }
+    }
+}
+
+/// Advance after both ordinary delivery and startup re-feeding, exactly once per round.
+async fn advance_unified_dkg<C>(
+    app_state: std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
+    tx: &tokio::sync::mpsc::UnboundedSender<crate::elm::message::Message>,
+) where
+    C: frost_core::Ciphersuite + Send + Sync + 'static,
+{
+    if let Some(round2) = crate::protocal::unified_dkg::start_round2(app_state.clone()).await {
+        let device_id = app_state.lock().await.device_id.clone();
+        send_unified_round2(app_state.clone(), &device_id, &round2).await;
+    }
+    if crate::protocal::unified_dkg::can_finalize(app_state.clone()).await {
+        try_finalize_unified(&app_state, tx).await;
     }
 }
 
@@ -892,6 +906,7 @@ fn begin_new_dkg<C: frost_core::Ciphersuite>(
     state.current_wallet_id = None;
     state.unified_mode = false;
     state.unified_dkg = None;
+    state.pending_unified = Default::default();
     state.unified_finalize = None;
     state.own_mesh_ready_sent = false;
     state.pending_mesh_ready_signals.clear();
@@ -1729,6 +1744,11 @@ impl Command {
                     .await
                     {
                         broadcast_unified_round1(app_state.clone(), &device_id, &pkg).await;
+                        let pending =
+                            crate::protocal::unified_dkg::take_pending(app_state.clone()).await;
+                        crate::protocal::unified_dkg::replay_pending(app_state.clone(), pending)
+                            .await;
+                        advance_unified_dkg(app_state.clone(), &tx).await;
                         let _ = tx.send(Message::Info {
                             message: "✅ Unified DKG Round 1 initiated (ed25519 + secp256k1)"
                                 .into(),
@@ -1787,20 +1807,7 @@ impl Command {
                 )
                 .await;
                 if ready {
-                    // Run part2 + send targeted round-2 packages to every peer.
-                    if let Some(round2) =
-                        crate::protocal::unified_dkg::start_round2(app_state.clone()).await
-                    {
-                        let device_id = app_state.lock().await.device_id.clone();
-                        send_unified_round2(app_state.clone(), &device_id, &round2).await;
-                    }
-                    // Race fix (mirrors single-curve re-feed): a peer's round-2
-                    // package can arrive BEFORE our part2 ran, so it was ingested
-                    // (can_finalize=false then). Now that our part2 is done,
-                    // re-check and finalize if everything's present.
-                    if crate::protocal::unified_dkg::can_finalize(app_state.clone()).await {
-                        try_finalize_unified(app_state, &tx).await;
-                    }
+                    advance_unified_dkg(app_state.clone(), &tx).await;
                 }
             }
 
@@ -3802,6 +3809,7 @@ impl Command {
                         state.received_dkg_packages.clear();
                         state.received_dkg_round2_packages.clear();
                         state.unified_dkg = None;
+                        state.pending_unified = Default::default();
                         state.unified_finalize = None;
                         state.pending_mesh_ready_signals.clear();
                         state.own_mesh_ready_sent = false;
@@ -3834,6 +3842,7 @@ impl Command {
                         session_id.or_else(|| state.session.as_ref().map(|s| s.session_id.clone()));
                     state.session = None;
                     state.dkg_in_progress = false;
+                    state.pending_unified = Default::default();
                     state.ceremony_outbox.clear();
                     (session_id, state.websocket_msg_tx.clone())
                 };
