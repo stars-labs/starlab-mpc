@@ -945,7 +945,9 @@ fn incomplete_cohort<C: frost_core::Ciphersuite>(
 /// group_public_key)` from the persisted metadata, for the announce/join. On any
 /// failure returns `Err` and leaves `AppState` untouched (no `reshare_in_progress`).
 #[allow(clippy::type_complexity)]
-async fn seed_reshare_context<C: frost_core::Ciphersuite>(
+async fn seed_reshare_context<
+    C: frost_core::Ciphersuite + crate::utils::curve_traits::CurveIdentifier,
+>(
     app_state: &std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
     wallet_id: &str,
     password: &str,
@@ -955,12 +957,17 @@ async fn seed_reshare_context<C: frost_core::Ciphersuite>(
     let device_id = { app_state.lock().await.device_id.clone() };
     let ks = Keystore::new(keystore_path, &device_id)
         .map_err(|e| format!("reshare: keystore open ({keystore_path}): {e}"))?;
+    // A unified wallet has multiple same-ID entries. Select BOTH metadata and
+    // ciphertext by the runner's ciphersuite, never filesystem/cache order.
+    let curve = C::curve_type();
     let meta = ks
-        .get_wallet(wallet_id)
-        .ok_or_else(|| format!("reshare: wallet '{wallet_id}' not found in keystore"))?
-        .clone();
+        .list_wallets()
+        .into_iter()
+        .find(|wallet| wallet.session_id == wallet_id && wallet.curve_type == curve)
+        .cloned()
+        .ok_or_else(|| format!("reshare: wallet '{wallet_id}' has no {curve} share in keystore"))?;
     let blob = ks
-        .load_wallet_file(wallet_id, password)
+        .load_wallet_file_for_curve(wallet_id, curve, password)
         .map_err(|e| format!("reshare: unlock '{wallet_id}' failed: {e}"))?;
     let (key_package, public_key_package) =
         decode_keystore_blob::<C>(&blob).map_err(|e| format!("reshare: decode blob: {e}"))?;
@@ -3895,6 +3902,84 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unified_reshare_selects_each_runtime_curve_and_rejects_missing_curve() {
+        use crate::utils::{appstate_compat::AppState, curve_traits::CurveIdentifier};
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+        let dir = tempfile::tempdir().unwrap();
+        let password = "curve-explicit-reshare-password";
+        let (ed, ed_public) = starlab_core::resharing::dkg_keypackages::<Ed>(3, 2, 31).unwrap();
+        let (secp, secp_public) =
+            starlab_core::resharing::dkg_keypackages::<Secp>(3, 2, 47).unwrap();
+        let ed_group = hex::encode(ed_public.verifying_key().serialize().unwrap());
+        let secp_group = hex::encode(secp_public.verifying_key().serialize().unwrap());
+        let mut ks = crate::keystore::Keystore::new(dir.path(), "alice").unwrap();
+        ks.create_wallet_unified(
+            "unified-wallet",
+            2,
+            3,
+            1,
+            vec!["alice".into(), "bob".into(), "charlie".into()],
+            None,
+            password,
+            &ed_group,
+            &encode_keystore_blob(&ed[&1], &ed_public).unwrap(),
+            &secp_group,
+            &encode_keystore_blob(&secp[&1], &secp_public).unwrap(),
+        )
+        .unwrap();
+        async fn check<C: frost_core::Ciphersuite + CurveIdentifier>(
+            path: &str,
+            password: &str,
+            group: &str,
+        ) {
+            let state = Arc::new(Mutex::new(AppState::<C>::with_device_id("alice".into())));
+            let (peers, threshold, total, curve, public) =
+                seed_reshare_context::<C>(&state, "unified-wallet", password, path)
+                    .await
+                    .expect("requested curve must seed reshare");
+            assert_eq!(curve, C::curve_type());
+            assert_eq!(public, group);
+            assert_eq!(peers, ["alice", "bob", "charlie"]);
+            assert_eq!((threshold, total), (2, 3));
+            let state = state.lock().await;
+            assert!(state.reshare_in_progress);
+            assert_eq!(
+                hex::encode(
+                    state
+                        .public_key_package
+                        .as_ref()
+                        .unwrap()
+                        .verifying_key()
+                        .serialize()
+                        .unwrap()
+                ),
+                group
+            );
+        }
+        check::<Secp>(dir.path().to_str().unwrap(), password, &secp_group).await;
+        check::<Ed>(dir.path().to_str().unwrap(), password, &ed_group).await;
+        std::fs::remove_file(dir.path().join("alice/secp256k1/unified-wallet.json")).unwrap();
+        let state = Arc::new(Mutex::new(AppState::<Secp>::with_device_id("alice".into())));
+        assert!(
+            seed_reshare_context::<Secp>(
+                &state,
+                "unified-wallet",
+                password,
+                dir.path().to_str().unwrap()
+            )
+            .await
+            .is_err()
+        );
+        let state = state.lock().await;
+        assert!(!state.reshare_in_progress);
+        assert!(state.key_package.is_none());
+        assert!(state.public_key_package.is_none());
+    }
 
     #[tokio::test]
     async fn unified_missing_or_empty_storage_context_never_starts_or_writes_default_files() {

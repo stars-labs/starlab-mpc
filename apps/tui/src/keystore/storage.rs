@@ -345,6 +345,7 @@ impl Keystore {
     pub fn update_wallet_share(
         &mut self,
         wallet_id: &str,
+        curve_type: &str,
         key_share_data: &[u8],
         password: &str,
         threshold: u16,
@@ -353,9 +354,11 @@ impl Keystore {
         participant_index: u16,
     ) -> Result<()> {
         let existing = self
-            .get_wallet(wallet_id)
+            .wallet_cache
+            .iter()
+            .find(|wallet| wallet.session_id == wallet_id && wallet.curve_type == curve_type)
             .cloned()
-            .ok_or_else(|| KeystoreError::WalletNotFound(wallet_id.to_string()))?;
+            .ok_or_else(|| KeystoreError::WalletNotFound(format!("{wallet_id} ({curve_type})")))?;
 
         let mut metadata = WalletMetadata::with_participants(
             wallet_id.to_string(),
@@ -375,7 +378,7 @@ impl Keystore {
         if let Some(slot) = self
             .wallet_cache
             .iter_mut()
-            .find(|w| w.session_id == wallet_id)
+            .find(|w| w.session_id == wallet_id && w.curve_type == curve_type)
         {
             *slot = metadata;
         } else {
@@ -1001,6 +1004,114 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
+    fn unified_refresh_replaces_only_requested_curve_and_preserves_sibling_ciphertexts() {
+        use crate::elm::command::encode_keystore_blob;
+        use frost_ed25519::Ed25519Sha512 as Ed;
+        use frost_secp256k1_tr::Secp256K1Sha256TR as Secp;
+        let tmp = tempfile::tempdir().unwrap();
+        let password = "curve-bound-refresh-password";
+        let (ed, ed_public) = starlab_core::resharing::dkg_keypackages::<Ed>(3, 2, 19).unwrap();
+        let (old, old_public) = starlab_core::resharing::dkg_keypackages::<Secp>(3, 2, 29).unwrap();
+        let (fresh, fresh_public) =
+            starlab_core::resharing::refresh::<Secp>(&old, &old_public, &[1, 3], 2, 73).unwrap();
+        let ed_blob = encode_keystore_blob(&ed[&1], &ed_public).unwrap();
+        let new_blob = encode_keystore_blob(&fresh[&1], &fresh_public).unwrap();
+        let group = hex::encode(old_public.verifying_key().serialize().unwrap());
+        let mut ks = Keystore::new(tmp.path(), "alice").unwrap();
+        ks.create_wallet_unified(
+            "same-wallet",
+            2,
+            3,
+            1,
+            vec!["alice".into(), "bob".into(), "charlie".into()],
+            None,
+            password,
+            &hex::encode(ed_public.verifying_key().serialize().unwrap()),
+            &ed_blob,
+            &group,
+            &encode_keystore_blob(&old[&1], &old_public).unwrap(),
+        )
+        .unwrap();
+        // Opaque encrypted sibling transport fixture, not an operational ECDSA
+        // share: this test checks byte-for-byte preservation, not ECDSA refresh.
+        let sibling = WalletMetadata::with_participants(
+            "same-wallet".into(),
+            "alice".into(),
+            ECDSA_CURVE.into(),
+            2,
+            3,
+            1,
+            group.clone(),
+            vec!["alice".into(), "bob".into(), "charlie".into()],
+        );
+        ks.save_wallet_file_atomic("same-wallet", b"opaque-ecdsa-sibling", password, &sibling)
+            .unwrap();
+        let ed_path = tmp.path().join("alice/ed25519/same-wallet.json");
+        let ecdsa_path = tmp.path().join("alice/secp256k1-ecdsa/same-wallet.json");
+        let ed_before = std::fs::read(&ed_path).unwrap();
+        let ecdsa_before = std::fs::read(&ecdsa_path).unwrap();
+        // Force the same order as a re-opened unified keystore: ed25519 first.
+        let mut ks = Keystore::new(tmp.path(), "alice").unwrap();
+        ks.update_wallet_share(
+            "same-wallet",
+            "secp256k1",
+            &new_blob,
+            password,
+            2,
+            2,
+            vec!["alice".into(), "charlie".into()],
+            1,
+        )
+        .unwrap();
+        assert!(std::fs::read(&ed_path).unwrap() == ed_before);
+        assert!(std::fs::read(&ecdsa_path).unwrap() == ecdsa_before);
+        let reopened = Keystore::new(tmp.path(), "alice").unwrap();
+        assert!(
+            reopened
+                .load_wallet_file_for_curve("same-wallet", "secp256k1", password)
+                .unwrap()
+                == new_blob
+        );
+        assert!(
+            reopened
+                .load_wallet_file_for_curve("same-wallet", "ed25519", password)
+                .unwrap()
+                == ed_blob
+        );
+        let selected = ks
+            .list_wallets()
+            .into_iter()
+            .find(|wallet| wallet.curve_type == "secp256k1")
+            .unwrap();
+        assert_eq!(selected.total_participants, 2);
+        assert_eq!(selected.participants, ["alice", "charlie"]);
+        assert_eq!(selected.group_public_key, group);
+        assert_eq!(
+            ks.list_wallets()
+                .into_iter()
+                .find(|wallet| wallet.curve_type == "ed25519")
+                .unwrap()
+                .total_participants,
+            3
+        );
+        assert!(
+            ks.update_wallet_share(
+                "same-wallet",
+                "missing-curve",
+                &new_blob,
+                password,
+                2,
+                2,
+                vec!["alice".into(), "charlie".into()],
+                1
+            )
+            .is_err()
+        );
+        assert!(std::fs::read(&ed_path).unwrap() == ed_before);
+        assert!(std::fs::read(&ecdsa_path).unwrap() == ecdsa_before);
+    }
+
+    #[test]
     fn delete_wallet_removes_encrypted_shares_and_preserves_other_wallets() {
         let tmp = TempDir::new().unwrap();
         let mut ks = Keystore::new(tmp.path(), "device").unwrap();
@@ -1173,6 +1284,7 @@ mod tests {
 
         ks.update_wallet_share(
             &wallet_id,
+            "secp256k1",
             b"NEW-REFRESHED-SHARE",
             "pw-123456789012",
             2,
