@@ -670,17 +670,26 @@ async fn try_finalize_unified<C>(
 ) where
     C: frost_core::Ciphersuite + Send + Sync + 'static,
 {
-    let (password, keystore_path, label) = {
+    let (password, keystore_path, label, wallet_id) = {
         let state = app_state.lock().await;
-        state.unified_finalize.clone().unwrap_or_default()
-    };
-    let wallet_id = {
-        let state = app_state.lock().await;
-        state
-            .session
+        let Some((password, path, label)) = state
+            .unified_finalize
             .as_ref()
-            .map(|s| crate::protocal::dkg::wallet_id_from_session(&s.session_id))
-            .unwrap_or_else(|| "wallet".to_string())
+            .filter(|(password, path, _)| !password.is_empty() && !path.trim().is_empty())
+        else {
+            error!("Unified DKG cannot persist without an explicit password and keystore path");
+            let _ = tx.send(Message::DKGFailed { error: "Wallet setup could not save your keys securely. Cancel this setup and try again.".into() });
+            return;
+        };
+        let Some(session) = state.session.as_ref() else {
+            return;
+        };
+        (
+            password.clone(),
+            path.clone(),
+            label.clone(),
+            crate::protocal::dkg::wallet_id_from_session(&session.session_id),
+        )
     };
     if let Some(outcome) = crate::protocal::unified_dkg::finalize(
         app_state.clone(),
@@ -1640,6 +1649,17 @@ impl Command {
                     is_unified,
                 ) = {
                     let mut state_guard = app_state.lock().await;
+                    // Mesh-ready commands can race each other; never publish a
+                    // unified driver before its explicit storage context exists.
+                    // PrepareUnifiedFinalize precedes Start in the ordered batch.
+                    if state_guard.unified_mode
+                        && !state_guard.unified_finalize.as_ref().is_some_and(
+                            |(password, path, _)| !password.is_empty() && !path.trim().is_empty(),
+                        )
+                    {
+                        info!("Unified DKG waiting for its wallet storage setup");
+                        return Ok(());
+                    }
                     let already =
                         !matches!(state_guard.dkg_state, crate::utils::state::DkgState::Idle);
                     if !already {
@@ -3875,6 +3895,51 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unified_missing_or_empty_storage_context_never_starts_or_writes_default_files() {
+        use crate::utils::appstate_compat::AppState;
+        use frost_ed25519::Ed25519Sha512;
+        let storage = tempfile::tempdir().unwrap();
+        let node = format!("missing-context-{}", uuid::Uuid::new_v4());
+        let cwd_target = std::env::current_dir().unwrap().join(&node);
+        assert!(!cwd_target.exists());
+        let state = std::sync::Arc::new(tokio::sync::Mutex::new(AppState::<Ed25519Sha512>::new()));
+        {
+            let mut state = state.lock().await;
+            state.device_id = node;
+            state.unified_mode = true;
+            state.dkg_in_progress = true;
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        Command::StartFrostProtocol
+            .execute(tx.clone(), &state)
+            .await
+            .unwrap();
+        assert!(state.lock().await.unified_dkg.is_none());
+        for context in [
+            None,
+            Some((
+                String::new(),
+                storage.path().to_string_lossy().into_owned(),
+                None,
+            )),
+            Some(("explicit-password".into(), String::new(), None)),
+        ] {
+            state.lock().await.unified_finalize = context;
+            try_finalize_unified(&state, &tx).await;
+            assert!(matches!(rx.try_recv(), Ok(Message::DKGFailed { .. })));
+            let state = state.lock().await;
+            assert!(!matches!(
+                state.dkg_state,
+                crate::utils::state::DkgState::Complete
+            ));
+            assert!(state.current_wallet_id.is_none());
+            assert!(state.ceremony_outbox.frames_for("peer").is_empty());
+            assert!(!cwd_target.exists());
+            assert_eq!(std::fs::read_dir(storage.path()).unwrap().count(), 0);
+        }
+    }
 
     #[tokio::test]
     async fn unified_round2_sender_and_replay_outbox_are_recipient_private() {
