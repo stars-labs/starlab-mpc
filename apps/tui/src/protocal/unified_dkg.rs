@@ -60,6 +60,77 @@ impl UnifiedRound2Message {
     }
 }
 
+/// Early frames never cross a session boundary or grow beyond its remote cohort.
+#[derive(Default)]
+pub struct PendingUnifiedFrames {
+    session_id: Option<String>,
+    pub(crate) round1: std::collections::BTreeMap<String, UnifiedRound1Package>,
+    pub(crate) round2: std::collections::BTreeMap<String, UnifiedRound2Message>,
+}
+
+impl PendingUnifiedFrames {
+    fn for_session(&mut self, session_id: &str) -> &mut Self {
+        if self.session_id.as_deref() != Some(session_id) {
+            *self = Self {
+                session_id: Some(session_id.into()),
+                ..Self::default()
+            };
+        }
+        self
+    }
+}
+
+fn active_session<C: Ciphersuite>(
+    state: &AppState<C>,
+) -> Option<crate::protocal::signal::SessionInfo> {
+    let session = state.session.as_ref()?;
+    (state.dkg_in_progress
+        && session.curve_type == "unified"
+        && matches!(
+            session.session_type,
+            crate::protocal::signal::SessionType::DKG
+        )
+        && !matches!(
+            state.dkg_state,
+            crate::utils::state::DkgState::Complete | crate::utils::state::DkgState::Failed(_)
+        ))
+    .then(|| session.clone())
+}
+
+/// Consume only the current session's inbox, after our round 1 was broadcast.
+/// This bypasses transport deduplication: these frames were already delivered.
+pub async fn take_pending<C: Ciphersuite>(state: Arc<Mutex<AppState<C>>>) -> PendingUnifiedFrames {
+    let mut state = state.lock().await;
+    let pending = std::mem::take(&mut state.pending_unified);
+    if active_session(&state)
+        .is_some_and(|session| pending.session_id.as_deref() == Some(session.session_id.as_str()))
+    {
+        pending
+    } else {
+        PendingUnifiedFrames::default()
+    }
+}
+
+/// Recheck the captured session and re-feed the entire batch atomically.
+/// A cancellation/new ceremony cannot interleave between individual packages.
+pub async fn replay_pending<C: Ciphersuite>(
+    state: Arc<Mutex<AppState<C>>>,
+    pending: PendingUnifiedFrames,
+) {
+    let mut state = state.lock().await;
+    if !active_session(&state)
+        .is_some_and(|session| pending.session_id.as_deref() == Some(session.session_id.as_str()))
+    {
+        return;
+    }
+    for (sender, package) in pending.round1 {
+        ingest_round1_locked(&mut state, sender, package);
+    }
+    for (sender, package) in pending.round2 {
+        ingest_round2_locked(&mut state, sender, package);
+    }
+}
+
 /// Result of a finished unified ceremony — both group keys + canonical addresses.
 pub struct UnifiedDkgOutcome {
     pub wallet_id: String,
@@ -126,6 +197,9 @@ where
         }
     };
 
+    // Clear stale replay frames before publishing the driver: a concurrent
+    // delivery may advance part2 immediately after this lock is released.
+    guard.ceremony_outbox.clear();
     guard.dkg_state = crate::utils::state::DkgState::Round1InProgress;
     guard.unified_dkg = Some(dkg);
     info!(
@@ -146,10 +220,16 @@ where
     C: Ciphersuite + Send + Sync + 'static,
 {
     let mut guard = state.lock().await;
+    ingest_round1_locked(&mut guard, from_device_id, package)
+}
 
-    let session = match &guard.session {
-        Some(s) => s.clone(),
-        None => return false,
+fn ingest_round1_locked<C: Ciphersuite>(
+    guard: &mut AppState<C>,
+    from_device_id: String,
+    package: UnifiedRound1Package,
+) -> bool {
+    let Some(session) = active_session(guard) else {
+        return false;
     };
     let from_index = match canonical_index(&session.participants, &from_device_id) {
         Some(i) => i,
@@ -159,10 +239,18 @@ where
         }
     };
 
+    if from_device_id == guard.device_id {
+        return false;
+    }
     let dkg = match guard.unified_dkg.as_mut() {
         Some(d) => d,
         None => {
-            warn!("unified DKG: round1 arrived before our start_round1 ran — ignoring");
+            guard
+                .pending_unified
+                .for_session(&session.session_id)
+                .round1
+                .entry(from_device_id)
+                .or_insert(package);
             return false;
         }
     };
@@ -188,7 +276,16 @@ where
 {
     let mut guard = state.lock().await;
     let from_index = guard.unified_dkg.as_ref().map(|d| d.participant_index())?;
+    if !matches!(
+        guard.dkg_state,
+        crate::utils::state::DkgState::Round1InProgress
+    ) {
+        return None;
+    }
     let dkg = guard.unified_dkg.as_mut()?;
+    if !dkg.can_start_round2() {
+        return None;
+    }
     match dkg.generate_round2() {
         Ok(UnifiedRound2Packages { ed25519, secp256k1 }) => {
             guard.dkg_state = crate::utils::state::DkgState::Round2InProgress;
@@ -222,18 +319,21 @@ where
     C: Ciphersuite + Send + Sync + 'static,
 {
     let mut guard = state.lock().await;
-    let my_index = match guard.unified_dkg.as_ref() {
-        Some(d) => d.participant_index(),
-        None => {
-            warn!("unified DKG: round2 arrived before our DKG was initialised — ignoring");
-            return false;
-        }
-    };
+    ingest_round2_locked(&mut guard, from_device_id, msg)
+}
 
-    let sender_index = guard
-        .session
-        .as_ref()
-        .and_then(|session| canonical_index(&session.participants, &from_device_id));
+fn ingest_round2_locked<C: Ciphersuite>(
+    guard: &mut AppState<C>,
+    from_device_id: String,
+    msg: UnifiedRound2Message,
+) -> bool {
+    let Some(session) = active_session(guard) else {
+        return false;
+    };
+    let Some(my_index) = canonical_index(&session.participants, &guard.device_id) else {
+        return false;
+    };
+    let sender_index = canonical_index(&session.participants, &from_device_id);
     if sender_index != Some(msg.from_index) || msg.from_index == my_index {
         warn!(
             "unified DKG: rejecting round2 sender/index mismatch from {}",
@@ -270,7 +370,15 @@ where
 
     let dkg = match guard.unified_dkg.as_mut() {
         Some(d) => d,
-        None => return false,
+        None => {
+            guard
+                .pending_unified
+                .for_session(&session.session_id)
+                .round2
+                .entry(from_device_id)
+                .or_insert(msg);
+            return false;
+        }
     };
     if let Err(e) = dkg.add_round2_package(msg.from_index, &ed_hex, &secp_hex) {
         error!(
