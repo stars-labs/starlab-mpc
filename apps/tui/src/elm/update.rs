@@ -648,6 +648,9 @@ pub fn update(model: &mut Model, msg: Message) -> Option<Command> {
                 let session_id = session.session_id.clone();
                 match &session.session_type {
                     crate::protocal::signal::SessionType::DKG => {
+                        // The invite is authoritative for joiners, including
+                        // headless serve nodes that never selected a local mode.
+                        model.wallet_state.unified = session.curve_type == "unified";
                         begin_dkg(model);
                         model.push_screen(Screen::DKGProgress {
                             session_id: session_id.clone(),

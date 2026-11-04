@@ -204,6 +204,12 @@ async fn early_round1_replays_through_start_command_and_early_part2_completes_wi
     }
     // Transport has already delivered/deduplicated these frames. Startup must
     // consume its local inbox and advance; no resend or reconnect is simulated.
+    let storage = tempfile::tempdir().unwrap();
+    states[0].lock().await.unified_finalize = Some((
+        "fixture-password".into(),
+        storage.path().to_string_lossy().into_owned(),
+        None,
+    ));
     let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
     Command::StartFrostProtocol
         .execute(tx, &states[0])
@@ -351,4 +357,82 @@ async fn preinit_inbox_is_authenticated_bounded_and_cannot_cross_sessions() {
     )
     .await;
     assert!(receiver.lock().await.pending_unified.round2.is_empty());
+}
+
+#[tokio::test]
+async fn headless_unified_joiner_prepares_explicit_storage_and_password_decrypts_saved_curves() {
+    use crate::elm::{Message, Model, command::Command, update::update};
+    let storage = tempfile::tempdir().unwrap();
+    let password = "joiner-explicit-password";
+    let (states, packages) = round2_fixture().await;
+    let state = states[0].clone();
+    let invite = state.lock().await.session.clone().unwrap();
+    let mut model = Model::new("charlie".into());
+    model.wallet_state.keystore_path = storage.path().to_string_lossy().into_owned();
+    model.wallet_state.unified = false; // `serve` has no local unified selector.
+    model.session_invites.push(invite.clone());
+    update(
+        &mut model,
+        Message::HeadlessJoinSession {
+            session_id: invite.session_id,
+            password: password.into(),
+            label: String::new(),
+        },
+    );
+    update(
+        &mut model,
+        Message::SubmitPassword {
+            value: password.into(),
+        },
+    );
+    assert!(model.wallet_state.unified);
+    let batch = update(&mut model, Message::StartDKGProtocol).unwrap();
+    assert!(
+        matches!(&batch, Command::Batch(commands) if matches!(commands.first(), Some(Command::PrepareUnifiedFinalize { keystore_path, password: pw, .. }) if keystore_path == storage.path().to_str().unwrap() && pw == password))
+    );
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    batch.execute(tx, &state).await.unwrap();
+    for i in 1..3 {
+        ingest_round2(
+            state.clone(),
+            PEERS[i].into(),
+            packages[i].for_recipient(3).unwrap(),
+        )
+        .await;
+    }
+    let (saved_password, path, label) = state.lock().await.unified_finalize.clone().unwrap();
+    let outcome = finalize(
+        state,
+        "explicit-storage-wallet".into(),
+        saved_password,
+        path,
+        label,
+    )
+    .await
+    .unwrap();
+    let keystore = crate::keystore::Keystore::new(storage.path(), "charlie").unwrap();
+    for curve in ["ed25519", "secp256k1"] {
+        assert!(
+            storage
+                .path()
+                .join("charlie")
+                .join(curve)
+                .join("explicit-storage-wallet.json")
+                .is_file()
+        );
+        let share = keystore
+            .load_wallet_file_for_curve(&outcome.wallet_id, curve, password)
+            .unwrap();
+        assert!(!share.is_empty());
+        assert!(
+            keystore
+                .load_wallet_file_for_curve(&outcome.wallet_id, curve, "")
+                .is_err()
+        );
+        assert!(
+            keystore
+                .load_wallet_file_for_curve(&outcome.wallet_id, curve, "wrong-password")
+                .is_err()
+        );
+    }
 }
