@@ -313,8 +313,13 @@ impl UnifiedDkg {
 
     /// Check if DKG can be finalized.
     pub fn can_finalize(&self) -> bool {
-        self.ed25519_round2_packages.len() >= (self.threshold - 1) as usize
-            && self.secp256k1_round2_packages.len() >= (self.threshold - 1) as usize
+        let Some(required) = self.total.checked_sub(1) else {
+            return false;
+        };
+        // DKG needs every other participant's contribution, even when later
+        // signing uses a smaller threshold.
+        self.ed25519_round2_packages.len() == usize::from(required)
+            && self.secp256k1_round2_packages.len() == usize::from(required)
             && self.ed25519_round2_secret.is_some()
             && self.secp256k1_round2_secret.is_some()
     }

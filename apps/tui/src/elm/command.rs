@@ -579,9 +579,8 @@ async fn broadcast_unified_round1<C>(
     }
 }
 
-/// Send our unified round-2 message (per-recipient packages) to every peer. The
-/// message carries the full recipient map; each peer picks out its own entry
-/// (matches `UnifiedDkg::add_round2_package`'s 1-based index contract).
+/// Send each peer only its private unified round-2 packages, using canonical
+/// 1-based participant indices and the existing map-shaped wire format.
 async fn send_unified_round2<C>(
     app_state: std::sync::Arc<tokio::sync::Mutex<crate::utils::appstate_compat::AppState<C>>>,
     self_device_id: &str,
@@ -597,21 +596,29 @@ async fn send_unified_round2<C>(
             .map(|s| s.participants.clone())
             .unwrap_or_default()
     };
-    let json = match serde_json::to_string(msg) {
-        Ok(j) => j,
-        Err(e) => {
-            error!("unified round2 serialize failed: {}", e);
-            return;
-        }
-    };
-    let message = crate::protocal::signal::WebRTCMessage::<C>::SimpleMessage {
-        text: format!("{}{}", UNIFIED_DKG_ROUND2_PREFIX, json),
-    };
-    for device_id in participants {
+    for device_id in &participants {
         if device_id == self_device_id {
             continue;
         }
-        match crate::utils::device::send_webrtc_message(&device_id, &message, app_state.clone())
+        let Some(index) = crate::protocal::unified_dkg::canonical_index(&participants, device_id)
+        else {
+            continue;
+        };
+        let Some(targeted) = msg.for_recipient(index) else {
+            error!("unified round2 missing packages for recipient {}", index);
+            continue;
+        };
+        let json = match serde_json::to_string(&targeted) {
+            Ok(json) => json,
+            Err(error) => {
+                error!("unified round2 serialize failed: {}", error);
+                continue;
+            }
+        };
+        let message = crate::protocal::signal::WebRTCMessage::<C>::SimpleMessage {
+            text: format!("{}{}", UNIFIED_DKG_ROUND2_PREFIX, json),
+        };
+        match crate::utils::device::send_webrtc_message(device_id, &message, app_state.clone())
             .await
         {
             Ok(()) => info!("✅ sent unified round2 to {}", device_id),
@@ -1809,8 +1816,12 @@ impl Command {
                             return Ok(());
                         }
                     };
-                let ready =
-                    crate::protocal::unified_dkg::ingest_round2(app_state.clone(), msg).await;
+                let ready = crate::protocal::unified_dkg::ingest_round2(
+                    app_state.clone(),
+                    from_device,
+                    msg,
+                )
+                .await;
                 if ready {
                     try_finalize_unified(app_state, &tx).await;
                 }
@@ -3855,6 +3866,54 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unified_round2_sender_and_replay_outbox_are_recipient_private() {
+        use crate::protocal::signal::{SessionInfo, SessionType};
+        use crate::protocal::unified_dkg::UnifiedRound2Message;
+        use crate::utils::appstate_compat::AppState;
+        use frost_ed25519::Ed25519Sha512;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let mut state = AppState::<Ed25519Sha512>::new();
+        state.device_id = "alice".into();
+        state.session = Some(SessionInfo {
+            session_id: "private-send-fixture".into(),
+            proposer_id: "alice".into(),
+            total: 3,
+            threshold: 2,
+            participants: vec!["charlie".into(), "alice".into(), "bob".into()],
+            session_type: SessionType::DKG,
+            curve_type: "unified".into(),
+            coordination_type: "Network".into(),
+            signing_message_hex: None,
+        });
+        let state = Arc::new(Mutex::new(state));
+        let packages = UnifiedRound2Message {
+            from_index: 1,
+            ed25519: [(2, "ed-bob".into()), (3, "ed-charlie".into())].into(),
+            secp256k1: [(2, "secp-bob".into()), (3, "secp-charlie".into())].into(),
+        };
+        // No data channels: production sending still records each targeted
+        // envelope for replay, allowing us to inspect actual outbound bytes.
+        send_unified_round2(state.clone(), "alice", &packages).await;
+        let state = state.lock().await;
+        assert!(state.ceremony_outbox.frames_for("alice").is_empty());
+        for (peer, recipient) in [("bob", 2), ("charlie", 3)] {
+            let frames = state.ceremony_outbox.frames_for(peer);
+            assert_eq!(frames.len(), 1);
+            let envelope: serde_json::Value = serde_json::from_str(&frames[0]).unwrap();
+            let text = envelope["text"].as_str().unwrap();
+            let targeted: UnifiedRound2Message =
+                serde_json::from_str(text.strip_prefix(UNIFIED_DKG_ROUND2_PREFIX).unwrap())
+                    .unwrap();
+            assert!(targeted.ed25519.keys().copied().eq([recipient]));
+            assert!(targeted.secp256k1.keys().copied().eq([recipient]));
+            assert!(targeted.ed25519.get(&recipient) == packages.ed25519.get(&recipient));
+            assert!(targeted.secp256k1.get(&recipient) == packages.secp256k1.get(&recipient));
+        }
+    }
 
     #[test]
     fn test_command_creation() {
