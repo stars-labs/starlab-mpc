@@ -193,7 +193,7 @@ pub async fn handle_trigger_reshare_round1<C>(
     self_device_id: String,
     tx: UnboundedSender<Message>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     let (participants, pkg_bytes) = {
         let mut guard = state.lock().await;
@@ -256,7 +256,7 @@ pub async fn process_reshare_round1<C>(
     package_bytes: Vec<u8>,
     tx: UnboundedSender<Message>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     {
         let mut guard = state.lock().await;
@@ -303,7 +303,7 @@ async fn maybe_advance_to_reshare_round2<C>(
     self_device_id: String,
     tx: UnboundedSender<Message>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     let advance = {
         let guard = state.lock().await;
@@ -328,7 +328,7 @@ pub async fn handle_trigger_reshare_round2<C>(
     self_device_id: String,
     tx: UnboundedSender<Message>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     let (participants, original, per_recipient) = {
         let mut guard = state.lock().await;
@@ -371,7 +371,7 @@ pub async fn process_reshare_round2<C>(
     package_bytes: Vec<u8>,
     tx: UnboundedSender<Message>,
 ) where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     {
         let mut guard = state.lock().await;
@@ -405,7 +405,7 @@ pub async fn process_reshare_round2<C>(
 /// over the existing wallet, and emits `ReshareComplete`.
 async fn maybe_finalize_reshare<C>(state: Arc<Mutex<AppState<C>>>, tx: UnboundedSender<Message>)
 where
-    C: Ciphersuite + Send + Sync + 'static,
+    C: Ciphersuite + crate::utils::curve_traits::CurveIdentifier + Send + Sync + 'static,
 {
     let ready = {
         let guard = state.lock().await;
@@ -459,12 +459,21 @@ where
             match crate::elm::command::encode_keystore_blob(&new_key, &new_pub) {
                 Ok(blob) => match crate::keystore::Keystore::new(&path, &device_id) {
                     Ok(mut ks) => {
-                        let idx = ks
-                            .get_wallet(&wallet_id)
-                            .map(|w| w.participant_index)
-                            .unwrap_or(1);
+                        let curve = C::curve_type();
+                        let Some(idx) = ks
+                            .list_wallets()
+                            .into_iter()
+                            .find(|wallet| {
+                                wallet.session_id == wallet_id && wallet.curve_type == curve
+                            })
+                            .map(|wallet| wallet.participant_index)
+                        else {
+                            error!("reshare persist: missing {curve} share metadata");
+                            return;
+                        };
                         if let Err(e) = ks.update_wallet_share(
                             &wallet_id,
+                            curve,
                             &blob,
                             &password,
                             session.threshold,
