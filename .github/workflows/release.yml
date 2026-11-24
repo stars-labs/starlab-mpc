@@ -153,7 +153,7 @@ jobs:
             ### Quick Install
             Download the archive matching your OS & CPU architecture below, extract it, and verify against `SHA256SUMS.txt`.
 
-            - **Guide & Walkthrough**: https://starslab-app.freeman-xiong.workers.dev/wallet
+            - **Guide & Walkthrough**: https://wallet.starslab.qzz.io
             - **Desktop GUI**: https://github.com/stars-labs/starlab-desktop/releases
             - **Browser Extension**: https://github.com/stars-labs/starlab-wallet/releases
           files: release-assets/*
