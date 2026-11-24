@@ -39,6 +39,10 @@ workspace member.
 - [`RESHARE_CEREMONY_DESIGN.md`](RESHARE_CEREMONY_DESIGN.md) — design for the
   networked reshare ceremony over the WebRTC mesh (the #45 build-out): session
   type, mesh driver, identifier-preservation rule, safety invariants, phased plan.
+- [`ESP32_HARDWARE_SHARE.md`](ESP32_HARDWARE_SHARE.md) — **Starlab Key**
+  low-cost open-source ESP32-S3 / ESP32-C3 hardware MPC share blueprint
+  ($3.5–$12 BOM, SLHW v1 NDJSON & MicroSD air-gap protocol, security model,
+  paired with `packages/@starlab/hw-protocol` and `hardware/esp32-share`).
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — code-of-conduct, branching
   model, commit format, PR guidelines.
 - [`CHANGELOG.md`](CHANGELOG.md) — release history.

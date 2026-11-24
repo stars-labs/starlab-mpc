@@ -7,6 +7,13 @@ members = [
     "packages/@starlab/core",
     "packages/@starlab/core-wasm",
     "packages/@starlab/blockchain",
+    "packages/@starlab/hw-protocol",
+]
+# The ESP-IDF firmware crate cross-compiles for xtensa-esp32s3-espidf /
+# riscv32imc-esp-espidf with its own Espressif toolchain, so exclude it from
+# native host workspace builds.
+exclude = [
+    "hardware/esp32-share",
 ]
 # Bare `cargo run` at the workspace root is ambiguous (starlab-cli,
 # starlab-signal-server and starlab-tui are all binaries), so point the

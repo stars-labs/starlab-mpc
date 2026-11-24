@@ -1,0 +1,20 @@
+# Production security hardening overlay for Starlab Key.
+# WARNING: Flashing with Flash Encryption + Secure Boot V2 burns irreversible
+# eFuses on the ESP32! Always test on a dev board with sdkconfig.defaults first.
+
+# 1. Hardware AES-256-XTS Flash Encryption (Release mode)
+CONFIG_SECURE_FLASH_ENC_ENABLED=y
+CONFIG_SECURE_FLASH_ENCRYPTION_MODE_RELEASE=y
+CONFIG_SECURE_FLASH_ENCRYPTION_AES256=y
+
+# 2. Secure Boot V2 (prevents unauthorized reflashing to dump NVS)
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_BOOT_SIGNING_KEY="secure_boot_signing_key.pem"
+
+# 3. NVS Encryption backed by hardware XTS key partition
+CONFIG_NVS_ENCRYPTION=y
+
+# 4. Permanently disable JTAG & ROM download mode in production
+CONFIG_SECURE_DISABLE_ROM_DL_MODE=y
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=n

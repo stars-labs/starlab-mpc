@@ -1,0 +1,40 @@
+[package]
+name = "starlab-esp32-share"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Starlab Key — low-cost open-source ESP32-S3 / ESP32-C3 hardware MPC share firmware (SLHW v1)"
+
+[features]
+default = ["board-t-display-s3"]
+# LilyGO T-Display-S3 (ESP32-S3 N16R8 + 1.9" IPS + GPIO0/GPIO14 buttons) — RECOMMENDED
+board-t-display-s3 = []
+# Seeed XIAO ESP32-C3 / ESP32-C3 SuperMini + 0.96" I2C SSD1306 OLED + 2 buttons
+board-xiao-c3 = []
+# Cheap Yellow Display 2.8" ESP32-S3 (CYD-S3 + MicroSD air-gap slot)
+board-cyd-s3 = []
+# Generic ESP32-S3-DevKitC-1 + optional I2C OLED
+board-devkit-s3 = []
+
+[dependencies]
+# Shared SLHW v1 protocol, encrypted NVS vault, and FROST Ed25519 + secp256k1-tr engine
+starlab-hw-protocol = { path = "../../packages/@starlab/hw-protocol" }
+
+esp-idf-svc = { version = "0.51", default-features = false, features = ["std", "binstart", "alloc"] }
+esp-idf-hal = "0.45"
+esp-idf-sys = { version = "0.36", features = ["binstart"] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11.1"
+hex = "0.4"
+log = "0.4"
+
+[build-dependencies]
+embuild = "0.33"
+
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

@@ -1,0 +1,24 @@
+# Starlab Key (ESP32-S3 / ESP32-C3) base ESP-IDF configuration
+
+# Route stdin/stdout NDJSON protocol over native USB Serial/JTAG (no external UART chip needed)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Generous main task stack for FROST elliptic-curve arithmetic + JSON framing
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=32768
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=16384
+
+# Watchdog: allow up to 60s interactive physical button confirmation without WDT reset
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=90
+
+# Partition table with dedicated 256 KB NVS keystore vault
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Enable 8 MB PSRAM when present (ESP32-S3 N16R8: LilyGO T-Display-S3 / CYD-S3)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_IGNORE_NOTFOUND=y
+
+# Keep boot logs quiet on stdout so NDJSON framing stays clean
+CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
