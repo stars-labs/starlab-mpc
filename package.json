@@ -17,7 +17,7 @@
     "format": "prettier --write ."
   },
   "devDependencies": {
-    "@solana/web3.js": "^1.99.0",
-    "prettier": "^3.9.9"
+    "@solana/web3.js": "^3.2.1",
+    "prettier": "^3.10.1"
   }
 }

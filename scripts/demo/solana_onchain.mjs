@@ -40,7 +40,7 @@ if (cmd === "address") {
   const bh = await conn.getLatestBlockhash();
   await conn.confirmTransaction({ signature: sig, ...bh }, "confirmed");
   console.log("airdrop confirmed:", explorer(sig));
-  console.log("balance:", (await conn.getBalance(pk)) / LAMPORTS_PER_SOL, "SOL");
+  console.log("balance:", Number(await conn.getBalance(pk)) / LAMPORTS_PER_SOL, "SOL");
 } else if (cmd === "prepare") {
   const from = pkFromHex(a);
   const to = !b || b === "self" ? from : new PublicKey(b);
@@ -52,7 +52,11 @@ if (cmd === "address") {
   fs.writeFileSync(
     CTX,
     JSON.stringify({
-      fromHex: a.replace(/^0x/, ""), to: to.toBase58(), lamports, blockhash, lastValidBlockHeight,
+      fromHex: a.replace(/^0x/, ""),
+      to: to.toBase58(),
+      lamports,
+      blockhash,
+      lastValidBlockHeight: lastValidBlockHeight.toString(),
     }),
   );
   console.log("from   :", from.toBase58());
@@ -60,7 +64,7 @@ if (cmd === "address") {
   console.log("lamports:", lamports);
   console.log("");
   console.log("MESSAGE TO SIGN (hex) — feed to the MPC wallet with --encoding hex:");
-  console.log(msg.toString("hex"));
+  console.log(Buffer.from(msg).toString("hex"));
   console.log("");
   console.log(`(context saved to ${CTX}; run \`finalize <signatureHex>\` within ~60s)`);
 } else if (cmd === "verify") {
@@ -71,29 +75,31 @@ if (cmd === "address") {
   const ctx = JSON.parse(fs.readFileSync(CTX, "utf8"));
   const from = pkFromHex(ctx.fromHex);
   const to = new PublicKey(ctx.to);
+  const lastValidBlockHeight = BigInt(ctx.lastValidBlockHeight);
   const tx = new Transaction({
-    feePayer: from, blockhash: ctx.blockhash, lastValidBlockHeight: ctx.lastValidBlockHeight,
+    feePayer: from, blockhash: ctx.blockhash, lastValidBlockHeight,
   });
   tx.add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: ctx.lamports }));
   tx.addSignature(from, Buffer.from(a.replace(/^0x/, ""), "hex"));
   console.log("from (Solana addr):", from.toBase58());
   console.log("to                :", to.toBase58(), `(${ctx.lamports} lamports)`);
-  console.log("web3.js tx.verifySignatures():", tx.verifySignatures());
+  console.log("web3.js tx.verifySignatures():", await tx.verifySignatures());
 } else if (cmd === "finalize") {
   const ctx = JSON.parse(fs.readFileSync(CTX, "utf8"));
   const from = pkFromHex(ctx.fromHex);
   const to = new PublicKey(ctx.to);
+  const lastValidBlockHeight = BigInt(ctx.lastValidBlockHeight);
   // Rebuild the IDENTICAL message so the signed bytes match.
   const tx = new Transaction({
-    feePayer: from, blockhash: ctx.blockhash, lastValidBlockHeight: ctx.lastValidBlockHeight,
+    feePayer: from, blockhash: ctx.blockhash, lastValidBlockHeight,
   });
   tx.add(SystemProgram.transfer({ fromPubkey: from, toPubkey: to, lamports: ctx.lamports }));
   tx.addSignature(from, Buffer.from(a.replace(/^0x/, ""), "hex")); // verifies the sig fits
-  const raw = tx.serialize(); // throws if the signature is invalid for these bytes
+  const raw = await tx.serialize(); // throws if the signature is invalid for these bytes
   const sig = await conn.sendRawTransaction(raw, { skipPreflight: false });
   console.log("submitted:", sig);
   await conn.confirmTransaction(
-    { signature: sig, blockhash: ctx.blockhash, lastValidBlockHeight: ctx.lastValidBlockHeight },
+    { signature: sig, blockhash: ctx.blockhash, lastValidBlockHeight },
     "confirmed",
   );
   console.log("CONFIRMED ON-CHAIN:", explorer(sig));

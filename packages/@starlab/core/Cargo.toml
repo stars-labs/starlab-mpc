@@ -18,12 +18,12 @@ frost-ed25519 = { version = "3.0.0", features = ["serde"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.151"
+serde_json = "1.0.154"
 hex = "0.4.3"
 base64 = "0.23.1"
 
 # Cryptography
-sha2 = "0.11.0"
+sha2 = "0.11.1"
 sha3 = "0.12.0"
 k256 = "0.14.0"
 # RNG stack: rand_core/rand_chacha 0.10 + getrandom 0.4 (SysRng). frost-core
@@ -69,7 +69,7 @@ thiserror = "2.0.21"
 [dev-dependencies]
 # Only examples/dkg.rs uses clap (argument parsing). No tests in this
 # crate currently; no async in the examples either.
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.9", features = ["derive"] }
 # Third FROST ciphersuite used ONLY in curve_registry tests, to prove a curve
 # beyond ed25519/secp256k1 registers and runs DKG with zero engine edits (#35).
 # Same ZCash FROST 3.0 line as the production curves.

@@ -47,10 +47,10 @@ frost-secp256k1-tr = { version = "3.0.0", features = ["serde"] }
 frost-ed25519 = { version = "3.0.0", features = ["serde"] }
 
 # Async runtime
-tokio = { version = "1.53.1", features = ["full"] }
+tokio = { version = "1.54.1", features = ["full"] }
 
 # WebRTC dependencies
-webrtc = "0.21.0"
+webrtc = "0.21.1"
 
 # Logging
 tracing = "0.1"

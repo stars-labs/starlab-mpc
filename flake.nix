@@ -28,7 +28,7 @@
         let
           # Common dependencies for all platforms
           commonBuildInputs = with pkgs; [
-            nixfmt-rfc-style
+            nixfmt
             nixd
             bun
             pkg-config
@@ -65,9 +65,9 @@
 
           # Determine platform-specific inputs
           platformBuildInputs =
-            if pkgs.stdenv.isLinux then
+            if pkgs.stdenv.hostPlatform.isLinux then
               linuxBuildInputs
-            else if pkgs.stdenv.isDarwin then
+            else if pkgs.stdenv.hostPlatform.isDarwin then
               darwinBuildInputs
             else
               [];
@@ -78,10 +78,10 @@
             RUST_BACKTRACE = 1;
 
             # Platform-specific environment variables
-            LD_LIBRARY_PATH = if pkgs.stdenv.isLinux then linuxLibraryPath else "";
+            LD_LIBRARY_PATH = if pkgs.stdenv.hostPlatform.isLinux then linuxLibraryPath else "";
 
             # macOS-specific environment variables
-            DYLD_FALLBACK_LIBRARY_PATH = if pkgs.stdenv.isDarwin then
+            DYLD_FALLBACK_LIBRARY_PATH = if pkgs.stdenv.hostPlatform.isDarwin then
               "${pkgs.libiconv}/lib"
             else "";
 

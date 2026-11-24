@@ -82,7 +82,7 @@ jobs:
       # One cache for every shard (same dependency set); only the unit shard
       # writes it, so the shards don't race to save near-identical caches.
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
         with:
           shared-key: rust-tests
           save-if: ${{ matrix.name == 'unit + core crypto' }}
@@ -110,14 +110,14 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2.9.2
+        uses: Swatinem/rust-cache@v2.9.3
       # Install the wasm-pack BINARY onto PATH. We can't rely on the npm
       # wasm-pack package because the next step installs with --ignore-scripts
       # (so its binary-download postinstall wouldn't run).
       - name: Install wasm-pack
         uses: jetli/wasm-pack-action@v0.4.0
         with:
-          version: 'v0.15.0'
+          version: 'v0.15.1'
       - uses: oven-sh/setup-bun@v2.2.0
 
       - run: bun install --frozen-lockfile --ignore-scripts
